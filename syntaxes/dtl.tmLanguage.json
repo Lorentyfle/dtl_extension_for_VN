@@ -1,0 +1,154 @@
+{
+  "name": "DTL",
+  "scopeName": "source.dtl",
+
+  "patterns": [
+    {
+      "include": "#translationid"
+    },
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#commands"
+    },
+    {
+      "include": "#flow"
+    },
+    {
+      "include": "#variables"
+    },
+    {
+      "include": "#signals"
+    },
+    {
+      "include": "#dialogue"
+    },
+    {
+      "include": "#choices"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#constants"
+    }
+  ],
+
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.dtl",
+          "match": "#.*$"
+        }
+      ]
+    },
+
+    "translationid": {
+      "patterns": [
+        {
+          "name": "entity.name.translationid.dtl",
+          "match": "#id:[A-Za-z0-9_]+"
+        }
+      ]
+    },
+
+    "commands": {
+      "patterns": [
+        {
+          "name": "keyword.control.command.dtl",
+          "match": "\\b(join|leave|update|audio)\\b"
+        },
+        {
+          "name": "constant.language.position.dtl",
+          "match": "\\b(left|right|center)\\b"
+        },
+        {
+          "name": "entity.name.character.dtl",
+          "match": "(?<=(join|update|leave)\\s)[A-Za-z_][A-Za-z0-9_]*"
+        }
+      ]
+    },
+
+    "flow": {
+      "patterns": [
+        {
+          "name": "keyword.control.flow.dtl",
+          "match": "\\b(if|else|set)\\b"
+        }
+      ]
+    },
+
+    "variables": {
+      "patterns": [
+        {
+          "name": "variable.other.dtl",
+          "match": "\\{[^}]+\\}"
+        }
+      ]
+    },
+
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.dtl",
+          "match": "\\b(true|false)\\b"
+        },
+        {
+          "name": "support.function.dtl",
+          "match": "\\b(range|pick_random)\\b"
+        }
+      ]
+    },
+
+    "dialogue": {
+      "patterns": [
+        {
+          "name": "entity.name.character.dtl",
+          "match": "^\\s*[A-Za-z_][A-Za-z0-9_]*(?=\\s*:)"
+        },
+        {
+          "name": "string.unquoted.dialogue.dtl",
+          "match": "(?<=:)\\s.*?(?=#id:|$)"
+        }
+      ]
+    },
+
+    "choices": {
+      "patterns": [
+        {
+          "name": "markup.list.choice.dtl",
+          "match": "^\\s*-\\s.*$"
+        },
+        {
+          "name": "keyword.control.choice.dtl",
+          "match": "\\[(if|else)(?=[\\s=\\]])"
+        }
+      ]
+    },
+
+    "signals": {
+      "patterns": [
+        {
+          "name": "meta.signal.dtl",
+          "match": "\\[[^\\]]+\\]"
+        },
+        {
+          "name": "support.function.signal-key.dtl",
+          "match": "\"(Nature|Effect|Kill|Windx|Windy|type|t|s)\"(?=\\s*:)"
+        }
+      ]
+    },
+
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.dtl",
+          "begin": "\"",
+          "end": "\""
+        }
+      ]
+    }
+  }
+}

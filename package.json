@@ -1,0 +1,30 @@
+{
+  "name": "dtl-reader",
+  "displayName": "DTL Reader",
+  "description": "Syntax highlighting for DTL files",
+  "version": "0.0.1",
+  "publisher": "lorentyfle",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "dtl",
+        "aliases": ["DTL"],
+        "extensions": [".dtl"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "dtl",
+        "scopeName": "source.dtl",
+        "path": "./syntaxes/dtl.tmLanguage.json"
+      }
+    ]
+  }
+}
