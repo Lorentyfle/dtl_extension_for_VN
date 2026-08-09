@@ -32,15 +32,37 @@
     },
     {
       "include": "#constants"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#operator"
     }
   ],
 
   "repository": {
+    "operator": {
+      "patterns": [
+        {
+          "name": "keyword.operator.dtl",
+          "match": "(==|!=|>=|<=|>|<|\\+=|-=|=)"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.dtl",
+          "match": "\\b-?\\d+(?:\\.\\d+)?\\b"
+        }
+      ]
+    },
     "comments": {
       "patterns": [
         {
           "name": "comment.line.number-sign.dtl",
-          "match": "#.*$"
+          "match":"#(?!id:).*$"
         }
       ]
     },
@@ -62,7 +84,7 @@
         },
         {
           "name": "constant.language.position.dtl",
-          "match": "\\b(left|right|center)\\b"
+          "match": "\\b(left|right|center|rightmost|leftmost)\\b"
         },
         {
           "name": "entity.name.character.dtl",
@@ -97,7 +119,7 @@
         },
         {
           "name": "support.function.dtl",
-          "match": "\\b(range|pick_random)\\b"
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\()"
         }
       ]
     },
@@ -132,11 +154,11 @@
       "patterns": [
         {
           "name": "meta.signal.dtl",
-          "match": "\\[[^\\]]+\\]"
+          "match": "\\[signal\\b[^\\]]*\\]"
         },
         {
-          "name": "support.function.signal-key.dtl",
-          "match": "\"(Nature|Effect|Kill|Windx|Windy|type|t|s)\"(?=\\s*:)"
+          "name": "support.type.property-name.dtl",
+          "match": "\"[A-Za-z_][A-Za-z0-9_]*\"(?=\\s*:)"
         }
       ]
     },
