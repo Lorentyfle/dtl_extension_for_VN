@@ -3,162 +3,155 @@
   "scopeName": "source.dtl",
 
   "patterns": [
-    {
-      "include": "#translationid"
-    },
-    {
-      "include": "#comments"
-    },
-    {
-      "include": "#commands"
-    },
-    {
-      "include": "#flow"
-    },
-    {
-      "include": "#variables"
-    },
-    {
-      "include": "#signals"
-    },
-    {
-      "include": "#dialogue"
-    },
-    {
-      "include": "#choices"
-    },
-    {
-      "include": "#strings"
-    },
-    {
-      "include": "#constants"
-    },
-    {
-      "include": "#numbers"
-    },
-    {
-      "include": "#operator"
-    }
+    { "include": "#translationid" },
+    { "include": "#comments" },
+    { "include": "#signals" },
+    { "include": "#options" },
+    { "include": "#commands" },
+    { "include": "#flow" },
+    { "include": "#variables" },
+    { "include": "#dialogue" },
+    { "include": "#choices" },
+    { "include": "#strings" },
+    { "include": "#constants" },
+    { "include": "#numbers" },
+    { "include": "#operator" }
   ],
 
   "repository": {
+
     "operator": {
       "patterns": [
-        {
-          "name": "keyword.operator.dtl",
-          "match": "(==|!=|>=|<=|>|<|\\+=|-=|=)"
-        }
+        { "name": "keyword.operator.dtl", "match": "(==|!=|>=|<=|>|<|\\+=|-=|=)" }
       ]
     },
+
     "numbers": {
       "patterns": [
-        {
-          "name": "constant.numeric.dtl",
-          "match": "\\b-?\\d+(?:\\.\\d+)?\\b"
-        }
+        { "name": "constant.numeric.dtl", "match": "\\b-?\\d+(?:\\.\\d+)?\\b" }
       ]
     },
+
     "comments": {
       "patterns": [
-        {
-          "name": "comment.line.number-sign.dtl",
-          "match":"#(?!id:).*$"
-        }
+        { "name": "comment.line.number-sign.dtl", "match": "#(?!id:).*$" }
       ]
     },
 
     "translationid": {
       "patterns": [
-        {
-          "name": "entity.name.translationid.dtl",
-          "match": "#id:[A-Za-z0-9_]+"
-        }
+        { "name": "entity.name.translationid.dtl", "match": "#id:[A-Za-z0-9_]+" }
       ]
     },
 
     "commands": {
       "patterns": [
-        {
-          "name": "keyword.control.command.dtl",
-          "match": "\\b(join|leave|update|audio)\\b"
-        },
-        {
-          "name": "constant.language.position.dtl",
-          "match": "\\b(left|right|center|rightmost|leftmost)\\b"
-        },
-        {
-          "name": "entity.name.character.dtl",
-          "match": "(?<=(join|update|leave)\\s)[A-Za-z_][A-Za-z0-9_]*"
-        }
+        { "name": "keyword.control.command.dtl", "match": "\\b(join|leave|update|audio)\\b" },
+        { "name": "support.type.audio-kind.dtl", "match": "(?<=\\baudio\\s)(music|sfx|voice|ambience)\\b" },
+        { "name": "constant.language.position.dtl", "match": "\\b(left|right|center|rightmost|leftmost)\\b" },
+        { "name": "entity.name.character.dtl", "match": "(?<=\\b(join|update|leave)\\s)[A-Za-z_][A-Za-z0-9_]*" }
       ]
     },
 
     "flow": {
       "patterns": [
-        {
-          "name": "keyword.control.flow.dtl",
-          "match": "\\b(if|else|set)\\b"
-        }
+        { "name": "keyword.control.flow.dtl", "match": "\\b(if|else|set)\\b" },
+        { "name": "punctuation.section.block.dtl", "match": ":\\s*$" }
       ]
     },
 
     "variables": {
+      "comment": "{path.to.value} — braces and dot-separated segments get their own scopes so a theme can shade the path differently from plain text.",
       "patterns": [
         {
           "name": "variable.other.dtl",
-          "match": "\\{[^}]+\\}"
+          "begin": "\\{",
+          "beginCaptures": { "0": { "name": "punctuation.definition.variable.begin.dtl" } },
+          "end": "\\}",
+          "endCaptures": { "0": { "name": "punctuation.definition.variable.end.dtl" } },
+          "patterns": [
+            { "name": "punctuation.accessor.dtl", "match": "\\." },
+            { "name": "variable.other.property.dtl", "match": "[A-Za-z_][A-Za-z0-9_]*" }
+          ]
         }
       ]
     },
 
     "constants": {
       "patterns": [
-        {
-          "name": "constant.language.boolean.dtl",
-          "match": "\\b(true|false)\\b"
-        },
-        {
-          "name": "support.function.dtl",
-          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\()"
-        }
+        { "name": "constant.language.boolean.dtl", "match": "\\b(true|false)\\b" },
+        { "name": "support.function.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\()" }
       ]
     },
 
     "dialogue": {
+      "comment": "Speaker line 'Name: text [inline=options] #id:xyz'. The spoken text is a begin/end region so inline markup like [pause=1.5] still highlights.",
       "patterns": [
-        {
-          "name": "entity.name.character.dtl",
-          "match": "^\\s*[A-Za-z_][A-Za-z0-9_]*(?=\\s*:)"
-        },
+        { "name": "entity.name.character.dtl", "match": "^\\s*[A-Za-z_][A-Za-z0-9_]*(?=\\s*:)" },
         {
           "name": "string.unquoted.dialogue.dtl",
-          "match": "(?<=:)\\s.*?(?=#id:|$)"
+          "begin": "(?<=:)\\s",
+          "end": "(?=#id:|$)",
+          "patterns": [ { "include": "#options" } ]
         }
       ]
     },
 
     "choices": {
+      "comment": "'- choice text | [if ...] [else=...]'. Only the leading dash is punctuation; conditions inside brackets reuse #options.",
       "patterns": [
         {
+          "begin": "^(\\s*)(-)(\\s)",
+          "beginCaptures": {
+            "2": { "name": "punctuation.definition.list.begin.dtl" }
+          },
+          "end": "$",
           "name": "markup.list.choice.dtl",
-          "match": "^\\s*-\\s.*$"
-        },
-        {
-          "name": "keyword.control.choice.dtl",
-          "match": "\\[(if|else)(?=[\\s=\\]])"
+          "patterns": [
+            { "name": "punctuation.separator.choice.dtl", "match": "\\|" },
+            { "include": "#options" },
+            { "include": "#variables" }
+          ]
         }
       ]
     },
 
     "signals": {
+      "comment": "[signal arg_type=\"dict\" arg=\"{...}\"] - kept as its own repository (rather than folded into #options) so it can be themed as a distinct 'event' scope.",
       "patterns": [
         {
           "name": "meta.signal.dtl",
-          "match": "\\[signal\\b[^\\]]*\\]"
-        },
+          "begin": "\\[signal\\b",
+          "beginCaptures": { "0": { "name": "punctuation.definition.tag.begin.signal.dtl" } },
+          "end": "\\]",
+          "endCaptures": { "0": { "name": "punctuation.definition.tag.end.signal.dtl" } },
+          "patterns": [
+            { "name": "variable.parameter.signal.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=)" },
+            { "include": "#operator" },
+            { "include": "#strings" }
+          ]
+        }
+      ]
+    },
+
+    "options": {
+      "comment": "Generic '[key=value key2=\"value2\"]' bracket block used by commands, choices and inline dialogue markup (extra_data, animation, pause, if/else, alt_text...).",
+      "patterns": [
         {
-          "name": "support.type.property-name.dtl",
-          "match": "\"[A-Za-z_][A-Za-z0-9_]*\"(?=\\s*:)"
+          "name": "meta.options.dtl",
+          "begin": "\\[",
+          "beginCaptures": { "0": { "name": "punctuation.definition.tag.begin.dtl" } },
+          "end": "\\]",
+          "endCaptures": { "0": { "name": "punctuation.definition.tag.end.dtl" } },
+          "patterns": [
+            { "name": "keyword.control.choice.dtl", "match": "\\b(if|else)\\b" },
+            { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=)" },
+            { "include": "#operator" },
+            { "include": "#strings" },
+            { "include": "#numbers" },
+            { "include": "#constants" },
+            { "include": "#variables" }
+          ]
         }
       ]
     },
@@ -168,7 +161,10 @@
         {
           "name": "string.quoted.double.dtl",
           "begin": "\"",
-          "end": "\""
+          "end": "\"",
+          "patterns": [
+            { "name": "constant.character.escape.dtl", "match": "\\\\." }
+          ]
         }
       ]
     }

@@ -1,14 +1,15 @@
 {
   "name": "dtl-reader",
   "displayName": "DTL Reader",
-  "description": "Syntax highlighting for DTL files",
-  "version": "0.0.1",
+  "description": "Syntax highlighting, file icon and color theme for DTL (Dialogic2) files",
+  "version": "0.1.0",
   "publisher": "lorentyfle",
   "engines": {
-    "vscode": "^1.80.0"
+    "vscode": "^1.85.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Themes"
   ],
   "contributes": {
     "languages": [
@@ -16,7 +17,11 @@
         "id": "dtl",
         "aliases": ["DTL"],
         "extensions": [".dtl"],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/dtl.svg",
+          "dark": "./icons/dtl.svg"
+        }
       }
     ],
     "grammars": [
@@ -24,6 +29,14 @@
         "language": "dtl",
         "scopeName": "source.dtl",
         "path": "./syntaxes/dtl.tmLanguage.json"
+      }
+    ],
+    "themes": [
+      {
+        "id": "dtl-dark",
+        "label": "DTL Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/dtl-color-theme.json"
       }
     ]
   }
