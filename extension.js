@@ -139,6 +139,34 @@ const DTL_ENTRIES = [
     example: '[end_timeline]'
   }
 ];
+const DTL_POSITIONS = [
+  {
+    name: 'left',
+    description: 'Place the character on the left side.'
+  },
+  {
+    name: 'right',
+    description: 'Place the character on the right side.'
+  },
+  {
+    name: 'center',
+    description: 'Place the character in the center.'
+  },
+  {
+    name: 'leftmost',
+    description: 'Place the character at the far left.'
+  },
+  {
+    name: 'rightmost',
+    description: 'Place the character at the far right.'
+  }
+];
+const DTL_CHARACTER_COMMANDS = [
+  'join',
+  'leave',
+  'update'
+];
+
 
 const hoverProvider = vscode.languages.registerHoverProvider('dtl', {
   provideHover(document, position) {
@@ -212,7 +240,8 @@ const provider = vscode.languages.registerCompletionItemProvider('dtl', {
     const line = document.lineAt(position.line).text;
     const beforeCursor = line.substring(0, position.character);
     const items = [];
-    // ---------------------------------------------------------
+
+        // ---------------------------------------------------------
     // Existing character suggestions
     // ---------------------------------------------------------
     for (const name of cachedCharacterNames) {
@@ -259,6 +288,124 @@ const provider = vscode.languages.registerCompletionItemProvider('dtl', {
       }
     }
     // ---------------------------------------------------------
+    // JOIN / LEAVE / UPDATE
+    // ---------------------------------------------------------
+    const CharactercommandMatch = beforeCursor.match(
+      /^\s*(join|leave|update)\s+(.*)$/
+    );
+    if (CharactercommandMatch) {
+      const command = CharactercommandMatch[1];
+      const argumentsText = CharactercommandMatch[2];
+      const argumentsParts = argumentsText.split(/\s+/);
+      // -------------------------------------------------------
+      // Character
+      //
+      // join |
+      // leave |
+      // update |
+      // -------------------------------------------------------
+      if (
+        argumentsParts.length === 1 &&
+        argumentsParts[0] === ''
+      ) {
+        for (const name of cachedCharacterNames) {
+          const item = new vscode.CompletionItem(
+            name,
+            vscode.CompletionItemKind.EnumMember
+          );
+
+          item.detail = 'DTL character';
+
+          items.push(item);
+        }
+
+        return items;
+      }
+
+      // -------------------------------------------------------
+      // JOIN / UPDATE position
+      //
+      // join Alice |
+      // update Alice |
+      // -------------------------------------------------------
+
+      if (
+        (command === 'join' || command === 'update') &&
+        argumentsParts.length === 2 &&
+        argumentsParts[1] === ''
+      ) {
+        for (const position of DTL_POSITIONS) {
+          const item = new vscode.CompletionItem(
+            position,
+            vscode.CompletionItemKind.EnumMember
+          );
+
+          item.detail = 'DTL character position';
+
+          items.push(item);
+        }
+
+        return items;
+      }
+
+      // -------------------------------------------------------
+      // Partial character name
+      //
+      // join Al|
+      // -------------------------------------------------------
+
+      if (argumentsParts.length === 1) {
+        const prefix = argumentsParts[0];
+
+        for (const name of cachedCharacterNames) {
+          if (!name.toLowerCase().startsWith(prefix.toLowerCase())) {
+            continue;
+          }
+
+          const item = new vscode.CompletionItem(
+            name,
+            vscode.CompletionItemKind.EnumMember
+          );
+
+          item.detail = 'DTL character';
+
+          items.push(item);
+        }
+
+        return items;
+      }
+
+      // -------------------------------------------------------
+      // Partial position
+      //
+      // join Alice le|
+      // update Alice ce|
+      // -------------------------------------------------------
+      if (
+        (command === 'join' || command === 'update') &&
+        argumentsParts.length === 2
+      ) {
+        const prefix = argumentsParts[1];
+
+        for (const position of DTL_POSITIONS) {
+          if (!position.toLowerCase().startsWith(prefix.toLowerCase())) {
+            continue;
+          }
+
+          const item = new vscode.CompletionItem(
+            position,
+            vscode.CompletionItemKind.EnumMember
+          );
+
+          item.detail = 'DTL character position';
+
+          items.push(item);
+        }
+
+        return items;
+      }
+    }
+    // ---------------------------------------------------------
     // Normal DTL commands
     // ---------------------------------------------------------
     const commandMatch = beforeCursor.match(
@@ -287,10 +434,12 @@ const provider = vscode.languages.registerCompletionItemProvider('dtl', {
         items.push(item);
       }
     }
+
     return items;
   }
 });
 
+context.subscriptions.push(provider);
 
 
 
