@@ -420,13 +420,10 @@ function activate(context) {
             // leave Lar|
             // update Lar|
             // ---------------------------------------------------------------
-
             if (argumentsParts.length === 1) {
-
               const prefix =
                 argumentsParts[0]
                   .toLowerCase();
-
               for (
                 const name of cachedCharacterNames
               ) {
@@ -456,11 +453,7 @@ function activate(context) {
             //
             // leave does NOT have a position.
             // ---------------------------------------------------------------
-            if (
-              (command === 'join' ||
-               command === 'update') &&
-              argumentsParts.length === 2
-            ) {
+            if ((command === 'join' || command === 'update') && argumentsParts.length === 2) {
               const prefix = argumentsParts[1].toLowerCase();
               for (const position of DTL_POSITIONS) {
                 if (
@@ -488,11 +481,8 @@ function activate(context) {
               /\[([A-Za-z_][A-Za-z0-9_]*)?$/
             );
           if (bracketMatch) {
-            const prefix =
-              bracketMatch[1] || '';
-            for (
-              const entry of DTL_ENTRIES
-            ) {
+            const prefix = bracketMatch[1] || '';
+            for ( const entry of DTL_ENTRIES ) {
               if (entry.type !== 'bracket') {
                 continue;
               }
@@ -509,38 +499,32 @@ function activate(context) {
             return items;
           }
           // =========================================================================
-          // NORMAL COMMANDS
+          // NORMAL COMMANDS + Dialogue characters.
           // =========================================================================
-          const commandMatch = beforeCursor.match(/(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)$/);
-          if (commandMatch) {
-            const prefix = commandMatch[1].toLowerCase();
-            for ( const entry of DTL_ENTRIES) {
-              if (entry.type !== 'command') {
-                continue;
+          if (/^\s*[A-Za-z_][A-Za-z0-9_]*$/.test(beforeCursor)) {
+            const prefix = beforeCursor.trim().toLowerCase();
+            // Characters
+            for (const name of cachedCharacterNames) {
+              if (name.toLowerCase().startsWith(prefix)) {
+                items.push(createCharacterCompletion(name));
               }
-              if (
-                !entry.name
-                  .toLowerCase()
-                  .startsWith(prefix)
-              ) {
-                continue;
+            }
+            // Commands
+            for (const entry of DTL_ENTRIES) {
+              if (entry.type !== 'command') {continue;}
+              if (entry.name.toLowerCase().startsWith(prefix)) {
+                items.push(createCommandCompletion(entry));
               }
-              items.push(
-                createCommandCompletion(entry)
-              );
             }
             return items;
           }
-          // =========================================================================
-          // CHARACTER COMPLETION
-          //
-          // Keep the original behavior:
-          // character names can be suggested anywhere.
-          // =========================================================================
-          for (const name of cachedCharacterNames) {items.push(createCharacterCompletion(name));}
-          return items;
+          /// Fall back
+          for (const name of cachedCharacterNames) {
+            items.push(createCharacterCompletion(name));
+          }
+          return items
+          }
         }
-      }
     );
   context.subscriptions.push(completionProvider);
 }
