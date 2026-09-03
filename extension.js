@@ -1,23 +1,18 @@
 // extension.js
 // -----------------------------------------------------------------------------
-// Adds autocomplete for character names inside .dtl files.
+// DTL language support for Dialogic 2 Timeline (.dtl) files.
 //
-// Character names are read from the Godot project's `project.godot` file,
-// specifically from the `directories/dch_directory` dictionary under the
-// `[dialogic]` section:
-//
-//   [dialogic]
-//   directories/dch_directory={
-//   "John":"res://path_to_dch_file.dch",
-//   "Frodon":"res://path_to_dch_file.dch",
-//   }
-//
-// Each key ("John", "Frodon", ...) is offered as a completion anywhere in a
-// .dtl file, since character names are used both on speaker lines
-// ("John: Hello!") and as arguments to join/update/leave commands.
+// Provides:
+// - Character autocomplete from project.godot
+// - Command autocomplete
+// - Contextual character/position autocomplete for join/leave/update
+// - Hover documentation for commands
 // -----------------------------------------------------------------------------
 
 const vscode = require('vscode');
+// =============================================================================
+// DTL DOCUMENTATION
+// =============================================================================
 const DTL_ENTRIES = [
   {
     name: 'label',
@@ -122,7 +117,7 @@ const DTL_ENTRIES = [
     type: 'bracket',
     syntax: '[signal ...]',
     description: 'Send a dialogic signal with given arguments.',
-    example: '[signal arg_type="dict" arg="{"Amount":100,"Effect":"Rain","Nature":"meteo","Windx":20.0,"Windy":1.0}"]'
+    example: '[signal arg_type="dict" arg="{\"Amount\":100,\"Effect\":\"Rain\",\"Nature\":\"meteo\",\"Windx\":20.0,\"Windy\":1.0}"]'
   },
   {
     name: 'text_input',
@@ -139,6 +134,9 @@ const DTL_ENTRIES = [
     example: '[end_timeline]'
   }
 ];
+// =============================================================================
+// POSITIONS
+// =============================================================================
 const DTL_POSITIONS = [
   {
     name: 'left',
@@ -161,382 +159,394 @@ const DTL_POSITIONS = [
     description: 'Place the character at the far right.'
   }
 ];
-const DTL_CHARACTER_COMMANDS = [
-  'join',
-  'leave',
-  'update'
-];
-
-
-const hoverProvider = vscode.languages.registerHoverProvider('dtl', {
-  provideHover(document, position) {
-    const line = document.lineAt(position.line).text;
-    // ---------------------------------------------------------
-    // Normal commands: label / jump / etc.
-    // ---------------------------------------------------------
-    const wordRange = document.getWordRangeAtPosition(position);
-    if (wordRange) {
-      const word = document.getText(wordRange);
-      const entry = DTL_ENTRIES.find(
-        (entry) => entry.name === word
-      );
-      if (entry) {
-        const markdown = new vscode.MarkdownString();
-        markdown.appendMarkdown(`**${entry.name}**\n\n`);
-        markdown.appendMarkdown(`${entry.description}\n\n`);
-        markdown.appendMarkdown(`**Syntax:** \`${entry.syntax}\`\n\n`);
-        if (entry.example) {
-          markdown.appendMarkdown('**Example:**\n\n');
-          markdown.appendCodeblock(entry.example, 'dtl');
-        }
-        return new vscode.Hover(markdown, wordRange);
-      }
-    }
-    // ---------------------------------------------------------
-    // Bracket commands: [wait], [audio], [voice], etc.
-    // ---------------------------------------------------------
-    const bracketRegex = /\[([A-Za-z_][A-Za-z0-9_]*)/g;
-    let match;
-    while ((match = bracketRegex.exec(line)) !== null) {
-      const start = match.index;
-      const end = start + match[0].length;
-      if (
-        position.character >= start &&
-        position.character <= end
-      ) {
-        const commandName = match[1];
-        const entry = DTL_ENTRIES.find(
-          (entry) => entry.name === commandName
-        );
-        if (!entry) {
-          return undefined;
-        }
-        const markdown = new vscode.MarkdownString();
-        markdown.appendMarkdown(`**[${entry.name}]**\n\n`);
-        markdown.appendMarkdown(`${entry.description}\n\n`);
-        markdown.appendMarkdown(`**Syntax:** \`${entry.syntax}\`\n\n`);
-        if (entry.example) {
-          markdown.appendMarkdown('**Example:**\n\n');
-          markdown.appendCodeblock(entry.example, 'dtl');
-        }
-        const range = new vscode.Range(
-          position.line,
-          start,
-          position.line,
-          end
-        );
-        return new vscode.Hover(markdown, range);
-      }
-    }
-
-    return undefined;
-  }
-});
-
-context.subscriptions.push(hoverProvider);
-
-const provider = vscode.languages.registerCompletionItemProvider('dtl', {
-  provideCompletionItems(document, position) {
-    const line = document.lineAt(position.line).text;
-    const beforeCursor = line.substring(0, position.character);
-    const items = [];
-
-        // ---------------------------------------------------------
-    // Existing character suggestions
-    // ---------------------------------------------------------
-    for (const name of cachedCharacterNames) {
-      const item = new vscode.CompletionItem(
-        name,
-        vscode.CompletionItemKind.EnumMember
-      );
-      item.detail = 'DTL character (from project.godot)';
-      items.push(item);
-    }
-    // ---------------------------------------------------------
-    // Bracket commands
-    //
-    // Suggest only when the user has just opened a bracket or
-    // is typing the name of a bracket command.
-    // ---------------------------------------------------------
-    const bracketMatch = beforeCursor.match(
-      /\[([A-Za-z_][A-Za-z0-9_]*)?$/
-    );
-    if (bracketMatch) {
-      const prefix = bracketMatch[1] || '';
-      for (const entry of DTL_ENTRIES) {
-        if (entry.type !== 'bracket') {
-          continue;
-        }
-        if (!entry.name.startsWith(prefix)) {
-          continue;
-        }
-        const item = new vscode.CompletionItem(
-          entry.name,
-          vscode.CompletionItemKind.Keyword
-        );
-        item.detail = entry.syntax;
-        item.documentation = new vscode.MarkdownString(
-          `${entry.description}\n\n` +
-          (entry.example
-            ? `**Example:**\n\n\`\`\`dtl\n${entry.example}\n\`\`\``
-            : '')
-        );
-        // Replace the text after "[" rather than inserting another
-        // complete command somewhere else.
-        item.insertText = entry.name;
-        items.push(item);
-      }
-    }
-    // ---------------------------------------------------------
-    // JOIN / LEAVE / UPDATE
-    // ---------------------------------------------------------
-    const CharactercommandMatch = beforeCursor.match(
-      /^\s*(join|leave|update)\s+(.*)$/
-    );
-    if (CharactercommandMatch) {
-      const command = CharactercommandMatch[1];
-      const argumentsText = CharactercommandMatch[2];
-      const argumentsParts = argumentsText.split(/\s+/);
-      // -------------------------------------------------------
-      // Character
-      //
-      // join |
-      // leave |
-      // update |
-      // -------------------------------------------------------
-      if (
-        argumentsParts.length === 1 &&
-        argumentsParts[0] === ''
-      ) {
-        for (const name of cachedCharacterNames) {
-          const item = new vscode.CompletionItem(
-            name,
-            vscode.CompletionItemKind.EnumMember
-          );
-
-          item.detail = 'DTL character';
-
-          items.push(item);
-        }
-
-        return items;
-      }
-
-      // -------------------------------------------------------
-      // JOIN / UPDATE position
-      //
-      // join Alice |
-      // update Alice |
-      // -------------------------------------------------------
-
-      if (
-        (command === 'join' || command === 'update') &&
-        argumentsParts.length === 2 &&
-        argumentsParts[1] === ''
-      ) {
-        for (const position of DTL_POSITIONS) {
-          const item = new vscode.CompletionItem(
-            position,
-            vscode.CompletionItemKind.EnumMember
-          );
-
-          item.detail = 'DTL character position';
-
-          items.push(item);
-        }
-
-        return items;
-      }
-
-      // -------------------------------------------------------
-      // Partial character name
-      //
-      // join Al|
-      // -------------------------------------------------------
-
-      if (argumentsParts.length === 1) {
-        const prefix = argumentsParts[0];
-
-        for (const name of cachedCharacterNames) {
-          if (!name.toLowerCase().startsWith(prefix.toLowerCase())) {
-            continue;
-          }
-
-          const item = new vscode.CompletionItem(
-            name,
-            vscode.CompletionItemKind.EnumMember
-          );
-
-          item.detail = 'DTL character';
-
-          items.push(item);
-        }
-
-        return items;
-      }
-
-      // -------------------------------------------------------
-      // Partial position
-      //
-      // join Alice le|
-      // update Alice ce|
-      // -------------------------------------------------------
-      if (
-        (command === 'join' || command === 'update') &&
-        argumentsParts.length === 2
-      ) {
-        const prefix = argumentsParts[1];
-
-        for (const position of DTL_POSITIONS) {
-          if (!position.toLowerCase().startsWith(prefix.toLowerCase())) {
-            continue;
-          }
-
-          const item = new vscode.CompletionItem(
-            position,
-            vscode.CompletionItemKind.EnumMember
-          );
-
-          item.detail = 'DTL character position';
-
-          items.push(item);
-        }
-
-        return items;
-      }
-    }
-    // ---------------------------------------------------------
-    // Normal DTL commands
-    // ---------------------------------------------------------
-    const commandMatch = beforeCursor.match(
-      /(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)$/
-    );
-    if (commandMatch) {
-      const prefix = commandMatch[1];
-      for (const entry of DTL_ENTRIES) {
-        if (entry.type !== 'command') {
-          continue;
-        }
-        if (!entry.name.startsWith(prefix)) {
-          continue;
-        }
-        const item = new vscode.CompletionItem(
-          entry.name,
-          vscode.CompletionItemKind.Keyword
-        );
-        item.detail = entry.syntax;
-        item.documentation = new vscode.MarkdownString(
-          `${entry.description}\n\n` +
-          (entry.example
-            ? `**Example:**\n\n\`\`\`dtl\n${entry.example}\n\`\`\``
-            : '')
-        );
-        items.push(item);
-      }
-    }
-
-    return items;
-  }
-});
-
-context.subscriptions.push(provider);
-
-
+// =============================================================================
+// CHARACTER CACHE
+// =============================================================================
 
 /**
- * In-memory cache of character names found in the workspace's project.godot.
- * Rebuilt only when project.godot changes, so completion requests stay fast
- * (no disk read on every keystroke).
+ * Character names found in project.godot.
+ *
  * @type {string[]}
  */
 let cachedCharacterNames = [];
-
 /**
- * Extracts character names from a project.godot file's contents.
+ * Extract character names from project.godot.
  *
- * @param {string} text - Full contents of project.godot.
- * @returns {string[]} Character names (the dictionary keys), in file order.
+ * @param {string} text
+ * @returns {string[]}
  */
 function extractCharacterNames(text) {
-  // Isolate the [dialogic] section: everything from its header up to the
-  // next "[section]" header, or to the end of the file.
-  const sectionMatch = text.match(/\[dialogic\]([\s\S]*?)(\n\[|$)/);
+
+  const sectionMatch = text.match(
+    /\[dialogic\]([\s\S]*?)(\n\[|$)/
+  );
+
   if (!sectionMatch) {
     return [];
   }
+
   const dialogicSection = sectionMatch[1];
 
-  // Pull out the dch_directory dictionary body: everything between its { }.
-  const dictionaryMatch = dialogicSection.match(
-    /directories\/dch_directory\s*=\s*\{([\s\S]*?)\}/
-  );
+  const dictionaryMatch = dialogicSection.match(/directories\/dch_directory\s*=\s*\{([\s\S]*?)\}/);
   if (!dictionaryMatch) {
     return [];
   }
   const dictionaryBody = dictionaryMatch[1];
-
-  // Each entry looks like "Name":"res://some/path.dch" — we only need the key.
   const keyPattern = /"([^"]+)"\s*:\s*"[^"]*"/g;
   const names = [];
   let match;
-  while ((match = keyPattern.exec(dictionaryBody)) !== null) {
-    names.push(match[1]);
-  }
+  while ((match = keyPattern.exec(dictionaryBody)) !== null) {names.push(match[1]);}
   return names;
 }
-
 /**
- * Finds project.godot in the current workspace and refreshes
- * `cachedCharacterNames` from it. Safe to call repeatedly; leaves the cache
- * empty if no project.godot exists or it has no character dictionary yet.
+ * Refresh the character cache.
  */
 async function refreshCharacterNames() {
-  const matches = await vscode.workspace.findFiles('**/project.godot', '**/.godot/**', 1);
+
+  const matches = await vscode.workspace.findFiles(
+    '**/project.godot',
+    '**/.godot/**',
+    1
+  );
+
   if (matches.length === 0) {
     cachedCharacterNames = [];
     return;
   }
 
   try {
+
     const bytes = await vscode.workspace.fs.readFile(matches[0]);
-    cachedCharacterNames = extractCharacterNames(Buffer.from(bytes).toString('utf8'));
+
+    cachedCharacterNames =
+      extractCharacterNames(
+        Buffer.from(bytes).toString('utf8')
+      );
+
   } catch (error) {
-    // A missing/unreadable project.godot shouldn't break the extension —
-    // just fall back to no suggestions.
-    console.error('DTL Reader: could not read project.godot', error);
+
+    console.error(
+      'DTL Reader: could not read project.godot',
+      error
+    );
+
     cachedCharacterNames = [];
   }
 }
+// =============================================================================
+// MARKDOWN DOCUMENTATION HELPER
+// =============================================================================
+function createDocumentation(entry) {
+  const markdown = new vscode.MarkdownString();
+  markdown.appendMarkdown(`**${entry.name}**\n\n`);
+  markdown.appendMarkdown(`${entry.description}\n\n`);
+  markdown.appendMarkdown(`**Syntax:** \`${entry.syntax}\`\n\n`);
+  if (entry.example) {
+    markdown.appendMarkdown('**Example:**\n\n');
+    markdown.appendCodeblock(entry.example,'dtl');
+  }
+  return markdown;
+}
+// =============================================================================
+// COMPLETION ITEM HELPERS
+// =============================================================================
+function createCommandCompletion(entry) {
+  const item = new vscode.CompletionItem(entry.name,vscode.CompletionItemKind.Keyword);
+  item.detail = entry.syntax;
+  item.documentation = createDocumentation(entry);
+  return item;
+}
+function createPositionCompletion(position) {
+  const item = new vscode.CompletionItem(position.name,vscode.CompletionItemKind.EnumMember);
+  item.detail = 'DTL character position';
+  item.documentation =
+    new vscode.MarkdownString(position.description);
+  return item;
+}
+function createCharacterCompletion(name) {
+  const item = new vscode.CompletionItem(name,vscode.CompletionItemKind.EnumMember);
+  item.detail = 'Dialogic character (from project.godot)';
+  return item;
+}
 
-/**
- * Entry point called once by VS Code when the extension activates.
- * @param {vscode.ExtensionContext} context
- */
+// =============================================================================
+// ACTIVATE
+// =============================================================================
+
 function activate(context) {
-  // Build the initial cache right away.
+  // ---------------------------------------------------------------------------
+  // Initial character cache
+  // ---------------------------------------------------------------------------
   refreshCharacterNames();
-
-  // Keep the cache in sync whenever project.godot is created, edited, or
-  // deleted, so newly added characters show up without a reload.
+  // ---------------------------------------------------------------------------
+  // Watch project.godot
+  // ---------------------------------------------------------------------------
   const watcher = vscode.workspace.createFileSystemWatcher('**/project.godot');
   watcher.onDidChange(refreshCharacterNames);
   watcher.onDidCreate(refreshCharacterNames);
   watcher.onDidDelete(refreshCharacterNames);
   context.subscriptions.push(watcher);
+  // ===========================================================================
+  // HOVER PROVIDER
+  // ===========================================================================
+  const hoverProvider =
+    vscode.languages.registerHoverProvider(
+      'dtl',
+      {
+        provideHover(document, position) {
+          const line = document.lineAt(position.line).text;
+          // -------------------------------------------------------------------
+          // Bracket commands
+          //
+          // [wait]
+          // [audio]
+          // [voice]
+          // -------------------------------------------------------------------
+          const bracketRegex =
+            /\[([A-Za-z_][A-Za-z0-9_]*)/g;
+          let match;
+          while (
+            (match = bracketRegex.exec(line)) !== null
+          ) {
+            const start = match.index;
+            const end =
+              start + match[0].length;
+            if (
+              position.character >= start &&
+              position.character <= end
+            ) {
+              const commandName = match[1];
+              const entry =
+                DTL_ENTRIES.find(
+                  entry =>
+                    entry.name === commandName
+                );
+              if (!entry) {
+                return undefined;
+              }
+              const range =
+                new vscode.Range(
+                  position.line,
+                  start,
+                  position.line,
+                  end
+                );
+              return new vscode.Hover(
+                createDocumentation(entry),
+                range
+              );
+            }
+          }
+          // -------------------------------------------------------------------
+          // Normal commands
+          //
+          // label
+          // jump
+          // join
+          // update
+          // leave
+          // -------------------------------------------------------------------
+          const wordRange =
+            document.getWordRangeAtPosition(
+              position
+            );
 
-  // Offer character names as completions anywhere in a .dtl file; VS Code
-  // filters the list against whatever the user has already typed.
-  const provider = vscode.languages.registerCompletionItemProvider('dtl', {
-    provideCompletionItems() {
-      return cachedCharacterNames.map((name) => {
-        const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.EnumMember);
-        item.detail = 'Dialogic character (read from project.godot)';
-        return item;
-      });
-    },
-  });
-  context.subscriptions.push(provider);
+          if (!wordRange) {
+            return undefined;
+          }
+
+          const word =
+            document.getText(wordRange);
+
+          const entry =
+            DTL_ENTRIES.find(
+              entry => entry.name === word
+            );
+
+          if (!entry) {
+            return undefined;
+          }
+
+          return new vscode.Hover(
+            createDocumentation(entry),
+            wordRange
+          );
+        }
+      }
+    );
+  context.subscriptions.push(hoverProvider);
+  // ===========================================================================
+  // COMPLETION PROVIDER
+  // ===========================================================================
+  const completionProvider =
+    vscode.languages.registerCompletionItemProvider('dtl',
+      {
+        provideCompletionItems(document, position) {
+          const line = document.lineAt(position.line).text;
+          const beforeCursor = line.substring(0,position.character);
+          const items = [];
+          // ===================================================================
+          // JOIN / LEAVE / UPDATE
+          // ===================================================================
+          const characterCommandMatch = beforeCursor.match(/^\s*(join|leave|update)(?:\s+(.*))?$/);
+          if (characterCommandMatch) {
+            const command = characterCommandMatch[1];
+            const argumentsText = characterCommandMatch[2] || '';
+            // ---------------------------------------------------------------
+            // No argument yet
+            //
+            // join |
+            // leave |
+            // update |
+            // ---------------------------------------------------------------
+            if (argumentsText === '') {
+              for (
+                const name of cachedCharacterNames
+              ) {
+                items.push(
+                  createCharacterCompletion(name)
+                );
+              }
+              return items;
+            }
+            // ---------------------------------------------------------------
+            // Split arguments
+            // ---------------------------------------------------------------
+            const argumentsParts = argumentsText.split(/\s+/);
+            // ---------------------------------------------------------------
+            // Character is currently being typed
+            //
+            // join Lar|
+            // leave Lar|
+            // update Lar|
+            // ---------------------------------------------------------------
+
+            if (argumentsParts.length === 1) {
+
+              const prefix =
+                argumentsParts[0]
+                  .toLowerCase();
+
+              for (
+                const name of cachedCharacterNames
+              ) {
+
+                if (
+                  !name
+                    .toLowerCase()
+                    .startsWith(prefix)
+                ) {
+                  continue;
+                }
+
+                items.push(
+                  createCharacterCompletion(name)
+                );
+              }
+
+              return items;
+            }
+
+
+            // ---------------------------------------------------------------
+            // Position
+            //
+            // join Laripo |
+            // update Laripo |
+            //
+            // leave does NOT have a position.
+            // ---------------------------------------------------------------
+            if (
+              (command === 'join' ||
+               command === 'update') &&
+              argumentsParts.length === 2
+            ) {
+              const prefix = argumentsParts[1].toLowerCase();
+              for (const position of DTL_POSITIONS) {
+                if (
+                  !position.name
+                    .toLowerCase()
+                    .startsWith(prefix)
+                ) {
+                  continue;
+                }
+
+                items.push(
+                  createPositionCompletion(
+                    position
+                  )
+                );
+              }
+              return items;
+            }
+          }
+          // =========================================================================
+          // BRACKET COMMANDS
+          // =========================================================================
+          const bracketMatch =
+            beforeCursor.match(
+              /\[([A-Za-z_][A-Za-z0-9_]*)?$/
+            );
+          if (bracketMatch) {
+            const prefix =
+              bracketMatch[1] || '';
+            for (
+              const entry of DTL_ENTRIES
+            ) {
+              if (entry.type !== 'bracket') {
+                continue;
+              }
+              if (
+                !entry.name
+                  .startsWith(prefix)
+              ) {
+                continue;
+              }
+              const item =
+                createCommandCompletion(entry);
+              items.push(item);
+            }
+            return items;
+          }
+          // =========================================================================
+          // NORMAL COMMANDS
+          // =========================================================================
+          const commandMatch = beforeCursor.match(/(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)$/);
+          if (commandMatch) {
+            const prefix = commandMatch[1].toLowerCase();
+            for ( const entry of DTL_ENTRIES) {
+              if (entry.type !== 'command') {
+                continue;
+              }
+              if (
+                !entry.name
+                  .toLowerCase()
+                  .startsWith(prefix)
+              ) {
+                continue;
+              }
+              items.push(
+                createCommandCompletion(entry)
+              );
+            }
+            return items;
+          }
+          // =========================================================================
+          // CHARACTER COMPLETION
+          //
+          // Keep the original behavior:
+          // character names can be suggested anywhere.
+          // =========================================================================
+          for (const name of cachedCharacterNames) {items.push(createCharacterCompletion(name));}
+          return items;
+        }
+      }
+    );
+  context.subscriptions.push(completionProvider);
 }
+// =============================================================================
+// DEACTIVATE
+// =============================================================================
 
 function deactivate() {}
 
