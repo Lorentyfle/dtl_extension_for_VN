@@ -6,6 +6,11 @@
     { "include": "#translationid" },
     { "include": "#comments" },
     { "include": "#signals" },
+    { "include": "#wait"},
+    { "include": "#audio"},
+    { "include": "#clear"},
+    { "include": "#images"},
+    { "include": "#end_timeline"},
     { "include": "#options" },
     { "include": "#commands" },
     { "include": "#flow" },
@@ -46,17 +51,17 @@
 
     "commands": {
       "patterns": [
-        { "name": "keyword.control.command.dtl", "match": "\\b(join|leave|update|audio)\\b" },
-        { "name": "support.type.audio-kind.dtl", "match": "(?<=\\baudio\\s)(music|sfx|voice|ambience)\\b" },
+        { "name": "keyword.control.command.dtl", "match": "\\b(join|leave|update|audio|do|return)\\b" },
+        { "name": "support.type.audio-kind.dtl", "match": "(?<=\\baudio\\b)\\s+([^\\s\"]+)" },
         { "name": "constant.language.position.dtl", "match": "\\b(left|right|center|rightmost|leftmost)\\b" },
         { "name": "entity.name.character.dtl", "match": "(?<=\\b(join|update|leave)\\s)[A-Za-z_][A-Za-z0-9_]*" }
       ]
     },
 
     "flow": {
-      "comment": "if / else / elif / set / label / jump / not / and / or all share keyword.control.flow.dtl so a theme colors them identically. label/jump additionally tag their target name with entity.name.label.dtl, mirroring how #commands tags character names after join/update/leave.",
+      "comment": "if / else / elif / set / label / jump / not / and / or / in all share keyword.control.flow.dtl so a theme colors them identically. label/jump additionally tag their target name with entity.name.label.dtl, mirroring how #commands tags character names after join/update/leave.",
       "patterns": [
-        { "name": "keyword.control.flow.dtl", "match": "\\b(if|else|elif|set|label|jump|not|or|and)\\b" },
+        { "name": "keyword.control.flow.dtl", "match": "\\b(if|else|elif|set|label|jump|not|or|and|in)\\b" },
         { "name": "entity.name.label.dtl", "match": "(?<=\\b(label|jump)\\s)[A-Za-z_][A-Za-z0-9_]*" },
         { "name": "punctuation.section.block.dtl", "match": ":\\s*$" }
       ]
@@ -89,7 +94,7 @@
     "dialogue": {
       "comment": "Speaker line 'Name: text [inline=options] #id:xyz'. The spoken text is a begin/end region so inline markup like [pause=1.5] and {variable} references still highlight.",
       "patterns": [
-        { "name": "entity.name.character.dtl", "match": "^\\s*[A-Za-z_][A-Za-z0-9_]*(?=\\s*:)" },
+        { "name": "entity.name.character.dtl", "match": "^\\s*(?!(?:if|else|elif|set|label|jump)\\s*:)[A-Za-z_][A-Za-z0-9_]*(?=\\s*:)" },
         {
           "name": "string.unquoted.dialogue.dtl",
           "begin": "(?<=:)\\s",
@@ -137,6 +142,103 @@
       ]
     },
 
+    "end_timeline" : {
+      "patterns": [
+        {
+          "name" : "meta.endtimeline.dtl",
+          "match": "\\[end_timeline\\]"
+        }
+      ]
+    },
+
+    "wait": {
+      "comment": "[wait or wait_input] flag type.",
+      "patterns": [
+        {
+          "name": "meta.options.dtl",
+          "begin": "\\[\\b(wait|wait_input)\\b\\b",
+          "beginCaptures": { "0": { "name": "meta.wait.dtl" } },
+          "end": "\\]",
+          "endCaptures": { "0": { "name": "punctuation.definition.tag.end.dtl" } },
+          "patterns": [
+            { "name": "keyword.control.choice.dtl", "match": "\\b(if|elif|else)\\b" },
+            { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=)" },
+            { "include": "#operator" },
+            { "include": "#strings" },
+            { "include": "#numbers" },
+            { "include": "#constants" },
+            { "include": "#variables" }
+          ]
+        }
+      ]
+    },
+
+    "audio": {
+      "comment": "[voice or audio] flag type.",
+      "patterns": [
+        {
+          "name": "meta.options.dtl",
+          "begin": "\\[\\b(audio|voice)\\b\\b",
+          "beginCaptures": { "0": { "name": "support.type.audio-kind.dtl" } },
+          "end": "\\]",
+          "endCaptures": { "0": { "name": "punctuation.definition.tag.end.dtl" } },
+          "patterns": [
+            { "name": "keyword.control.choice.dtl", "match": "\\b(if|elif|else)\\b" },
+            { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=)" },
+            { "include": "#operator" },
+            { "include": "#strings" },
+            { "include": "#numbers" },
+            { "include": "#constants" },
+            { "include": "#variables" }
+          ]
+        }
+      ]
+    },
+
+    "clear": {
+      "comment": "[clear ] flag type.",
+      "patterns": [
+        {
+          "name": "meta.options.dtl",
+          "begin": "\\[clear\\b",
+          "beginCaptures": { "0": { "name": "meta.clear.dtl" } },
+          "end": "\\]",
+          "endCaptures": { "0": { "name": "punctuation.definition.tag.end.dtl" } },
+          "patterns": [
+            { "name": "keyword.control.choice.dtl", "match": "\\b(if|elif|else)\\b" },
+            { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=)" },
+            { "include": "#operator" },
+            { "include": "#strings" },
+            { "include": "#numbers" },
+            { "include": "#constants" },
+            { "include": "#variables" }
+          ]
+        }
+      ]
+    },
+
+    "images": {
+      "comment": "[background or style ] flag type.",
+      "patterns": [
+        {
+          "name": "meta.images.dtl",
+          "begin": "\\[\\b(background|style)\\b\\b",
+          "beginCaptures": { "0": { "name": "meta.images.dtl" } },
+          "end": "\\]",
+          "endCaptures": { "0": { "name": "punctuation.definition.tag.end.dtl" } },
+          "patterns": [
+            { "name": "keyword.control.choice.dtl", "match": "\\b(if|elif|else)\\b" },
+            { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=)" },
+            { "include": "#operator" },
+            { "include": "#strings" },
+            { "include": "#numbers" },
+            { "include": "#constants" },
+            { "include": "#variables" }
+          ]
+        }
+      ]
+    },
+
     "options": {
       "comment": "Generic '[key=value key2=\"value2\"]' bracket block used by commands, choices and inline dialogue markup (extra_data, animation, pause, if/else, alt_text...).",
       "patterns": [
@@ -147,7 +249,7 @@
           "end": "\\]",
           "endCaptures": { "0": { "name": "punctuation.definition.tag.end.dtl" } },
           "patterns": [
-            { "name": "keyword.control.choice.dtl", "match": "\\b(if|else)\\b" },
+            { "name": "keyword.control.choice.dtl", "match": "\\b(if|elif|else)\\b" },
             { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=)" },
             { "include": "#operator" },
             { "include": "#strings" },

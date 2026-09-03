@@ -32,12 +32,12 @@
     {
       "comment": "Spoken dialogue text is left uncolored on purpose: it inherits editor.foreground (#d4d4d4) like plain prose, instead of a distinct string color. Add a 'foreground' here if you'd rather it stood out.",
       "scope": "string.unquoted.dialogue.dtl",
-      "settings": {  "foreground": "#ffe9d4" }
+      "settings": {  "foreground": "#fff3de" }
     },
     {
       "comment": "Choice wording ('- text') gets its own color so it reads as content rather than plain code text.",
       "scope": "markup.list.choice.dtl",
-      "settings": { "foreground": "#83cc4f" }
+      "settings": { "foreground": "#4fcc96" }
     },
     {
       "comment": "Target name after 'label' / 'jump'.",
@@ -70,11 +70,27 @@
     },
     {
       "scope": "punctuation.separator.choice.dtl",
-      "settings": { "foreground": "#7eb065" }
+      "settings": { "foreground": "#7b00ff" }
     },
     {
       "scope": ["punctuation.definition.variable.begin.dtl", "punctuation.definition.variable.end.dtl"],
       "settings": { "foreground": "#4ec9b0" }
+    },
+    {
+      "scope": "meta.endtimeline.dtl",
+      "settings": { "foreground": "#ff8fd2", "fontStyle": "bold"}
+    },
+    {
+      "scope": "meta.images.dtl",
+      "settings": { "foreground": "#c8c465", "fontStyle": "italic" }
+    },
+    {
+      "scope": "meta.clear.dtl",
+      "settings": { "foreground": "#949493" }
+    },
+    {
+      "scope": "meta.wait.dtl",
+      "settings": { "foreground": "#9b83fa" }
     },
     {
       "scope": "variable.other.property.dtl",
