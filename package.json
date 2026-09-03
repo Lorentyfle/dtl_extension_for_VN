@@ -48,7 +48,16 @@
         "uiTheme": "vs-dark",
         "path": "./themes/dtl-color-theme.json"
       }
-    ]
+    ],
+    "configurationDefaults": {
+      "[dtl]": {
+        "editor.quickSuggestions": {
+          "other": true,
+          "comments": false,
+          "strings": true
+        }
+      }
+    }
   },
   "devDependencies": {
     "@vscode/vsce": "^3.9.2"

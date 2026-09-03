@@ -397,24 +397,27 @@ function updateJumpDiagnostics(document) {
   }
 
   const diagnostics = [];
-  const jumpPattern = /\bjump\s+([A-Za-z_][A-Za-z0-9_]*)/g;
+  // Anchored to the start of the line (ignoring leading whitespace): a real
+  // `jump` command is always its own line, never embedded inside a `#`
+  // comment or inside spoken dialogue text, so this naturally excludes both.
+  const jumpLinePattern = /^\s*jump\s+([A-Za-z_][A-Za-z0-9_]*)/;
   for (let line = 0; line < document.lineCount; line++) {
     const text = document.lineAt(line).text;
-    jumpPattern.lastIndex = 0;
-    let match;
-    while ((match = jumpPattern.exec(text)) !== null) {
-      const targetName = match[1];
-      if (declaredLabels.has(targetName)) {
-        continue;
-      }
-      const nameStart = match.index + match[0].length - targetName.length;
-      const range = new vscode.Range(line, nameStart, line, nameStart + targetName.length);
-      diagnostics.push(new vscode.Diagnostic(
-        range,
-        `No "label ${targetName}" found in this file, so ctrl+click can't jump there.`,
-        vscode.DiagnosticSeverity.Warning
-      ));
+    const match = text.match(jumpLinePattern);
+    if (!match) {
+      continue;
     }
+    const targetName = match[1];
+    if (declaredLabels.has(targetName)) {
+      continue;
+    }
+    const nameStart = match[0].length - targetName.length;
+    const range = new vscode.Range(line, nameStart, line, nameStart + targetName.length);
+    diagnostics.push(new vscode.Diagnostic(
+      range,
+      `No "label ${targetName}" found in this file, so ctrl+click can't jump there.`,
+      vscode.DiagnosticSeverity.Warning
+    ));
   }
 
   diagnosticCollection.set(document.uri, diagnostics);
@@ -547,8 +550,10 @@ function activate(context) {
           const line = document.lineAt(position.line).text;
           const beforeWord = line.substring(0, wordRange.start.character);
 
-          // Only resolve a definition when the word directly follows `jump`.
-          if (!/\bjump\s+$/.test(beforeWord)) {
+          // Only resolve a definition when the line is a real `jump` command
+          // (anchored to line start), not the word "jump" inside a comment
+          // or inside spoken dialogue text.
+          if (!/^\s*jump\s+$/.test(beforeWord)) {
             return undefined;
           }
 
