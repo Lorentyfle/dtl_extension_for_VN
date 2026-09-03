@@ -8,10 +8,8 @@ How to use?
     2) Use DTL theme as it will provide full support over DTL files.
 
 
-Versions:
-    0.1.1
-        Suggestion of character names.
-        Most of the balises missing highlight.
-        Bug correction.
-    0.1.0
-        Syntax highlight.
+
+Important philosophy that can differ from using Dialogic on Godot:
+
+- This highlight chose to not consider to color '' as string as I simply use it for the english apostrophes. It would render the code impossible to read if it was done.
+- labels MUST not be setup with spaces or any kind of brakets.
