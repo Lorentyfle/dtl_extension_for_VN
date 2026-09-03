@@ -17,6 +17,7 @@
     { "include": "#flow" },
     { "include": "#variables" },
     { "include": "#dialogue" },
+    { "include": "#narration" },
     { "include": "#choices" },
     { "include": "#strings" },
     { "include": "#constants" },
@@ -92,21 +93,58 @@
       ]
     },
 
+    "balises": {
+      "comment": "Personalized/BBCode-style rich text tags used inside player-facing text: [b]bold[\\b], [i]italic[\\i], and any other custom effect tag like [MyEffect]text[\\MyEffect] - note the closing tag uses a literal backslash before the name, not a forward slash. The scope spans the whole tag including its content, so the theme's fontStyle actually renders the enclosed text bold/italic to match what Dialogic shows in-game. Safety net: if a matching '[\\name]' closer is never found, the span ends at end of line ('$' in the end alternation) instead of swallowing the rest of the file.",
+      "patterns": [
+        {
+          "name": "markup.bold.dtl",
+          "begin": "\\[b\\]",
+          "end": "(\\[\\x5Cb\\]|$)",
+          "patterns": [ { "include": "#variables" } ]
+        },
+        {
+          "name": "markup.italic.dtl",
+          "begin": "\\[i\\]",
+          "end": "(\\[\\x5Ci\\]|$)",
+          "patterns": [ { "include": "#variables" } ]
+        },
+        {
+          "name": "markup.custom-balise.dtl",
+          "comment": "Any other personalized balise, e.g. [Shake]text[\\Shake]. Reserved bracket commands (wait, audio, signal...) are excluded via the lookahead so they keep using #options as before.",
+          "begin": "\\[(?!(?:wait|wait_input|audio|voice|clear|background|style|signal|text_input|end_timeline)\\])([A-Za-z_][A-Za-z0-9_]*)\\]",
+          "end": "(\\[\\x5C\\1\\]|$)",
+          "patterns": [ { "include": "#variables" } ]
+        }
+      ]
+    },
+
     "dialogue": {
-      "comment": "Speaker line 'Name: text [inline=options] #id:xyz'. The spoken text is a begin/end region so inline markup like [pause=1.5] and {variable} references still highlight.",
+      "comment": "Speaker line 'Name: text [inline=options] #id:xyz'. The spoken text is a begin/end region so inline markup like [pause=1.5], [b]bold[\\b], and {variable} references still highlight.",
       "patterns": [
         { "name": "entity.name.character.dtl", "match": "^\\s*(?!(?:if|else|elif|set|label|while|jump)\\s*:)[A-Za-z_][A-Za-z0-9_]*(?=\\s*:)" },
         {
           "name": "string.unquoted.dialogue.dtl",
           "begin": "(?<=:)\\s",
           "end": "(?=#id:|$)",
-          "patterns": [ { "include": "#options" }, { "include": "#variables" } ]
+          "patterns": [ { "include": "#balises" }, { "include": "#options" }, { "include": "#variables" } ]
+        }
+      ]
+    },
+
+    "narration": {
+      "comment": "A line with no 'Character:' prefix is still spoken/narrated text in Dialogic - a nameless speaker gets the same treatment as a named one. Reuses #dialogue's text scope and nested patterns. The negative lookaheads exclude anything that is actually a comment, choice, bracket command, or flow/command keyword line, so those keep their own dedicated highlighting instead of being swallowed as narration.",
+      "patterns": [
+        {
+          "name": "string.unquoted.dialogue.dtl",
+          "begin": "^(?!\\s*$)(?!\\s*#)(?!\\s*-\\s)(?!\\s*\\[)(?!\\s*(if|else|elif|set|label|jump|while|join|leave|update|audio|do|return)\\b)(?!\\s*[A-Za-z_][A-Za-z0-9_]*\\s*:)",
+          "end": "(?=#id:|$)",
+          "patterns": [ { "include": "#balises" }, { "include": "#options" }, { "include": "#variables" } ]
         }
       ]
     },
 
     "choices": {
-      "comment": "'- choice text | [if ...] [else=...] #id:xyz'. The leading dash is punctuation; #id:, bracketed conditions and {variables} inside the choice text reuse the shared repositories.",
+      "comment": "'- choice text | [if ...] [else=...] #id:xyz'. The leading dash is punctuation; #id:, bracketed conditions, [b]balises[\\b], and {variables} inside the choice text reuse the shared repositories.",
       "patterns": [
         {
           "begin": "^(\\s*)(-)(\\s)",
@@ -118,6 +156,7 @@
           "patterns": [
             { "name": "punctuation.separator.choice.dtl", "match": "\\|" },
             { "include": "#translationid" },
+            { "include": "#balises" },
             { "include": "#options" },
             { "include": "#variables" }
           ]

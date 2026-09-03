@@ -32,6 +32,13 @@ const DTL_ENTRIES = [
     example: 'jump Laripo_starts_reading_the_documentation'
   },
   {
+    name: 'return',
+    type: 'command',
+    syntax: 'return',
+    description: 'Returns to the latest jump event or end the timeline (if no jump happened before).',
+    example: 'return'
+  },
+  {
     name: 'set',
     type: 'command',
     syntax: 'set {variable} = variable_to_set',
@@ -71,14 +78,24 @@ const DTL_ENTRIES = [
     type: 'bracket',
     syntax: '[wait ...]',
     description: 'Pauses the progress of the timeline for a given amount of time.',
-    example: '[wait 1.5] [wait time="1.0"]'
+    example: '[wait 1.5] [wait time="1.0"]',
+    variables: {
+      // variable_name : documentation
+      'time':'Time waited in second.',
+      'hide_text':'Is the text hidden during that time?',
+      'skippable':'Can this waiting period be skipped?'
+    }
   },
   {
     name: 'wait_input',
     type: 'bracket',
     syntax: '[wait_input ...]',
     description: 'Waits for user input before continuing the timeline.',
-    example: '[wait_input]'
+    example: '[wait_input]',
+    variables: {
+      // variable_name : documentation
+      "hide_text":"Is the text hidden while waiting for user input?"
+    }
   },
   {
     name: 'audio',
@@ -92,49 +109,93 @@ const DTL_ENTRIES = [
     type: 'bracket',
     syntax: '[voice ...]',
     description: 'Adds a voice event.',
-    example: '[voice path="res://assets/voices/Laripo_dialogueID_666.mp3"]'
+    example: '[voice path="res://assets/voices/Laripo_dialogueID_666.mp3"]',
+    variables: {
+      // variable_name : documentation
+      "path":"Path to access the voice audio file.",
+      "volume":"Path to access the manual tweaking of the volume of the given voice file.",
+      "bus":"On which bus the voice audio will be played on."
+    }
   },
   {
     name: 'clear',
     type: 'bracket',
     syntax: '[clear ...]',
     description: 'Clears the relevant dialogue/display state.',
-    example: '[clear time="1.0"]'
+    example: '[clear time="1.0"]',
+    variables: {
+      // variable_name : documentation
+      "time":"How much in the past should the memory be forgotten.",
+      "step":"I have no idea what it does yet. (true by default)", // TODO: ASK WHAT THIS DOES!
+      "text":"Is the text cleared? (true by default)",
+      "portraits":"Are the portraits cleared? (true by default)",
+      "music":"Is the audio cleared? (true by default)",
+      "background":"Is the background cleared? (true by default)",
+      "position":"Are the character positions cleared? (true by default)",
+      "style":"Is the style cleared? (true by default)",
+    }
   },
   {
     name: 'background',
     type: 'bracket',
     syntax: '[background ...]',
     description: 'Changes the background.',
-    example: '[background arg="res://assets/sprite/new_background.png" fade="0.0"]'
+    example: '[background arg="res://assets/sprite/new_background.png" fade="0.0"]',
+    variables: {
+      // variable_name : documentation
+      "arg":"Path to the background used. Here an image, a color or an argument (a string).",
+      "scene":"Path to the background used. Here a scene.",
+      "transition":"What kind of transition is used.",
+      "fade":"How long will the image fade.",
+      "wait":"Wait for the fade to finish?"
+    }
   },
   {
     name: 'style',
     type: 'bracket',
     syntax: '[style ...]',
     description: 'Changes the dialogic style used. The name needs to correspond to a setup style loaded in the extension.',
-    example: '[style name="default"]'
+    example: '[style name="default"]',
+    variables: {
+      // variable_name : documentation
+      "name":"Name of the style used."
+    }
   },
   {
     name: 'signal',
     type: 'bracket',
     syntax: '[signal ...]',
     description: 'Send a dialogic signal with given arguments.',
-    example: '[signal arg_type="dict" arg="{\"Amount\":100,\"Effect\":\"Rain\",\"Nature\":\"meteo\",\"Windx\":20.0,\"Windy\":1.0}"]'
+    example: '[signal arg_type="dict" arg="{\"Amount\":100,\"Effect\":\"Rain\",\"Nature\":\"meteo\",\"Windx\":20.0,\"Windy\":1.0}"]',
+    variables: {
+      // variable_name : documentation
+      "arg_type":"What is the expected format of the argument sent with the Dialogic signal?",
+      "arg":"Argument sent with the Dialogic signal."
+    }
   },
   {
     name: 'text_input',
     type: 'bracket',
     syntax: '[text_input ...]',
     description: 'Make a text input prompt appear that would save the data in a variable.',
-    example: '[text_input text="Solve: 4x - 67 = 0" var="_butterfly_effect.part1.introduction.answer_equation1" placeholder="No idea" allow_empty="true"]'
+    example: '[text_input text="Solve: 4x - 67 = 0" var="_butterfly_effect.part1.introduction.answer_equation1" placeholder="No idea" allow_empty="true"]',
+    variables: { 
+      // variable_name : documentation
+      "text":"Text shown for entering the text input.",
+      "var" :"Variable that will store the result of the input.",
+      "placeholder":"Text shown inside the textbox if nothing is filled.",
+      "default":"Text outputed if nothing is filled.",
+      "allow_empty":"Can this text be submitted empty?"
+    }
   },
   {
     name: 'end_timeline',
     type: 'bracket',
     syntax: '[end_timeline]',
     description: 'Ends the current timeline.',
-    example: '[end_timeline]'
+    example: '[end_timeline]',
+    variables: {
+    }
   }
 ];
 // =============================================================================
@@ -282,30 +343,68 @@ function createCharacterCompletion(name) {
 }
 
 /**
- * True when `beforeCursor` sits inside the free-text part of a
- * `Character: spoken text` line (i.e. after the colon), and is not inside
- * an open `{variable}` block (which has its own completion handling).
- *
- * Limitation: like the rest of this provider, it does not fully track
- * `[option]` blocks that span multiple tokens (e.g. `[wait time=1.5 se`) -
- * only the bracket-completion check earlier in provideCompletionItems
- * catches those. This mirrors the previous behavior, just replacing a
- * silent `undefined` with useful word suggestions.
+ * True when `beforeCursor` sits inside spoken/narrated text - either after
+ * a `Character:` prefix, or on a bare narration line with no character
+ * name at all (Dialogic treats plain text with no prefix as dialogue too,
+ * spoken by a nameless narrator). Also false while inside an open
+ * `{variable}` block, which has its own completions.
  *
  * @param {string} beforeCursor
  * @returns {boolean}
  */
 function isInsideDialogueText(beforeCursor) {
   const colonMatch = beforeCursor.match(/^\s*[A-Za-z_][A-Za-z0-9_]*\s*:/);
-  if (!colonMatch) {
+
+  let textStart;
+  if (colonMatch) {
+    textStart = colonMatch[0].length;
+  } else if (isBareNarrationLine(beforeCursor)) {
+    textStart = 0;
+  } else {
     return false;
   }
-  const afterColon = beforeCursor.slice(colonMatch[0].length);
-  const lastOpenBrace = afterColon.lastIndexOf('{');
-  const lastCloseBrace = afterColon.lastIndexOf('}');
+
+  const spokenPart = beforeCursor.slice(textStart);
+  const lastOpenBrace = spokenPart.lastIndexOf('{');
+  const lastCloseBrace = spokenPart.lastIndexOf('}');
   // If the last '{' comes after the last '}', we are inside an open
   // {variable} block and should not offer word suggestions there.
   return lastOpenBrace <= lastCloseBrace;
+}
+
+/**
+ * A line with no `Character:` prefix still counts as spoken/narrated text
+ * in Dialogic, unless it's actually something else: blank, a comment, a
+ * choice, a standalone bracket command, or a flow/command keyword line.
+ * Mirrors the `#narration` rule in the TextMate grammar so the editor and
+ * the syntax highlighting agree on what counts as dialogue text.
+ *
+ * Known limitation: a line whose very first word happens to match a
+ * keyword (e.g. spoken text that starts with the word "return") is
+ * ambiguous with an actual command and is treated as a command line here,
+ * same as in the grammar - this mirrors a real ambiguity in the language
+ * itself, not something introduced by this check.
+ *
+ * @param {string} beforeCursor
+ * @returns {boolean}
+ */
+function isBareNarrationLine(beforeCursor) {
+  if (/^\s*$/.test(beforeCursor)) {
+    return false; // nothing typed yet on this line
+  }
+  if (/^\s*#/.test(beforeCursor)) {
+    return false; // comment
+  }
+  if (/^\s*-\s/.test(beforeCursor)) {
+    return false; // choice
+  }
+  if (/^\s*\[/.test(beforeCursor)) {
+    return false; // standalone bracket command, e.g. [wait 1]
+  }
+  if (/^\s*(if|else|elif|set|label|jump|while|join|leave|update|audio|do|return)\b/.test(beforeCursor)) {
+    return false; // flow/command keyword line
+  }
+  return true;
 }
 
 /**
