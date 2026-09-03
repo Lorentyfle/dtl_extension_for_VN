@@ -15,8 +15,12 @@
     "languages": [
       {
         "id": "dtl",
-        "aliases": ["DTL"],
-        "extensions": [".dtl"],
+        "aliases": [
+          "DTL"
+        ],
+        "extensions": [
+          ".dtl"
+        ],
         "configuration": "./language-configuration.json",
         "icon": {
           "light": "./icons/dtl.svg",
@@ -39,5 +43,8 @@
         "path": "./themes/dtl-color-theme.json"
       }
     ]
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.9.2"
   }
 }
