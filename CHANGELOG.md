@@ -19,3 +19,4 @@
 - Add while to the commands.
 - Documentation shown for dialogic commands.
 - Recognize text_input command.
+- Autocomplete working for commands and characters + specific join | leave and update have personalize autocomplete.
