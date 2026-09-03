@@ -10,6 +10,7 @@
     { "include": "#audio"},
     { "include": "#clear"},
     { "include": "#images"},
+    { "include": "#text_input"},
     { "include": "#end_timeline"},
     { "include": "#options" },
     { "include": "#commands" },
@@ -61,7 +62,7 @@
     "flow": {
       "comment": "if / else / elif / set / label / jump / not / and / or / in all share keyword.control.flow.dtl so a theme colors them identically. label/jump additionally tag their target name with entity.name.label.dtl, mirroring how #commands tags character names after join/update/leave.",
       "patterns": [
-        { "name": "keyword.control.flow.dtl", "match": "\\b(if|else|elif|set|label|jump|not|or|and|in)\\b" },
+        { "name": "keyword.control.flow.dtl", "match": "\\b(if|else|elif|set|label|jump|while|not|or|and|in)\\b" },
         { "name": "entity.name.label.dtl", "match": "(?<=\\b(label|jump)\\s)[A-Za-z_][A-Za-z0-9_]*" },
         { "name": "punctuation.section.block.dtl", "match": ":\\s*$" }
       ]
@@ -94,7 +95,7 @@
     "dialogue": {
       "comment": "Speaker line 'Name: text [inline=options] #id:xyz'. The spoken text is a begin/end region so inline markup like [pause=1.5] and {variable} references still highlight.",
       "patterns": [
-        { "name": "entity.name.character.dtl", "match": "^\\s*(?!(?:if|else|elif|set|label|jump)\\s*:)[A-Za-z_][A-Za-z0-9_]*(?=\\s*:)" },
+        { "name": "entity.name.character.dtl", "match": "^\\s*(?!(?:if|else|elif|set|label|while|jump)\\s*:)[A-Za-z_][A-Za-z0-9_]*(?=\\s*:)" },
         {
           "name": "string.unquoted.dialogue.dtl",
           "begin": "(?<=:)\\s",
@@ -158,6 +159,28 @@
           "name": "meta.options.dtl",
           "begin": "\\[\\b(wait|wait_input)\\b\\b",
           "beginCaptures": { "0": { "name": "meta.wait.dtl" } },
+          "end": "\\]",
+          "endCaptures": { "0": { "name": "punctuation.definition.tag.end.dtl" } },
+          "patterns": [
+            { "name": "keyword.control.choice.dtl", "match": "\\b(if|elif|else)\\b" },
+            { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=)" },
+            { "include": "#operator" },
+            { "include": "#strings" },
+            { "include": "#numbers" },
+            { "include": "#constants" },
+            { "include": "#variables" }
+          ]
+        }
+      ]
+    },
+
+    "text_input": {
+      "comment": "[text_input] flag type.",
+      "patterns": [
+        {
+          "name": "meta.text_input.dtl",
+          "begin": "\\[text_input\\b",
+          "beginCaptures": { "0": { "name": "meta.text_input.dtl" } },
           "end": "\\]",
           "endCaptures": { "0": { "name": "punctuation.definition.tag.end.dtl" } },
           "patterns": [

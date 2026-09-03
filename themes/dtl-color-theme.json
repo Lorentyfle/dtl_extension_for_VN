@@ -49,6 +49,10 @@
       "settings": { "foreground": "#f44747" }
     },
     {
+      "scope": "meta.text_input.dtl",
+      "settings": { "foreground": "#ff53a9" }
+    },
+    {
       "scope": "variable.parameter.signal.dtl",
       "settings": { "foreground": "#f28b82" }
     },

@@ -18,6 +18,281 @@
 // -----------------------------------------------------------------------------
 
 const vscode = require('vscode');
+const DTL_ENTRIES = [
+  {
+    name: 'label',
+    type: 'command',
+    syntax: 'label NAME',
+    description: 'Create a label on the timeline that can be reached with a jump command. A good use of label would be for a scene change or loop.',
+    example: 'label Laripo_starts_reading_the_documentation'
+  },
+  {
+    name: 'jump',
+    type: 'command',
+    syntax: 'jump NAME',
+    description: 'Jumps to a given label written after.',
+    example: 'jump Laripo_starts_reading_the_documentation'
+  },
+  {
+    name: 'set',
+    type: 'command',
+    syntax: 'set {variable} = variable_to_set',
+    description: 'Command that sets a variable from Dialogic or a global variable towards a given value. Increments can also be accepted.',
+    example: 'set {chapter} = 4'
+  },
+  {
+    name: 'join',
+    type: 'command',
+    syntax: 'join character position [...]',
+    description: 'Make a character join on a given position with a given extra information.',
+    example: 'join Laripo center [extra_data="set Emotion/Happy"]'
+  },
+  {
+    name: 'update',
+    type: 'command',
+    syntax: 'update character position [...]',
+    description: 'Update a joined character on a given position with a given extra information.',
+    example: 'update Laripo center [extra_data="set Emotion/Happy"]'
+  },
+  {
+    name: 'leave',
+    type: 'command',
+    syntax: 'leave character [...]',
+    description: 'Make a character leave the scene with a given extra information.',
+    example: 'leave Laripo [animation="Slide To Left"]'
+  },
+  {
+    name: 'do',
+    type: 'command',
+    syntax: 'do Global.function()',
+    description: 'Run a given function on a global script.',
+    example: 'do VnLibrary.apply_emotions()'
+  },
+  {
+    name: 'wait',
+    type: 'bracket',
+    syntax: '[wait ...]',
+    description: 'Pauses the progress of the timeline for a given amount of time.',
+    example: '[wait 1.5] [wait time="1.0"]'
+  },
+  {
+    name: 'wait_input',
+    type: 'bracket',
+    syntax: '[wait_input ...]',
+    description: 'Waits for user input before continuing the timeline.',
+    example: '[wait_input]'
+  },
+  {
+    name: 'audio',
+    type: 'command',
+    syntax: 'audio KIND "path"',
+    description: 'Adds an audio event, kind is the kind of audio used, for example music. It was set inside Dialogic.',
+    example: 'audio music "res://assets/ost/my_music.mp3"'
+  },
+  {
+    name: 'voice',
+    type: 'bracket',
+    syntax: '[voice ...]',
+    description: 'Adds a voice event.',
+    example: '[voice path="res://assets/voices/Laripo_dialogueID_666.mp3"]'
+  },
+  {
+    name: 'clear',
+    type: 'bracket',
+    syntax: '[clear ...]',
+    description: 'Clears the relevant dialogue/display state.',
+    example: '[clear time="1.0"]'
+  },
+  {
+    name: 'background',
+    type: 'bracket',
+    syntax: '[background ...]',
+    description: 'Changes the background.',
+    example: '[background arg="res://assets/sprite/new_background.png" fade="0.0"]'
+  },
+  {
+    name: 'style',
+    type: 'bracket',
+    syntax: '[style ...]',
+    description: 'Changes the dialogic style used. The name needs to correspond to a setup style loaded in the extension.',
+    example: '[style name="default"]'
+  },
+  {
+    name: 'signal',
+    type: 'bracket',
+    syntax: '[signal ...]',
+    description: 'Send a dialogic signal with given arguments.',
+    example: '[signal arg_type="dict" arg="{"Amount":100,"Effect":"Rain","Nature":"meteo","Windx":20.0,"Windy":1.0}"]'
+  },
+  {
+    name: 'text_input',
+    type: 'bracket',
+    syntax: '[text_input ...]',
+    description: 'Make a text input prompt appear that would save the data in a variable.',
+    example: '[text_input text="Solve: 4x - 67 = 0" var="_butterfly_effect.part1.introduction.answer_equation1" placeholder="No idea" allow_empty="true"]'
+  },
+  {
+    name: 'end_timeline',
+    type: 'bracket',
+    syntax: '[end_timeline]',
+    description: 'Ends the current timeline.',
+    example: '[end_timeline]'
+  }
+];
+
+const hoverProvider = vscode.languages.registerHoverProvider('dtl', {
+  provideHover(document, position) {
+    const line = document.lineAt(position.line).text;
+    // ---------------------------------------------------------
+    // Normal commands: label / jump / etc.
+    // ---------------------------------------------------------
+    const wordRange = document.getWordRangeAtPosition(position);
+    if (wordRange) {
+      const word = document.getText(wordRange);
+      const entry = DTL_ENTRIES.find(
+        (entry) => entry.name === word
+      );
+      if (entry) {
+        const markdown = new vscode.MarkdownString();
+        markdown.appendMarkdown(`**${entry.name}**\n\n`);
+        markdown.appendMarkdown(`${entry.description}\n\n`);
+        markdown.appendMarkdown(`**Syntax:** \`${entry.syntax}\`\n\n`);
+        if (entry.example) {
+          markdown.appendMarkdown('**Example:**\n\n');
+          markdown.appendCodeblock(entry.example, 'dtl');
+        }
+        return new vscode.Hover(markdown, wordRange);
+      }
+    }
+    // ---------------------------------------------------------
+    // Bracket commands: [wait], [audio], [voice], etc.
+    // ---------------------------------------------------------
+    const bracketRegex = /\[([A-Za-z_][A-Za-z0-9_]*)/g;
+    let match;
+    while ((match = bracketRegex.exec(line)) !== null) {
+      const start = match.index;
+      const end = start + match[0].length;
+      if (
+        position.character >= start &&
+        position.character <= end
+      ) {
+        const commandName = match[1];
+        const entry = DTL_ENTRIES.find(
+          (entry) => entry.name === commandName
+        );
+        if (!entry) {
+          return undefined;
+        }
+        const markdown = new vscode.MarkdownString();
+        markdown.appendMarkdown(`**[${entry.name}]**\n\n`);
+        markdown.appendMarkdown(`${entry.description}\n\n`);
+        markdown.appendMarkdown(`**Syntax:** \`${entry.syntax}\`\n\n`);
+        if (entry.example) {
+          markdown.appendMarkdown('**Example:**\n\n');
+          markdown.appendCodeblock(entry.example, 'dtl');
+        }
+        const range = new vscode.Range(
+          position.line,
+          start,
+          position.line,
+          end
+        );
+        return new vscode.Hover(markdown, range);
+      }
+    }
+
+    return undefined;
+  }
+});
+
+context.subscriptions.push(hoverProvider);
+
+const provider = vscode.languages.registerCompletionItemProvider('dtl', {
+  provideCompletionItems(document, position) {
+    const line = document.lineAt(position.line).text;
+    const beforeCursor = line.substring(0, position.character);
+    const items = [];
+    // ---------------------------------------------------------
+    // Existing character suggestions
+    // ---------------------------------------------------------
+    for (const name of cachedCharacterNames) {
+      const item = new vscode.CompletionItem(
+        name,
+        vscode.CompletionItemKind.EnumMember
+      );
+      item.detail = 'DTL character (from project.godot)';
+      items.push(item);
+    }
+    // ---------------------------------------------------------
+    // Bracket commands
+    //
+    // Suggest only when the user has just opened a bracket or
+    // is typing the name of a bracket command.
+    // ---------------------------------------------------------
+    const bracketMatch = beforeCursor.match(
+      /\[([A-Za-z_][A-Za-z0-9_]*)?$/
+    );
+    if (bracketMatch) {
+      const prefix = bracketMatch[1] || '';
+      for (const entry of DTL_ENTRIES) {
+        if (entry.type !== 'bracket') {
+          continue;
+        }
+        if (!entry.name.startsWith(prefix)) {
+          continue;
+        }
+        const item = new vscode.CompletionItem(
+          entry.name,
+          vscode.CompletionItemKind.Keyword
+        );
+        item.detail = entry.syntax;
+        item.documentation = new vscode.MarkdownString(
+          `${entry.description}\n\n` +
+          (entry.example
+            ? `**Example:**\n\n\`\`\`dtl\n${entry.example}\n\`\`\``
+            : '')
+        );
+        // Replace the text after "[" rather than inserting another
+        // complete command somewhere else.
+        item.insertText = entry.name;
+        items.push(item);
+      }
+    }
+    // ---------------------------------------------------------
+    // Normal DTL commands
+    // ---------------------------------------------------------
+    const commandMatch = beforeCursor.match(
+      /(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)$/
+    );
+    if (commandMatch) {
+      const prefix = commandMatch[1];
+      for (const entry of DTL_ENTRIES) {
+        if (entry.type !== 'command') {
+          continue;
+        }
+        if (!entry.name.startsWith(prefix)) {
+          continue;
+        }
+        const item = new vscode.CompletionItem(
+          entry.name,
+          vscode.CompletionItemKind.Keyword
+        );
+        item.detail = entry.syntax;
+        item.documentation = new vscode.MarkdownString(
+          `${entry.description}\n\n` +
+          (entry.example
+            ? `**Example:**\n\n\`\`\`dtl\n${entry.example}\n\`\`\``
+            : '')
+        );
+        items.push(item);
+      }
+    }
+    return items;
+  }
+});
+
+
+
 
 /**
  * In-memory cache of character names found in the workspace's project.godot.
@@ -106,7 +381,7 @@ function activate(context) {
     provideCompletionItems() {
       return cachedCharacterNames.map((name) => {
         const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.EnumMember);
-        item.detail = 'DTL character (from project.godot)';
+        item.detail = 'Dialogic character (read from project.godot)';
         return item;
       });
     },

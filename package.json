@@ -1,8 +1,8 @@
 {
   "name": "dtl-reader",
   "displayName": "DTL Reader",
-  "description": "Syntax highlighting for DTL (Dialogic2) files",
-  "version": "0.1.1",
+  "description": "Syntax highlighting for Dialogic2 TimeLine (.dtl) files",
+  "version": "0.1.2",
   "publisher": "lorentyfle",
   "icon": "./icons/favicon.png",
   "engines": {
@@ -17,9 +17,6 @@
     "Themes"
   ],
   "main": "./extension.js",
-  "activationEvents": [
-    "onLanguage:dtl"
-  ],
   "contributes": {
     "languages": [
       {
