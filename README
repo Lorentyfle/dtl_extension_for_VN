@@ -1,3 +1,16 @@
 # DTL Reader
 
 Syntax highlighting support for DTL visual novel scripts.
+
+How to use?
+
+    1) Add the DTL reader package. It will provide partial identification of DTL file.
+    2) Use DTL theme as it will provide full support over DTL files.
+
+
+Versions:
+    0.1.1
+        Suggestion of character names.
+        Bug correction.
+    0.1.0
+        Syntax highlight.

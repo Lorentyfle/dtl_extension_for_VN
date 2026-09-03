@@ -30,8 +30,19 @@
       "settings": { "foreground": "#e5c07b", "fontStyle": "bold" }
     },
     {
+      "comment": "Spoken dialogue text is left uncolored on purpose: it inherits editor.foreground (#d4d4d4) like plain prose, instead of a distinct string color. Add a 'foreground' here if you'd rather it stood out.",
       "scope": "string.unquoted.dialogue.dtl",
-      "settings": { "foreground": "#d4c9a8" }
+      "settings": {  "foreground": "#ffe9d4" }
+    },
+    {
+      "comment": "Choice wording ('- text') gets its own color so it reads as content rather than plain code text.",
+      "scope": "markup.list.choice.dtl",
+      "settings": { "foreground": "#83cc4f" }
+    },
+    {
+      "comment": "Target name after 'label' / 'jump'.",
+      "scope": "entity.name.label.dtl",
+      "settings": { "foreground": "#e0af68", "fontStyle": "bold" }
     },
     {
       "scope": ["punctuation.definition.tag.begin.signal.dtl", "punctuation.definition.tag.end.signal.dtl"],
@@ -59,7 +70,7 @@
     },
     {
       "scope": "punctuation.separator.choice.dtl",
-      "settings": { "foreground": "#808080" }
+      "settings": { "foreground": "#7eb065" }
     },
     {
       "scope": ["punctuation.definition.variable.begin.dtl", "punctuation.definition.variable.end.dtl"],

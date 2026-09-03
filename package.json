@@ -1,8 +1,8 @@
 {
   "name": "dtl-reader",
   "displayName": "DTL Reader",
-  "description": "Syntax highlighting, file icon and color theme for DTL (Dialogic2) files",
-  "version": "0.1.0",
+  "description": "Syntax highlighting for DTL (Dialogic2) files",
+  "version": "0.1.1",
   "publisher": "lorentyfle",
   "engines": {
     "vscode": "^1.85.0"
@@ -14,6 +14,10 @@
   "categories": [
     "Programming Languages",
     "Themes"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:dtl"
   ],
   "contributes": {
     "languages": [

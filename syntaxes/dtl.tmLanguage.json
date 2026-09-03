@@ -54,8 +54,10 @@
     },
 
     "flow": {
+      "comment": "if / else / elif / set / label / jump / not / and / or all share keyword.control.flow.dtl so a theme colors them identically. label/jump additionally tag their target name with entity.name.label.dtl, mirroring how #commands tags character names after join/update/leave.",
       "patterns": [
-        { "name": "keyword.control.flow.dtl", "match": "\\b(if|else|set)\\b" },
+        { "name": "keyword.control.flow.dtl", "match": "\\b(if|else|elif|set|label|jump|not|or|and)\\b" },
+        { "name": "entity.name.label.dtl", "match": "(?<=\\b(label|jump)\\s)[A-Za-z_][A-Za-z0-9_]*" },
         { "name": "punctuation.section.block.dtl", "match": ":\\s*$" }
       ]
     },
@@ -85,20 +87,20 @@
     },
 
     "dialogue": {
-      "comment": "Speaker line 'Name: text [inline=options] #id:xyz'. The spoken text is a begin/end region so inline markup like [pause=1.5] still highlights.",
+      "comment": "Speaker line 'Name: text [inline=options] #id:xyz'. The spoken text is a begin/end region so inline markup like [pause=1.5] and {variable} references still highlight.",
       "patterns": [
         { "name": "entity.name.character.dtl", "match": "^\\s*[A-Za-z_][A-Za-z0-9_]*(?=\\s*:)" },
         {
           "name": "string.unquoted.dialogue.dtl",
           "begin": "(?<=:)\\s",
           "end": "(?=#id:|$)",
-          "patterns": [ { "include": "#options" } ]
+          "patterns": [ { "include": "#options" }, { "include": "#variables" } ]
         }
       ]
     },
 
     "choices": {
-      "comment": "'- choice text | [if ...] [else=...]'. Only the leading dash is punctuation; conditions inside brackets reuse #options.",
+      "comment": "'- choice text | [if ...] [else=...] #id:xyz'. The leading dash is punctuation; #id:, bracketed conditions and {variables} inside the choice text reuse the shared repositories.",
       "patterns": [
         {
           "begin": "^(\\s*)(-)(\\s)",
@@ -109,6 +111,7 @@
           "name": "markup.list.choice.dtl",
           "patterns": [
             { "name": "punctuation.separator.choice.dtl", "match": "\\|" },
+            { "include": "#translationid" },
             { "include": "#options" },
             { "include": "#variables" }
           ]
