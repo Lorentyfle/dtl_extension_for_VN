@@ -6,7 +6,10 @@
 // - Character autocomplete from project.godot
 // - Command autocomplete
 // - Contextual character/position autocomplete for join/leave/update
+// - Word-based autocomplete for spoken dialogue text
 // - Hover documentation for commands
+// - Go to Definition for `jump NAME` -> `label NAME`
+// - Diagnostics warning about `jump` targets with no matching `label`
 // -----------------------------------------------------------------------------
 
 const vscode = require('vscode');
@@ -169,6 +172,15 @@ const DTL_POSITIONS = [
  * @type {string[]}
  */
 let cachedCharacterNames = [];
+
+/**
+ * Diagnostic collection used to warn about `jump` targets that have no
+ * matching `label` declaration in the same document.
+ *
+ * @type {vscode.DiagnosticCollection}
+ */
+let diagnosticCollection;
+
 /**
  * Extract character names from project.godot.
  *
@@ -267,6 +279,145 @@ function createCharacterCompletion(name) {
   const item = new vscode.CompletionItem(name,vscode.CompletionItemKind.EnumMember);
   item.detail = 'Dialogic character (from project.godot)';
   return item;
+}
+
+/**
+ * True when `beforeCursor` sits inside the free-text part of a
+ * `Character: spoken text` line (i.e. after the colon), and is not inside
+ * an open `{variable}` block (which has its own completion handling).
+ *
+ * Limitation: like the rest of this provider, it does not fully track
+ * `[option]` blocks that span multiple tokens (e.g. `[wait time=1.5 se`) -
+ * only the bracket-completion check earlier in provideCompletionItems
+ * catches those. This mirrors the previous behavior, just replacing a
+ * silent `undefined` with useful word suggestions.
+ *
+ * @param {string} beforeCursor
+ * @returns {boolean}
+ */
+function isInsideDialogueText(beforeCursor) {
+  const colonMatch = beforeCursor.match(/^\s*[A-Za-z_][A-Za-z0-9_]*\s*:/);
+  if (!colonMatch) {
+    return false;
+  }
+  const afterColon = beforeCursor.slice(colonMatch[0].length);
+  const lastOpenBrace = afterColon.lastIndexOf('{');
+  const lastCloseBrace = afterColon.lastIndexOf('}');
+  // If the last '{' comes after the last '}', we are inside an open
+  // {variable} block and should not offer word suggestions there.
+  return lastOpenBrace <= lastCloseBrace;
+}
+
+/**
+ * Collect every unique "word" (letters, apostrophes, hyphens - so accented
+ * names and contractions like "don't" work too) already used anywhere in
+ * the document. Used to power VS Code-style word-based suggestions for
+ * spoken dialogue text.
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {string[]}
+ */
+function collectDocumentWords(document) {
+  const wordPattern = /[\p{L}][\p{L}'\u2019-]*/gu;
+  const words = new Set();
+  const text = document.getText();
+  let match;
+  while ((match = wordPattern.exec(text)) !== null) {
+    if (match[0].length > 1) {
+      words.add(match[0]);
+    }
+  }
+  return Array.from(words);
+}
+
+/**
+ * Build Text completion items from words already used in the document,
+ * filtered by whatever word fragment is currently being typed.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {string} beforeCursor
+ * @returns {vscode.CompletionItem[]}
+ */
+function createWordSuggestions(document, beforeCursor) {
+  const prefixMatch = beforeCursor.match(/[\p{L}'\u2019-]*$/u);
+  const prefix = (prefixMatch ? prefixMatch[0] : '').toLowerCase();
+
+  const items = [];
+  for (const word of collectDocumentWords(document)) {
+    if (prefix && !word.toLowerCase().startsWith(prefix)) {
+      continue;
+    }
+    items.push(new vscode.CompletionItem(word, vscode.CompletionItemKind.Text));
+  }
+  return items;
+}
+
+// =============================================================================
+// LABEL / JUMP HELPERS
+// =============================================================================
+
+/**
+ * Find the `label NAME` declaration matching a jump target.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {string} labelName
+ * @returns {vscode.Location | undefined}
+ */
+function findLabelLocation(document, labelName) {
+  const labelDeclaration = new RegExp(`^\\s*label\\s+(${labelName})\\b`);
+  for (let line = 0; line < document.lineCount; line++) {
+    const text = document.lineAt(line).text;
+    const match = labelDeclaration.exec(text);
+    if (match) {
+      const nameStart = match.index + match[0].length - match[1].length;
+      return new vscode.Location(document.uri, new vscode.Position(line, nameStart));
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Re-scan a `.dtl` document and flag every `jump NAME` whose target has no
+ * matching `label NAME` anywhere in the same file, so a broken jump shows
+ * up as a warning even when it can't be resolved by "Go to Definition".
+ *
+ * @param {vscode.TextDocument} document
+ */
+function updateJumpDiagnostics(document) {
+  if (document.languageId !== 'dtl') {
+    return;
+  }
+
+  const declaredLabels = new Set();
+  for (let line = 0; line < document.lineCount; line++) {
+    const match = document.lineAt(line).text.match(/^\s*label\s+([A-Za-z_][A-Za-z0-9_]*)/);
+    if (match) {
+      declaredLabels.add(match[1]);
+    }
+  }
+
+  const diagnostics = [];
+  const jumpPattern = /\bjump\s+([A-Za-z_][A-Za-z0-9_]*)/g;
+  for (let line = 0; line < document.lineCount; line++) {
+    const text = document.lineAt(line).text;
+    jumpPattern.lastIndex = 0;
+    let match;
+    while ((match = jumpPattern.exec(text)) !== null) {
+      const targetName = match[1];
+      if (declaredLabels.has(targetName)) {
+        continue;
+      }
+      const nameStart = match.index + match[0].length - targetName.length;
+      const range = new vscode.Range(line, nameStart, line, nameStart + targetName.length);
+      diagnostics.push(new vscode.Diagnostic(
+        range,
+        `No "label ${targetName}" found in this file, so ctrl+click can't jump there.`,
+        vscode.DiagnosticSeverity.Warning
+      ));
+    }
+  }
+
+  diagnosticCollection.set(document.uri, diagnostics);
 }
 
 // =============================================================================
@@ -375,6 +526,55 @@ function activate(context) {
       }
     );
   context.subscriptions.push(hoverProvider);
+  // ===========================================================================
+  // DEFINITION PROVIDER (ctrl+click / F12 on a `jump NAME` target)
+  // ===========================================================================
+  const definitionProvider =
+    vscode.languages.registerDefinitionProvider(
+      'dtl',
+      {
+        provideDefinition(document, position) {
+          const wordRange =
+            document.getWordRangeAtPosition(
+              position,
+              /[A-Za-z_][A-Za-z0-9_]*/
+            );
+
+          if (!wordRange) {
+            return undefined;
+          }
+
+          const line = document.lineAt(position.line).text;
+          const beforeWord = line.substring(0, wordRange.start.character);
+
+          // Only resolve a definition when the word directly follows `jump`.
+          if (!/\bjump\s+$/.test(beforeWord)) {
+            return undefined;
+          }
+
+          const labelName = document.getText(wordRange);
+          return findLabelLocation(document, labelName);
+        }
+      }
+    );
+  context.subscriptions.push(definitionProvider);
+  // ===========================================================================
+  // DIAGNOSTICS (warn when a `jump` target has no matching `label`)
+  // ===========================================================================
+  diagnosticCollection = vscode.languages.createDiagnosticCollection('dtl');
+  context.subscriptions.push(diagnosticCollection);
+
+  vscode.workspace.textDocuments.forEach(updateJumpDiagnostics);
+
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument(updateJumpDiagnostics)
+  );
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument(event => updateJumpDiagnostics(event.document))
+  );
+  context.subscriptions.push(
+    vscode.workspace.onDidCloseTextDocument(document => diagnosticCollection.delete(document.uri))
+  );
   // ===========================================================================
   // COMPLETION PROVIDER
   // ===========================================================================
@@ -517,6 +717,12 @@ function activate(context) {
               }
             }
             return items;
+          }
+          // =========================================================================
+          // DIALOGUE TEXT (word-based suggestions, VS Code "txt" style)
+          // =========================================================================
+          if (isInsideDialogueText(beforeCursor)) {
+            return createWordSuggestions(document, beforeCursor);
           }
           /// Fall back
           for (const name of cachedCharacterNames) {

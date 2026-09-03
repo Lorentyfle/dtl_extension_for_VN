@@ -5,7 +5,7 @@
 - Make character suggestion part of the normal suggestion in the text.
 - Vscode suggestion similar to txt for dialogue text.
 - Markdown balises highlight.
-- ctrl+click on the jump label moves toward the position of the label.
+
 - Bug: the color of the choice continues even after the | where it should stop.
 - if `[wait]` is inside dialogue text it will not have good color.
 
@@ -20,3 +20,7 @@
 - Documentation shown for dialogic commands.
 - Recognize text_input command.
 - Autocomplete working for commands and characters + specific join | leave and update have personalize autocomplete.
+## [0.1.3] - 2026-09-04
+- Autocomplete working in the dialogue section.
+- ctrl+click on the jump label moves toward the position of the label.
+
