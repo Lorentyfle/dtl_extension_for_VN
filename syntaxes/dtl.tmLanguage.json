@@ -94,38 +94,38 @@
     },
 
     "balises": {
-      "comment": "BBCode-style rich text tags used inside player-facing text: [b]bold[/b], [i]italic[/i], [u]underline[/u], [s]strikethrough[/s], and any other custom effect tag like [MyEffect]text[/MyEffect]. Each opening tag only matches if a lookahead confirms its matching closer exists later on the SAME line - if no closer is found, nothing highlights here at all (the brackets stay plain text), so the tag's highlighting is always strictly the region between the two tags and never spills onto the rest of the line. An unclosed tag is instead caught by the whole-line diagnostic in extension.js.",
+      "comment": "BBCode-style rich text tags used inside player-facing text: [b]bold[/b], [i]italic[/i], [u]underline[/u], [s]strikethrough[/s], and any other custom effect tag like [MyEffect]text[/MyEffect]. Each opening tag only matches if a lookahead confirms its matching closer exists later on the SAME line - if no closer is found, nothing highlights here at all (the brackets stay plain text), so the tag's highlighting is always strictly the region between the two tags and never spills onto the rest of the line. An unclosed tag is instead caught by the whole-line diagnostic in extension.js. Each rule includes #balises itself so tags can nest/combine, e.g. [b][i]bold italic[/i][/b] - the theme has matching combined-scope rules for every 2-tag pairing so both effects actually render together; 3+ levels of nesting will fall back to showing just the innermost tag's style.",
       "patterns": [
         {
           "name": "markup.bold.dtl",
           "begin": "\\[b\\](?=[^\\n]*\\[/b\\])",
           "end": "\\[/b\\]",
-          "patterns": [ { "include": "#variables" } ]
+          "patterns": [ { "include": "#balises" }, { "include": "#variables" } ]
         },
         {
           "name": "markup.italic.dtl",
           "begin": "\\[i\\](?=[^\\n]*\\[/i\\])",
           "end": "\\[/i\\]",
-          "patterns": [ { "include": "#variables" } ]
+          "patterns": [ { "include": "#balises" }, { "include": "#variables" } ]
         },
         {
           "name": "markup.underline.dtl",
           "begin": "\\[u\\](?=[^\\n]*\\[/u\\])",
           "end": "\\[/u\\]",
-          "patterns": [ { "include": "#variables" } ]
+          "patterns": [ { "include": "#balises" }, { "include": "#variables" } ]
         },
         {
           "name": "markup.strikethrough.dtl",
           "begin": "\\[s\\](?=[^\\n]*\\[/s\\])",
           "end": "\\[/s\\]",
-          "patterns": [ { "include": "#variables" } ]
+          "patterns": [ { "include": "#balises" }, { "include": "#variables" } ]
         },
         {
           "name": "markup.custom-balise.dtl",
           "comment": "Any other personalized balise, e.g. [Shake]text[/Shake]. Reserved bracket commands (wait, audio, signal...) are excluded via the lookahead so they keep using #options as before.",
           "begin": "\\[(?!(?:wait|wait_input|audio|voice|clear|background|style|signal|text_input|end_timeline)\\])([A-Za-z_][A-Za-z0-9_]*)\\](?=[^\\n]*\\[/\\1\\])",
           "end": "\\[/\\1\\]",
-          "patterns": [ { "include": "#variables" } ]
+          "patterns": [ { "include": "#balises" }, { "include": "#variables" } ]
         }
       ]
     },

@@ -129,6 +129,49 @@
       "comment": "Any custom/personalized balise whose effect isn't one of the four known ones above - given its own color since the actual visual effect is unknown to the editor.",
       "scope": "markup.custom-balise.dtl",
       "settings": { "foreground": "#c792ea" }
+    },
+    {
+      "comment": "-- Combined balise styles. Plain nested scopes don't auto-merge fontStyle in VS Code (the innermost tag would otherwise silently win and the outer style would be lost), so each 2-tag pairing gets its own explicit rule, in both nesting orders (e.g. [b][i] and [i][b] both need to match). 3+ levels of nesting aren't covered and fall back to the innermost tag's single style. --",
+      "scope": [
+        "markup.bold.dtl markup.italic.dtl",
+        "markup.italic.dtl markup.bold.dtl"
+      ],
+      "settings": { "fontStyle": "bold italic" }
+    },
+    {
+      "scope": [
+        "markup.bold.dtl markup.underline.dtl",
+        "markup.underline.dtl markup.bold.dtl"
+      ],
+      "settings": { "fontStyle": "bold underline" }
+    },
+    {
+      "scope": [
+        "markup.bold.dtl markup.strikethrough.dtl",
+        "markup.strikethrough.dtl markup.bold.dtl"
+      ],
+      "settings": { "fontStyle": "bold strikethrough" }
+    },
+    {
+      "scope": [
+        "markup.italic.dtl markup.underline.dtl",
+        "markup.underline.dtl markup.italic.dtl"
+      ],
+      "settings": { "fontStyle": "italic underline" }
+    },
+    {
+      "scope": [
+        "markup.italic.dtl markup.strikethrough.dtl",
+        "markup.strikethrough.dtl markup.italic.dtl"
+      ],
+      "settings": { "fontStyle": "italic strikethrough" }
+    },
+    {
+      "scope": [
+        "markup.underline.dtl markup.strikethrough.dtl",
+        "markup.strikethrough.dtl markup.underline.dtl"
+      ],
+      "settings": { "fontStyle": "underline strikethrough" }
     }
   ]
 }

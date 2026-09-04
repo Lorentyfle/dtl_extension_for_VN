@@ -1,6 +1,40 @@
 # Changelog
 
 ## [Unreleased]
+- Bug: after a dialogic command, like label, do, set, return, if, else, elif, default autocomplete like dialogue text should be shown. Currently only character are suggested which should only be for join, update and leave.
+- Bug: Choices do not have default autocomplete like dialogue text but only character are suggested.
+- Bug: audio autocomplete should be personalized as kind can be gound in project.godot, in the entry:
+```
+audio/channel_defaults={
+"": {
+"audio_bus": "SFX",
+"fade_length": 0.0,
+"loop": false,
+"volume": 0.0
+},
+"loopSFX": {
+"audio_bus": "SFX",
+"fade_length": 0.0,
+"loop": true,
+"volume": 0.0
+},
+"loopSFX_channel2": {
+"audio_bus": "SFX",
+"fade_length": 0.0,
+"loop": true,
+"volume": 0.0
+},
+"music": {
+"audio_bus": "OST",
+"fade_length": 1.5,
+"loop": true,
+"volume": 0.0
+},
+}
+```
+where here we can find music, loopSFX and loopSFX_channel2.
+Then a "" string should be expected.
+- jump should have suggestion based on already written labels in the file.
 - Bug: the color of the choice continues even after the | where it should stop.
 - Bug: Accents are not counted as possible character name. Of example: Léa.
 - Bug: if `[wait]` is inside dialogue text it will not have good color.

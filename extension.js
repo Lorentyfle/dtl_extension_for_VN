@@ -1044,7 +1044,7 @@ function activate(context) {
           return items
           }
         }
-    );
+    , ' ', '[');
   context.subscriptions.push(completionProvider);
 }
 // =============================================================================
