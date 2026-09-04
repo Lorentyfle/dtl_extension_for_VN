@@ -1,11 +1,9 @@
 # Changelog
 
 ## [Unreleased]
-- Add documentation and suggestion for each of the possible entries for [] entries (hoover + autocomplete).
 - Bug: the color of the choice continues even after the | where it should stop.
 - Bug: Accents are not counted as possible character name. Of example: Léa.
 - Bug: if `[wait]` is inside dialogue text it will not have good color.
-- Bug: BBcode balises makes the #id:xyz coloring ignored even when it's closed.
 ## [0.1.0] - 2026-09-03
 - Syntax highlight for the important commands.
 ## [0.1.1] - 2026-09-03
@@ -25,3 +23,4 @@
 - Markdown balises highlight. (temporary)
 ## [0.1.5] - 2026-09-04
 - BBCode balises highlight.
+- Add documentation and suggestion for each of the possible entries for [] dialogic entries (hoover + autocomplete).

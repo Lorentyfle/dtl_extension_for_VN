@@ -109,7 +109,7 @@
       "settings": { "foreground": "#56b6c2" }
     },
     {
-      "comment": "-- Markdown-style inline formatting inside dialogue/narration/choice text. fontStyle is what makes the enclosed text actually render bold/italic/strikethrough, not just colored. --",
+      "comment": "-- BBCode-style balise formatting inside dialogue/narration/choice text. fontStyle is what makes the enclosed text actually render bold/italic/underline/strikethrough - the grammar only ever applies these scopes to text strictly between a matched opening and closing tag, never beyond. --",
       "scope": "markup.bold.dtl",
       "settings": { "fontStyle": "bold" }
     },
@@ -118,21 +118,17 @@
       "settings": { "fontStyle": "italic" }
     },
     {
+      "scope": "markup.underline.dtl",
+      "settings": { "fontStyle": "underline" }
+    },
+    {
       "scope": "markup.strikethrough.dtl",
       "settings": { "fontStyle": "strikethrough" }
     },
     {
-      "scope": "markup.inline.raw.dtl",
-      "settings": { "foreground": "#ce9178" }
-    },
-    {
-      "scope": [
-        "punctuation.definition.bold.dtl",
-        "punctuation.definition.italic.dtl",
-        "punctuation.definition.strikethrough.dtl",
-        "punctuation.definition.raw.dtl"
-      ],
-      "settings": { "foreground": "#7a7a7a" }
+      "comment": "Any custom/personalized balise whose effect isn't one of the four known ones above - given its own color since the actual visual effect is unknown to the editor.",
+      "scope": "markup.custom-balise.dtl",
+      "settings": { "foreground": "#c792ea" }
     }
   ]
 }

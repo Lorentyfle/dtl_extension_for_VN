@@ -94,25 +94,37 @@
     },
 
     "balises": {
-      "comment": "Personalized/BBCode-style rich text tags used inside player-facing text: [b]bold[\\b], [i]italic[\\i], and any other custom effect tag like [MyEffect]text[\\MyEffect] - note the closing tag uses a literal backslash before the name, not a forward slash. The scope spans the whole tag including its content, so the theme's fontStyle actually renders the enclosed text bold/italic to match what Dialogic shows in-game. Safety net: if a matching '[\\name]' closer is never found, the span ends at end of line ('$' in the end alternation) instead of swallowing the rest of the file.",
+      "comment": "BBCode-style rich text tags used inside player-facing text: [b]bold[/b], [i]italic[/i], [u]underline[/u], [s]strikethrough[/s], and any other custom effect tag like [MyEffect]text[/MyEffect]. Each opening tag only matches if a lookahead confirms its matching closer exists later on the SAME line - if no closer is found, nothing highlights here at all (the brackets stay plain text), so the tag's highlighting is always strictly the region between the two tags and never spills onto the rest of the line. An unclosed tag is instead caught by the whole-line diagnostic in extension.js.",
       "patterns": [
         {
           "name": "markup.bold.dtl",
-          "begin": "\\[b\\]",
-          "end": "(\\[\\x5Cb\\]|$)",
+          "begin": "\\[b\\](?=[^\\n]*\\[/b\\])",
+          "end": "\\[/b\\]",
           "patterns": [ { "include": "#variables" } ]
         },
         {
           "name": "markup.italic.dtl",
-          "begin": "\\[i\\]",
-          "end": "(\\[\\x5Ci\\]|$)",
+          "begin": "\\[i\\](?=[^\\n]*\\[/i\\])",
+          "end": "\\[/i\\]",
+          "patterns": [ { "include": "#variables" } ]
+        },
+        {
+          "name": "markup.underline.dtl",
+          "begin": "\\[u\\](?=[^\\n]*\\[/u\\])",
+          "end": "\\[/u\\]",
+          "patterns": [ { "include": "#variables" } ]
+        },
+        {
+          "name": "markup.strikethrough.dtl",
+          "begin": "\\[s\\](?=[^\\n]*\\[/s\\])",
+          "end": "\\[/s\\]",
           "patterns": [ { "include": "#variables" } ]
         },
         {
           "name": "markup.custom-balise.dtl",
-          "comment": "Any other personalized balise, e.g. [Shake]text[\\Shake]. Reserved bracket commands (wait, audio, signal...) are excluded via the lookahead so they keep using #options as before.",
-          "begin": "\\[(?!(?:wait|wait_input|audio|voice|clear|background|style|signal|text_input|end_timeline)\\])([A-Za-z_][A-Za-z0-9_]*)\\]",
-          "end": "(\\[\\x5C\\1\\]|$)",
+          "comment": "Any other personalized balise, e.g. [Shake]text[/Shake]. Reserved bracket commands (wait, audio, signal...) are excluded via the lookahead so they keep using #options as before.",
+          "begin": "\\[(?!(?:wait|wait_input|audio|voice|clear|background|style|signal|text_input|end_timeline)\\])([A-Za-z_][A-Za-z0-9_]*)\\](?=[^\\n]*\\[/\\1\\])",
+          "end": "\\[/\\1\\]",
           "patterns": [ { "include": "#variables" } ]
         }
       ]

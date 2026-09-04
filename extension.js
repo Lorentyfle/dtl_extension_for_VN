@@ -7,6 +7,7 @@
 // - Command autocomplete
 // - Contextual character/position autocomplete for join/leave/update
 // - Word-based autocomplete for spoken dialogue text (named or narration)
+// - Parameter-name autocomplete + hover docs inside bracket commands
 // - Hover documentation for commands and balises
 // - Go to Definition for `jump NAME` -> `label NAME`
 // - Diagnostics: unresolved `jump` targets, unclosed [balise] tags
@@ -200,16 +201,30 @@ const DTL_ENTRIES = [
   {
     name: 'b',
     type: 'bracket',
-    syntax: '[b] ... [\\b]',
-    description: 'BBCode-style balise: wraps the enclosed dialogue/narration/choice text in bold. Note the closing tag uses a backslash, not a forward slash.',
-    example: 'Laripo: This is [b]important[\\b].'
+    syntax: '[b] ... [/b]',
+    description: 'BBCode-style balise: wraps the enclosed dialogue/narration/choice text in bold.',
+    example: 'Laripo: This is [b]important[/b].'
   },
   {
     name: 'i',
     type: 'bracket',
-    syntax: '[i] ... [\\i]',
-    description: 'BBCode-style balise: wraps the enclosed dialogue/narration/choice text in italics. Note the closing tag uses a backslash, not a forward slash.',
-    example: 'Laripo: This is [i]interesting[\\i].'
+    syntax: '[i] ... [/i]',
+    description: 'BBCode-style balise: wraps the enclosed dialogue/narration/choice text in italics.',
+    example: 'Laripo: This is [i]interesting[/i].'
+  },
+  {
+    name: 'u',
+    type: 'bracket',
+    syntax: '[u] ... [/u]',
+    description: 'BBCode-style balise: wraps the enclosed dialogue/narration/choice text in an underline.',
+    example: 'Laripo: This is [u]underlined[/u].'
+  },
+  {
+    name: 's',
+    type: 'bracket',
+    syntax: '[s] ... [/s]',
+    description: 'BBCode-style balise: wraps the enclosed dialogue/narration/choice text in a strikethrough.',
+    example: 'Laripo: This is [s]struck out[/s].'
   }
 ];
 // =============================================================================
@@ -328,6 +343,13 @@ function createDocumentation(entry) {
   markdown.appendMarkdown(`**${entry.name}**\n\n`);
   markdown.appendMarkdown(`${entry.description}\n\n`);
   markdown.appendMarkdown(`**Syntax:** \`${entry.syntax}\`\n\n`);
+  if (entry.variables && Object.keys(entry.variables).length > 0) {
+    markdown.appendMarkdown('**Parameters:**\n\n');
+    for (const [name, doc] of Object.entries(entry.variables)) {
+      markdown.appendMarkdown(`- \`${name}\`: ${doc}\n`);
+    }
+    markdown.appendMarkdown('\n');
+  }
   if (entry.example) {
     markdown.appendMarkdown('**Example:**\n\n');
     markdown.appendCodeblock(entry.example,'dtl');
@@ -353,6 +375,23 @@ function createPositionCompletion(position) {
 function createCharacterCompletion(name) {
   const item = new vscode.CompletionItem(name,vscode.CompletionItemKind.EnumMember);
   item.detail = 'Dialogic character (from project.godot)';
+  return item;
+}
+
+/**
+ * Completion item for a bracket command's parameter name, e.g. `time` in
+ * `[wait time=1.5]`. Inserts `name=` (via a snippet) so the cursor lands
+ * right after the `=`, ready for the value.
+ *
+ * @param {string} name
+ * @param {string} doc
+ * @returns {vscode.CompletionItem}
+ */
+function createAttributeCompletion(name, doc) {
+  const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Property);
+  item.detail = 'DTL bracket parameter';
+  item.documentation = new vscode.MarkdownString(doc);
+  item.insertText = new vscode.SnippetString(`${name}=`);
   return item;
 }
 
@@ -565,11 +604,13 @@ function findUnresolvedJumpDiagnostics(document) {
 
 /**
  * Scan dialogue/narration/choice lines for a BBCode-style balise such as
- * `[b]` or `[MyEffect]` that has no matching `[\name]` closer on the same
+ * `[b]` or `[MyEffect]` that has no matching `[/name]` closer on the same
  * line. Reserved bracket commands like `[wait]` are skipped since they
  * aren't balises. A broken balise flags the whole line (rather than just
- * the tag) so it's easy to spot at a glance, mirroring the grammar's own
- * end-of-line fallback for the same unclosed-tag case.
+ * the tag) so it's easy to spot at a glance - this whole-line warning is
+ * intentionally the diagnostic's job alone: the grammar itself never
+ * highlights past a missing closer (see the `#balises` lookahead), so the
+ * two mechanisms don't overlap or conflict.
  *
  * @param {vscode.TextDocument} document
  * @returns {vscode.Diagnostic[]}
@@ -696,6 +737,32 @@ function activate(context) {
                 createDocumentation(entry),
                 range
               );
+            }
+          }
+          // -------------------------------------------------------------------
+          // Bracket command PARAMETERS
+          //
+          // [wait time=1.5]
+          //        ^^^^ hovering this
+          // -------------------------------------------------------------------
+          const paramWordRange = document.getWordRangeAtPosition(position, /[A-Za-z_][A-Za-z0-9_]*/);
+          if (paramWordRange) {
+            const paramName = document.getText(paramWordRange);
+            const afterParam = line.substring(paramWordRange.end.character);
+            if (/^\s*=/.test(afterParam)) {
+              const beforeParam = line.substring(0, paramWordRange.start.character);
+              const enclosingBracketMatch = beforeParam.match(/\[([A-Za-z_][A-Za-z0-9_]*)\s+[^\]]*$/);
+              if (enclosingBracketMatch) {
+                const enclosingEntry = DTL_ENTRIES.find(
+                  candidate => candidate.name === enclosingBracketMatch[1] && candidate.type === 'bracket'
+                );
+                if (enclosingEntry && enclosingEntry.variables && enclosingEntry.variables[paramName]) {
+                  const markdown = new vscode.MarkdownString();
+                  markdown.appendMarkdown(`**${paramName}** _(parameter of \`[${enclosingEntry.name}]\`)_\n\n`);
+                  markdown.appendMarkdown(enclosingEntry.variables[paramName]);
+                  return new vscode.Hover(markdown, paramWordRange);
+                }
+              }
             }
           }
           // -------------------------------------------------------------------
@@ -909,6 +976,40 @@ function activate(context) {
               items.push(item);
             }
             return items;
+          }
+          // =========================================================================
+          // BRACKET COMMAND PARAMETERS (e.g. inside `[wait time=1.5 |`)
+          // =========================================================================
+          const openBracketIndex = beforeCursor.lastIndexOf('[');
+          if (openBracketIndex !== -1 && !beforeCursor.slice(openBracketIndex).includes(']')) {
+            const bracketContent = beforeCursor.slice(openBracketIndex + 1);
+            const commandNameMatch = bracketContent.match(/^([A-Za-z_][A-Za-z0-9_]*)\s/);
+            if (commandNameMatch) {
+              const bracketEntry = DTL_ENTRIES.find(
+                candidate => candidate.name === commandNameMatch[1] && candidate.type === 'bracket'
+              );
+              if (bracketEntry && bracketEntry.variables) {
+                const afterCommandName = bracketContent.slice(commandNameMatch[0].length);
+                const lastSpaceIndex = afterCommandName.lastIndexOf(' ');
+                const currentToken = afterCommandName.slice(lastSpaceIndex + 1);
+                // Only suggest a parameter NAME while not already mid-value
+                // (i.e. the token being typed has no '=' in it yet).
+                if (!currentToken.includes('=')) {
+                  const prefix = currentToken.toLowerCase();
+                  const usedAttributes = new Set(afterCommandName.match(/[A-Za-z_][A-Za-z0-9_]*(?==)/g) || []);
+                  for (const attributeName of Object.keys(bracketEntry.variables)) {
+                    if (usedAttributes.has(attributeName)) {
+                      continue; // already set once on this line
+                    }
+                    if (!attributeName.toLowerCase().startsWith(prefix)) {
+                      continue;
+                    }
+                    items.push(createAttributeCompletion(attributeName, bracketEntry.variables[attributeName]));
+                  }
+                  return items;
+                }
+              }
+            }
           }
           // =========================================================================
           // NORMAL COMMANDS + Dialogue characters.
