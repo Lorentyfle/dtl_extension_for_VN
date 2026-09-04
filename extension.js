@@ -1041,8 +1041,8 @@ function activate(context) {
           for (const name of cachedCharacterNames) {
             items.push(createCharacterCompletion(name));
           }
-          return createWordSuggestions(document, beforeCursor);
-          return items
+          items.push(createWordSuggestions(document, beforeCursor));
+          return items;
           }
         }
     , ' ', '[');
