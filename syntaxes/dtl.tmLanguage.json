@@ -185,9 +185,9 @@
           "beginCaptures": {
             "2": { "name": "punctuation.definition.list.begin.dtl" }
           },
-          "end": "\\r?$",
+          "end": "(?=\\||#|\\r?$)",
           "patterns": [
-            { "name": "markup.list.choice.dtl", "match": "\\S(?:[^|#\\r\\n]*?)(?=\\||#|\\r?$)"},
+            { "name": "markup.list.choice.dtl", "match": "\\S(?:[^|#\\[\\]\\r\\n]|\\[(?![^\\]\\r\\n]*\\])[^|#\\r\\n])*?(?=\\||#|\\[|\\r?$)"},
             { "name": "punctuation.separator.choice.dtl", "match": "\\|"},
             { "include": "#translationid" },
             { "include": "#balises" },
