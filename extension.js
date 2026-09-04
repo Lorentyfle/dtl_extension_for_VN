@@ -579,7 +579,7 @@ function createAttributeCompletion(name, doc) {
  * @returns {boolean}
  */
 function isInsideDialogueText(beforeCursor) {
-  const colonMatch = beforeCursor.match(/^\s*[A-Za-z_][A-Za-z0-9_]*\s*:/);
+  const colonMatch = beforeCursor.match(/^\s*[\p{L}_][\p{L}0-9_]*\s*:/u);
 
   let textStart;
   if (colonMatch) {
@@ -642,7 +642,7 @@ function isBareNarrationLine(beforeCursor) {
  * @returns {boolean}
  */
 function isPlayerFacingTextLine(lineText) {
-  if (/^\s*[A-Za-z_][A-Za-z0-9_]*\s*:/.test(lineText)) {
+  if (/^\s*[\p{L}_][\p{L}0-9_]*\s*:/u.test(lineText)) {
     return true; // Character: ...
   }
   if (/^\s*-\s/.test(lineText)) {
@@ -981,6 +981,41 @@ function activate(context) {
                   markdown.appendMarkdown(enclosingEntry.variables[paramName]);
                   return new vscode.Hover(markdown, paramWordRange);
                 }
+              } else {
+                // join/update/leave's own trailing [options] bracket has no
+                // command name inside it (e.g. "join Laripo center
+                // [extra_data=...]"), so it needs its own lookup against the
+                // enclosing command's `variables` instead.
+                const trailingBracketMatch = beforeParam.match(/^\s*(join|update|leave)\b[^[]*\[[^\]]*$/);
+                if (trailingBracketMatch) {
+                  const commandEntry = DTL_ENTRIES.find(
+                    candidate => candidate.name === trailingBracketMatch[1] && candidate.type === 'command'
+                  );
+                  if (commandEntry && commandEntry.variables && commandEntry.variables[paramName]) {
+                    const markdown = new vscode.MarkdownString();
+                    markdown.appendMarkdown(`**${paramName}** _(parameter of \`${commandEntry.name}\`)_\n\n`);
+                    markdown.appendMarkdown(commandEntry.variables[paramName]);
+                    return new vscode.Hover(markdown, paramWordRange);
+                  }
+                } else {
+                  // pos=/size=/rot= transform tokens sit between the
+                  // character/position slot and the bracket, e.g.
+                  // "join Laripo pos=x0.3 size=y1 [...]".
+                  const transformMatch = beforeParam.match(
+                    /^\s*(join|update)\b\s+\S+(?:\s+[A-Za-z_][A-Za-z0-9_]*=\S*)*\s*$/
+                  );
+                  if (transformMatch) {
+                    const commandEntry = DTL_ENTRIES.find(
+                      candidate => candidate.name === transformMatch[1] && candidate.type === 'command'
+                    );
+                    if (commandEntry && commandEntry.transform_command && commandEntry.transform_command[paramName]) {
+                      const markdown = new vscode.MarkdownString();
+                      markdown.appendMarkdown(`**${paramName}** _(transform parameter of \`${commandEntry.name}\`)_\n\n`);
+                      markdown.appendMarkdown(commandEntry.transform_command[paramName]);
+                      return new vscode.Hover(markdown, paramWordRange);
+                    }
+                  }
+                }
               }
             }
           }
@@ -1088,55 +1123,127 @@ function activate(context) {
           if (characterCommandMatch) {
             const command = characterCommandMatch[1];
             const argumentsText = characterCommandMatch[2] || '';
-            // ---------------------------------------------------------------
-            // No argument yet
-            //
-            // join |
-            // leave |
-            // update |
-            // ---------------------------------------------------------------
-            if (argumentsText === '') {
-              for (const name of cachedCharacterNames) {
-                items.push(createCharacterCompletion(name));
-              }
-              return items;
-            }
-            // ---------------------------------------------------------------
-            // Split arguments
-            // ---------------------------------------------------------------
-            const argumentsParts = argumentsText.split(/\s+/);
-            // ---------------------------------------------------------------
-            // Character is currently being typed
-            //
-            // join Lar|
-            // leave Lar|
-            // update Lar|
-            // ---------------------------------------------------------------
-            if (argumentsParts.length === 1) {
-              const prefix = argumentsParts[0].toLowerCase();
-              for (const name of cachedCharacterNames) {
-                if (!name.toLowerCase().startsWith(prefix)) {
-                  continue;
+            // Once a '[' has been typed, we are past the character/position
+            // slot entirely and inside the trailing options bracket instead -
+            // that case is handled below by the dedicated bracket handler, so
+            // this block does nothing (and, importantly, does NOT return).
+            const hasOpenBracket = argumentsText.includes('[');
+            if (!hasOpenBracket) {
+              // ---------------------------------------------------------------
+              // No argument yet
+              //
+              // join |
+              // leave |
+              // update |
+              // ---------------------------------------------------------------
+              if (argumentsText === '') {
+                for (const name of cachedCharacterNames) {
+                  items.push(createCharacterCompletion(name));
                 }
-                items.push(createCharacterCompletion(name));
+                return items;
               }
-              return items;
-            }
-            // ---------------------------------------------------------------
-            // Position
-            //
-            // join Laripo |
-            // update Laripo |
-            //
-            // leave does NOT have a position.
-            // ---------------------------------------------------------------
-            if ((command === 'join' || command === 'update') && argumentsParts.length === 2) {
-              const prefix = argumentsParts[1].toLowerCase();
-              for (const position of DTL_POSITIONS) {
-                if (!position.name.toLowerCase().startsWith(prefix)) {
-                  continue;
+              // ---------------------------------------------------------------
+              // Split arguments
+              // ---------------------------------------------------------------
+              const argumentsParts = argumentsText.split(/\s+/);
+              // ---------------------------------------------------------------
+              // Character is currently being typed
+              //
+              // join Lar|
+              // leave Lar|
+              // update Lar|
+              // ---------------------------------------------------------------
+              if (argumentsParts.length === 1) {
+                const prefix = argumentsParts[0].toLowerCase();
+                for (const name of cachedCharacterNames) {
+                  if (!name.toLowerCase().startsWith(prefix)) {
+                    continue;
+                  }
+                  items.push(createCharacterCompletion(name));
                 }
-                items.push(createPositionCompletion(position));
+                return items;
+              }
+              // ---------------------------------------------------------------
+              // Position / transform arguments (join & update only; leave
+              // does NOT have a position).
+              //
+              // join Laripo |                    <- plain position keyword
+              // join Laripo pos=x0.3 size=y1 |    <- transform_command keys
+              //
+              // A plain position keyword (center, left, ...) can only be the
+              // first token; transform_command keys (pos/size/rot, defined
+              // per-entry in DTL_ENTRIES) can instead be used, one or more,
+              // as an alternative. Once a plain position keyword has been
+              // used, this slot is considered complete.
+              // ---------------------------------------------------------------
+              if (command === 'join' || command === 'update') {
+                const typedTokens = argumentsParts.slice(1, -1);
+                const currentToken = argumentsParts[argumentsParts.length - 1];
+                const usedPlainPosition = typedTokens.some(
+                  token => DTL_POSITIONS.some(position => position.name === token)
+                );
+                if (!usedPlainPosition && !currentToken.includes('=')) {
+                  const prefix = currentToken.toLowerCase();
+                  if (argumentsParts.length === 2) {
+                    for (const position of DTL_POSITIONS) {
+                      if (position.name.toLowerCase().startsWith(prefix)) {
+                        items.push(createPositionCompletion(position));
+                      }
+                    }
+                  }
+                  const commandEntry = DTL_ENTRIES.find(
+                    entry => entry.name === command && entry.type === 'command'
+                  );
+                  if (commandEntry && commandEntry.transform_command) {
+                    const usedTransformKeys = new Set(typedTokens.map(token => token.split('=')[0]));
+                    for (const [key, doc] of Object.entries(commandEntry.transform_command)) {
+                      if (usedTransformKeys.has(key)) {
+                        continue; // already set once on this line
+                      }
+                      if (!key.toLowerCase().startsWith(prefix)) {
+                        continue;
+                      }
+                      items.push(createAttributeCompletion(key, doc));
+                    }
+                  }
+                  return items;
+                }
+              }
+            }
+          }
+          // =========================================================================
+          // JOIN / LEAVE / UPDATE - trailing [options] bracket
+          //
+          // join Laripo center [extra_data="..." |
+          // leave Laripo [an|
+          //
+          // Reuses each command's own `variables` documentation (already
+          // written in DTL_ENTRIES) instead of leaving this bracket
+          // unsupported, the way the generic "[wait ...]"-style bracket
+          // commands already are below.
+          // =========================================================================
+          const trailingOptionsMatch = beforeCursor.match(/^\s*(join|update|leave)\b[^[]*\[([^\]]*)$/);
+          if (trailingOptionsMatch) {
+            const commandEntry = DTL_ENTRIES.find(
+              entry => entry.name === trailingOptionsMatch[1] && entry.type === 'command'
+            );
+            if (commandEntry && commandEntry.variables) {
+              const bracketArgumentsText = trailingOptionsMatch[2];
+              const lastSpaceIndex = bracketArgumentsText.lastIndexOf(' ');
+              const currentToken = bracketArgumentsText.slice(lastSpaceIndex + 1);
+              // Only suggest a parameter NAME while not already mid-value.
+              if (!currentToken.includes('=')) {
+                const prefix = currentToken.toLowerCase();
+                const usedAttributes = new Set(bracketArgumentsText.match(/[A-Za-z_][A-Za-z0-9_]*(?==)/g) || []);
+                for (const attributeName of Object.keys(commandEntry.variables)) {
+                  if (usedAttributes.has(attributeName)) {
+                    continue; // already set once on this line
+                  }
+                  if (!attributeName.toLowerCase().startsWith(prefix)) {
+                    continue;
+                  }
+                  items.push(createAttributeCompletion(attributeName, commandEntry.variables[attributeName]));
+                }
               }
               return items;
             }
@@ -1236,7 +1343,7 @@ function activate(context) {
           // =========================================================================
           // NORMAL COMMANDS + Dialogue characters.
           // =========================================================================
-          if (/^\s*[A-Za-z_][A-Za-z0-9_]*$/.test(beforeCursor)) {
+          if (/^\s*[\p{L}_][\p{L}0-9_]*$/u.test(beforeCursor)) {
             const prefix = beforeCursor.trim().toLowerCase();
             // Characters
             for (const name of cachedCharacterNames) {

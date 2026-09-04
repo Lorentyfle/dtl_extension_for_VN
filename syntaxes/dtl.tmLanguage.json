@@ -56,7 +56,7 @@
         { "name": "keyword.control.command.dtl", "match": "\\b(join|leave|update|audio|do|return)\\b" },
         { "name": "support.type.audio-kind.dtl", "match": "(?<=\\baudio\\b)\\s+([^\\s\"]+)" },
         { "name": "constant.language.position.dtl", "match": "\\b(left|right|center|rightmost|leftmost)\\b" },
-        { "name": "entity.name.character.dtl", "match": "(?<=\\b(join|update|leave)\\s)[A-Za-z_][A-Za-z0-9_]*" }
+        { "name": "entity.name.character.dtl", "match": "(?<=\\b(join|update|leave)\\s)[\\p{L}_][\\p{L}0-9_]*" }
       ]
     },
 
@@ -133,12 +133,23 @@
     "dialogue": {
       "comment": "Speaker line 'Name: text [inline=options] #id:xyz'. The spoken text is a begin/end region so inline markup like [pause=1.5], [b]bold[\\b], and {variable} references still highlight.",
       "patterns": [
-        { "name": "entity.name.character.dtl", "match": "^\\s*(?!(?:if|else|elif|set|label|while|jump)\\s*:)[A-Za-z_][A-Za-z0-9_]*(?=\\s*:)" },
+        { "name": "entity.name.character.dtl", "match": "^\\s*(?!(?:if|else|elif|set|label|while|jump)\\s*:)[\\p{L}_][\\p{L}0-9_]*(?=\\s*:)" },
         {
           "name": "string.unquoted.dialogue.dtl",
           "begin": "(?<=:)\\s",
           "end": "(?=#id:|$)",
-          "patterns": [ { "include": "#balises" }, { "include": "#options" }, { "include": "#variables" } ]
+          "patterns": [
+            { "include": "#balises" },
+            { "include": "#signals" },
+            { "include": "#wait" },
+            { "include": "#audio" },
+            { "include": "#clear" },
+            { "include": "#images" },
+            { "include": "#text_input" },
+            { "include": "#end_timeline" },
+            { "include": "#options" },
+            { "include": "#variables" }
+          ]
         }
       ]
     },
@@ -148,15 +159,26 @@
       "patterns": [
         {
           "name": "string.unquoted.dialogue.dtl",
-          "begin": "^(?!\\s*$)(?!\\s*#)(?!\\s*-\\s)(?!\\s*\\[)(?!\\s*(if|else|elif|set|label|jump|while|join|leave|update|audio|do|return)\\b)(?!\\s*[A-Za-z_][A-Za-z0-9_]*\\s*:)",
+          "begin": "^(?!\\s*$)(?!\\s*#)(?!\\s*-\\s)(?!\\s*\\[)(?!\\s*(if|else|elif|set|label|jump|while|join|leave|update|audio|do|return)\\b)(?!\\s*[\\p{L}_][\\p{L}0-9_]*\\s*:)",
           "end": "(?=#id:|$)",
-          "patterns": [ { "include": "#balises" }, { "include": "#options" }, { "include": "#variables" } ]
+          "patterns": [
+            { "include": "#balises" },
+            { "include": "#signals" },
+            { "include": "#wait" },
+            { "include": "#audio" },
+            { "include": "#clear" },
+            { "include": "#images" },
+            { "include": "#text_input" },
+            { "include": "#end_timeline" },
+            { "include": "#options" },
+            { "include": "#variables" }
+          ]
         }
       ]
     },
 
     "choices": {
-      "comment": "'- choice text | [if ...] [else=...] #id:xyz'. The leading dash is punctuation; #id:, bracketed conditions, [b]balises[\\b], and {variables} inside the choice text reuse the shared repositories.",
+      "comment": "'- choice text | [if ...] [else=...] #id:xyz'. The leading dash is punctuation. Only the choice WORDING (before the first '|') gets the markup.list.choice.dtl color: it lives in its own nested begin/end that stops at the first '|' (or end of line) via lookahead, so it never applies to the conditions/#id: that follow - those fall through to the normal option/translation-id/bracket-command highlighting instead.",
       "patterns": [
         {
           "begin": "^(\\s*)(-)(\\s)",
@@ -164,11 +186,34 @@
             "2": { "name": "punctuation.definition.list.begin.dtl" }
           },
           "end": "$",
-          "name": "markup.list.choice.dtl",
           "patterns": [
+            {
+              "name": "markup.list.choice.dtl",
+              "begin": "(?=\\S)",
+              "end": "(?=\\||$)",
+              "patterns": [
+                { "include": "#balises" },
+                { "include": "#signals" },
+                { "include": "#wait" },
+                { "include": "#audio" },
+                { "include": "#clear" },
+                { "include": "#images" },
+                { "include": "#text_input" },
+                { "include": "#end_timeline" },
+                { "include": "#options" },
+                { "include": "#variables" }
+              ]
+            },
             { "name": "punctuation.separator.choice.dtl", "match": "\\|" },
             { "include": "#translationid" },
             { "include": "#balises" },
+            { "include": "#signals" },
+            { "include": "#wait" },
+            { "include": "#audio" },
+            { "include": "#clear" },
+            { "include": "#images" },
+            { "include": "#text_input" },
+            { "include": "#end_timeline" },
             { "include": "#options" },
             { "include": "#variables" }
           ]
