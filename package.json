@@ -55,7 +55,8 @@
           "other": true,
           "comments": false,
           "strings": true
-        }
+        },
+        "editor.autoIndent": "full"
       }
     }
   },

@@ -20,7 +20,12 @@
     ["\"", "\""]
   ],
   "indentationRules": {
-    "increaseIndentPattern": "^\\s*(if\\b.*:|-\\s.*)\\s*$",
-    "decreaseIndentPattern": "^\\s*$"
-  }
+    "increaseIndentPattern": "^\\s*((if|elif|else)\\b.*:|-\\s.*)\\s*$"
+  },
+  "onEnterRules": [
+    {
+      "beforeText": "^\\s*((if|elif|else|while)\\b.*:|-\\s.*)\\s*$",
+      "action": { "indentAction": "indent" }
+    }
+  ]
 }

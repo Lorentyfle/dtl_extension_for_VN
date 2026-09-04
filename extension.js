@@ -278,21 +278,11 @@ let diagnosticCollection;
  * @returns {string[]}
  */
 function extractCharacterNames(text) {
-
-  const sectionMatch = text.match(
-    /\[dialogic\]([\s\S]*?)(\n\[|$)/
-  );
-
-  if (!sectionMatch) {
-    return [];
-  }
-
+  const sectionMatch = text.match(/\[dialogic\]([\s\S]*?)(\n\[|$)/);
+  if (!sectionMatch) {return [];}
   const dialogicSection = sectionMatch[1];
-
   const dictionaryMatch = dialogicSection.match(/directories\/dch_directory\s*=\s*\{([\s\S]*?)\}/);
-  if (!dictionaryMatch) {
-    return [];
-  }
+  if (!dictionaryMatch) {return [];}
   const dictionaryBody = dictionaryMatch[1];
   const keyPattern = /"([^"]+)"\s*:\s*"[^"]*"/g;
   const names = [];
@@ -304,22 +294,17 @@ function extractCharacterNames(text) {
  * Refresh the character cache.
  */
 async function refreshCharacterNames() {
-
   const matches = await vscode.workspace.findFiles(
     '**/project.godot',
     '**/.godot/**',
     1
   );
-
   if (matches.length === 0) {
     cachedCharacterNames = [];
     return;
   }
-
   try {
-
     const bytes = await vscode.workspace.fs.readFile(matches[0]);
-
     cachedCharacterNames =
       extractCharacterNames(
         Buffer.from(bytes).toString('utf8')
@@ -602,6 +587,34 @@ function findUnresolvedJumpDiagnostics(document) {
   return diagnostics;
 }
 
+function createLabelCompletion(name) {
+  const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Reference);
+  item.detail = 'DTL label (jump target)';
+  return item;
+}
+
+/**
+ * Collect every label name declared via `label NAME` in the document.
+ * Powers `jump` autocomplete.
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {string[]}
+ */
+function collectDocumentLabels(document) {
+  const labelPattern = /^\s*label\s+([A-Za-z_][A-Za-z0-9_]*)/;
+  const labels = new Set();
+  for (let line = 0; line < document.lineCount; line++) {
+    const match = document.lineAt(line).text.match(labelPattern);
+    if (match) { labels.add(match[1]); }
+  }
+  return Array.from(labels);
+}
+
+// =============================================================================
+// AUDIO HELPERS
+// =============================================================================
+
+
 /**
  * Scan dialogue/narration/choice lines for a BBCode-style balise such as
  * `[b]` or `[MyEffect]` that has no matching `[/name]` closer on the same
@@ -674,7 +687,6 @@ function updateDiagnostics(document) {
 // =============================================================================
 // ACTIVATE
 // =============================================================================
-
 function activate(context) {
   // ---------------------------------------------------------------------------
   // Initial character cache
@@ -879,12 +891,8 @@ function activate(context) {
             // update |
             // ---------------------------------------------------------------
             if (argumentsText === '') {
-              for (
-                const name of cachedCharacterNames
-              ) {
-                items.push(
-                  createCharacterCompletion(name)
-                );
+              for (const name of cachedCharacterNames) {
+                items.push(createCharacterCompletion(name));
               }
               return items;
             }
@@ -900,30 +908,15 @@ function activate(context) {
             // update Lar|
             // ---------------------------------------------------------------
             if (argumentsParts.length === 1) {
-              const prefix =
-                argumentsParts[0]
-                  .toLowerCase();
-              for (
-                const name of cachedCharacterNames
-              ) {
-
-                if (
-                  !name
-                    .toLowerCase()
-                    .startsWith(prefix)
-                ) {
+              const prefix = argumentsParts[0].toLowerCase();
+              for (const name of cachedCharacterNames) {
+                if (!name.toLowerCase().startsWith(prefix)) {
                   continue;
                 }
-
-                items.push(
-                  createCharacterCompletion(name)
-                );
+                items.push(createCharacterCompletion(name));
               }
-
               return items;
             }
-
-
             // ---------------------------------------------------------------
             // Position
             //
@@ -935,19 +928,10 @@ function activate(context) {
             if ((command === 'join' || command === 'update') && argumentsParts.length === 2) {
               const prefix = argumentsParts[1].toLowerCase();
               for (const position of DTL_POSITIONS) {
-                if (
-                  !position.name
-                    .toLowerCase()
-                    .startsWith(prefix)
-                ) {
+                if (!position.name.toLowerCase().startsWith(prefix)) {
                   continue;
                 }
-
-                items.push(
-                  createPositionCompletion(
-                    position
-                  )
-                );
+                items.push(createPositionCompletion(position));
               }
               return items;
             }
@@ -955,10 +939,7 @@ function activate(context) {
           // =========================================================================
           // BRACKET COMMANDS
           // =========================================================================
-          const bracketMatch =
-            beforeCursor.match(
-              /\[([A-Za-z_][A-Za-z0-9_]*)?$/
-            );
+          const bracketMatch = beforeCursor.match(/\[([A-Za-z_][A-Za-z0-9_]*)?$/);
           if (bracketMatch) {
             const prefix = bracketMatch[1] || '';
             for ( const entry of DTL_ENTRIES ) {
@@ -966,13 +947,11 @@ function activate(context) {
                 continue;
               }
               if (
-                !entry.name
-                  .startsWith(prefix)
+                !entry.name.startsWith(prefix)
               ) {
                 continue;
               }
-              const item =
-                createCommandCompletion(entry);
+              const item = createCommandCompletion(entry);
               items.push(item);
             }
             return items;
@@ -1010,6 +989,19 @@ function activate(context) {
                 }
               }
             }
+          }
+          // ===================================================================
+          // JUMP
+          // ===================================================================
+          const jumpCommandMatch = beforeCursor.match(/^\s*jump\s+(.*)$/);
+          if (jumpCommandMatch) {
+            const prefix = jumpCommandMatch[1].toLowerCase();
+            for (const label of collectDocumentLabels(document)) {
+              if (!prefix || label.toLowerCase().startsWith(prefix)) {
+                items.push(createLabelCompletion(label));
+              }
+            }
+            return items;
           }
           // =========================================================================
           // NORMAL COMMANDS + Dialogue characters.
@@ -1051,7 +1043,6 @@ function activate(context) {
 // =============================================================================
 // DEACTIVATE
 // =============================================================================
-
 function deactivate() {}
 
 module.exports = { activate, deactivate };
