@@ -2,15 +2,16 @@
 
 Syntax highlighting, autocomplete, and IDE tooling for **DTL** (`.dtl`) files - the timeline format used by the [Dialogic 2](https://docs.dialogic.pro/) addon for writing visual novel dialogue in Godot.
 
-![A short screen recording scrolling through a highlighted `.dtl` file, showing the DTL Dark theme in action.](assets/what_dtl_looks_like.gif)
+![A short screen recording scrolling through a highlighted `.dtl` file, showing the DTL Dark theme in action.](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/what_dtl_looks_like.gif)
 
 ## Features
 
 - **Syntax highlighting** for characters, dialogue, narration, choices, commands, `{variables}`, and `[balises]`, via a dedicated TextMate grammar and the bundled "DTL Dark" theme.
 
-![A sample timeline with the DTL Dark theme applied, showing several distinct colors (character names, dialogue, commands).](assets/classic_commands_for_dtl.png)
+![A sample timeline with the DTL Dark theme applied, showing several distinct colors (character names, dialogue, commands).](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/classic_commands_for_dtl.png)
 
-![A sample timeline with the DTL Dark theme applied, showing several distinct colors for choices.](assets/test_choice.png)
+
+![A sample timeline with the DTL Dark theme applied, showing several distinct colors for choices.](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/test_choice.png)
 
 - **Autocomplete** for:
   - Character names, read live from `project.godot`.
@@ -21,7 +22,7 @@ Syntax highlighting, autocomplete, and IDE tooling for **DTL** (`.dtl`) files - 
   - `jump` targets, based on `label`s already declared in the file.
   - Word-based suggestions inside dialogue text, similar to plain `.txt` editing.
 
-![Autocomplete dropdown popping up over a partially-typed `join` command, showing character names.](assets/join_character.gif)
+![Autocomplete dropdown popping up over a partially-typed `join` command, showing character names.](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/join_character.gif)
 
 - **Hover documentation** on commands, brackets, parameters, and position keywords - each shows its syntax, description, parameters, and an example.
 
@@ -29,7 +30,7 @@ Syntax highlighting, autocomplete, and IDE tooling for **DTL** (`.dtl`) files - 
 - **Diagnostics** for unresolved `jump` targets and unclosed `[balise]` tags.
 
 - **Go to Definition**: Ctrl+Click (or F12) a `jump NAME` to land on its matching `label NAME`.
-![A short clip of Ctrl+Click jumping from a `jump` line to its `label`.](assets/jump_demogif.gif)
+![A short clip of Ctrl+Click jumping from a `jump` line to its `label`.](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/jump_demogif.gif)
 
 ## Installation
 
@@ -50,8 +51,7 @@ Laripo: Hello there! [b]Welcome[/b] to the documentation.
 label ending
 [end_timeline]
 ```
-![Direct conversion to dtl](assets/direct_conversion_from_readme.png)
-
+![Direct conversion to dtl](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/direct_conversion_from_readme.png)
 
 ## Design Philosophy
 
