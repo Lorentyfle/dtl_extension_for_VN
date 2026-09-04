@@ -1,7 +1,9 @@
 # Changelog
 
-## [Unreleased]
+## [Planned]
 - Missing feature: suggestion for paths.
+- Missing feature: No suggestion for [] part for join, update and leave (should use documentation already written). as it is used this way: `join character position [animation="" extra_data=""]`
+- Missing feature: Make the extra_data become fully functionnal. [VERY COMPLEX, nice but not necessary]
 - Bug: Make in sort if, else, elif, while, - choice, increase the tabulation by one.
 - Bug: the color of the choice continues even after the | where it should stop.
 - Bug: Accents are not counted as possible character name. Of example: Léa.

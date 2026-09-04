@@ -50,22 +50,64 @@ const DTL_ENTRIES = [
     name: 'join',
     type: 'command',
     syntax: 'join character position [...]',
-    description: 'Make a character join on a given position with a given extra information.',
-    example: 'join Laripo center [extra_data="set Emotion/Happy"]'
+    description: 'Make a character join on a given position with a given extra information. The variables given are the one set inside the [].',
+    example: 'join Laripo center [extra_data="set Emotion/Happy"]',
+    transform_command: {
+      // transform command are given to entries that possess it. It is here for the documentation, but those are entries after the character name and before the [].
+      'pos':'Position can be specified like this: x0.5 y1, x100px y1% By default x and y are interpreted as relative to the viewport size, meaning 0.5 means half the width/height of the window. Position defines the ORIGIN of the portrait (usually the bottom center). When first joining a character, the position, size and rotation will be copied from the first portrait preset found. This means if you just want to vary the position along the x axis, a simple pos=x0.3 is usually enough and all the other values will be correct by default.',
+      'size':'Size can be specified like this: x0.5 y1, x100px y1% By default x and y are interpreted as relative to the viewport size, meaning 0.5 means half the width/height of the window. Position defines the ORIGIN of the portrait (usually the bottom center). When first joining a character, the position, size and rotation will be copied from the first portrait preset found. This means if you just want to vary the size along the x axis, a simple size=x0.3 is usually enough and all the other values will be correct by default.',
+      'rot':"Rotation is given in degrees. The portrait rotates around it's origin (usually the bottom center)!",
+    },
+    variables: {
+      // variable_name : documentation
+      'animation':'What is the animation followed by the character joining in (dtl_animation_join)',
+      'length':'Time in seconds of the animation. CAN ONLY BE SET WITH animation.',
+      'wait':"Await for the animation to finish before doing anything else. CAN ONLY BE SET WITH animation.",
+      'mirrored':"Is the sprite mirrored along the x axis?",
+      'z_index':"Modify the z_index of the sprite, higher z_index means more in front, lower means more in the back. It is not using godot's z-index and instead sorting the characters manually!",
+      'extra_data':"Supplementary data to pass to the joining of the character. IF you have a LayeredSprite2D then you change the elements of the sprite by doing: set Arm/Happy set Emotion/Angry.",
+    }
   },
   {
     name: 'update',
     type: 'command',
     syntax: 'update character position [...]',
-    description: 'Update a joined character on a given position with a given extra information.',
-    example: 'update Laripo center [extra_data="set Emotion/Happy"]'
+    description: 'Update a joined character on a given position with a given extra information. The variables given are the one set inside the [].',
+    example: 'update Laripo center [extra_data="set Emotion/Happy"]',
+    transform_command: {
+      // transform command are given to entries that possess it. It is here for the documentation, but those are entries after the character name and before the [].
+      'pos':'Position can be specified like this: x0.5 y1, x100px y1% By default x and y are interpreted as relative to the viewport size, meaning 0.5 means half the width/height of the window. Position defines the ORIGIN of the portrait (usually the bottom center). When first joining a character, the position, size and rotation will be copied from the first portrait preset found. This means if you just want to vary the position along the x axis, a simple pos=x0.3 is usually enough and all the other values will be correct by default.',
+      'size':'Size can be specified like this: x0.5 y1, x100px y1% By default x and y are interpreted as relative to the viewport size, meaning 0.5 means half the width/height of the window. Position defines the ORIGIN of the portrait (usually the bottom center). When first joining a character, the position, size and rotation will be copied from the first portrait preset found. This means if you just want to vary the size along the x axis, a simple size=x0.3 is usually enough and all the other values will be correct by default.',
+      'rot':"Rotation is given in degrees. The portrait rotates around it's origin (usually the bottom center)!",
+    },
+    variables: {
+      // variable_name : documentation
+      'animation':'What is the animation of the character while being displayed (dtl_animation_update).',
+      'length':'Time length of the animation. CAN ONLY BE SET WITH animation.',
+      'wait':"Await for the animation to finish before doing anything else. CAN ONLY BE SET WITH animation.",
+      'mirrored':"Is the sprite mirrored along the x axis?",
+      'z_index':"Modify the z_index of the sprite, higher z_index means more in front, lower means more in the back. It is not using godot's z-index and instead sorting the characters manually!",
+      'fade':'The fade setting (Only relevant if the portrait changes) defines the Crossfade animation that is used to fade from the last portrait to the next. If none is given it will fall back to a default that can be set in Setting>Portraits.',
+      'move_time': "On Update events that change the position you can set the time (in seconds), transition and easing used to tween from the old to the new position.",
+      'move_trans': "On Update events that change the position you can set the time (in seconds), transition and easing used to tween from the old to the new position.",
+      'repeat':"The animation repeat setting allows repeating the animation multiple times. CAN ONLY BE SET WITH move_trans or move_time.",
+      'move_ease':"On Update events that change the position you can set the time (in seconds), transition and easing used to tween from the old to the new position.",
+      'fade_length':"Defines the length of the fade in seconds.",
+      'extra_data':"Supplementary data to pass to the joining of the character. IF you have a LayeredSprite2D then you change the elements of the sprite by doing: set Arm/Happy set Emotion/Angry.",
+    }
   },
   {
     name: 'leave',
     type: 'command',
     syntax: 'leave character [...]',
-    description: 'Make a character leave the scene with a given extra information.',
-    example: 'leave Laripo [animation="Slide To Left"]'
+    description: 'Make a character leave the scene with a given extra information. The variables given are the one set inside the []. If one write `leave --All--` all joined characters will leave.',
+    example: 'leave Laripo [animation="Slide To Left"]',
+    variables: {
+      // variable_name : documentation
+      'animation':'What is the animation followed by the character leaving the scene (dtl_animation_leave)',
+      'length':'Time length of the animation. CAN ONLY BE SET WITH animation.',
+      'wait':"Await for the animation to finish before doing anything else. CAN ONLY BE SET WITH animation.",
+    }
   },
   {
     name: 'do',
@@ -253,6 +295,72 @@ const DTL_POSITIONS = [
   }
 ];
 // =============================================================================
+// CHARACTER / BACKGROUND ANIMATION
+// =============================================================================
+const DTL_ANIMATION_JOIN = [
+  "Bounce In",
+  "Fade In Down",
+  "Fade In",
+  "Fade In Up",
+  "Instant In",
+  "Slide In Down",
+  "Slide From Left",
+  "Slide From Right",
+  "Slide In Up",
+  "Zoom Center In",
+  "Zoom In",
+];
+const DTL_ANIMATION_LEAVE = [
+  "Bounce Out",
+  "Fade Out Up",
+  "Fade Out",
+  "Fade Out Down",
+  "Instant Out",
+  "Slide Out Up",
+  "Slide To Left",
+  "Slide To Right",
+  "Slide Out Down",
+  "Zoom Center Out",
+  "Zoom Out",
+];
+const DTL_TRANSITION = [
+  "Push Down",
+  "Push Left",
+  "Push Right",
+  "Push Up",
+  "Simple Fade",
+  "Swipe Diagonal Up Left",
+  "Swipe Left To Right",
+  "Swipe Right To Left"
+];
+const DTL_ANIMATION_UPDATE = [
+  "Bounce",
+  "Heartbeat",
+  "Shake X",
+  "Shake Y",
+  "Tada",
+];
+const DTL_MOVE_EASE = [
+  "In",
+  "Out",
+  "In_Out",
+  "Out_In",
+];
+const DTL_MOVE_TRANS = [
+  "Linear",
+  "Sine",
+  "Quint",
+  "Quart",
+  "Quad",
+  "Expo",
+  "Elastic",
+  "Cubic",
+  "Circ",
+  "Bounce",
+  "Back",
+  "Spring",
+];
+// =============================================================================
 // PROJECT.GODOT CACHE (characters + audio channels)
 // =============================================================================
 
@@ -342,8 +450,6 @@ async function refreshProjectGodotData() {
     cachedAudioChannels = [];
   }
 }
-
-
 
 /**
  * Diagnostic collection used to warn about `jump` targets that have no
