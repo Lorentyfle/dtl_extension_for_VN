@@ -2,37 +2,6 @@
 
 ## [Unreleased]
 - Missing feature: suggestion for paths.
-- Missing feature: audio autocomplete should be personalized as kind can be gound in project.godot, in the entry:
-```
-audio/channel_defaults={
-"": {
-"audio_bus": "SFX",
-"fade_length": 0.0,
-"loop": false,
-"volume": 0.0
-},
-"loopSFX": {
-"audio_bus": "SFX",
-"fade_length": 0.0,
-"loop": true,
-"volume": 0.0
-},
-"loopSFX_channel2": {
-"audio_bus": "SFX",
-"fade_length": 0.0,
-"loop": true,
-"volume": 0.0
-},
-"music": {
-"audio_bus": "OST",
-"fade_length": 1.5,
-"loop": true,
-"volume": 0.0
-},
-}
-```
-where here we can find music, loopSFX and loopSFX_channel2.
-Then a "" string should be expected.
 - Bug: Make in sort if, else, elif, while, - choice, increase the tabulation by one.
 - Bug: the color of the choice continues even after the | where it should stop.
 - Bug: Accents are not counted as possible character name. Of example: Léa.
@@ -60,5 +29,6 @@ Then a "" string should be expected.
 - Bug: after a dialogic command, like label, do, set, return, if, else, elif, default autocomplete like dialogue text should be shown. Currently only character are suggested which should only be for join, update and leave.
 - Bug: Choices do not have default autocomplete like dialogue text but only character are suggested.
 - Make in sort tabulation level is kept when typing enter.
-- Missing feature: jump should have suggestion based on already written labels in the file.
+- jump should have suggestion based on already written labels in the file.
 ## [0.1.6] - 2026-09-04
+- audio autocomplete should be personalized as kind can be found in project.godot.

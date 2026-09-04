@@ -253,15 +253,97 @@ const DTL_POSITIONS = [
   }
 ];
 // =============================================================================
-// CHARACTER CACHE
+// PROJECT.GODOT CACHE (characters + audio channels)
 // =============================================================================
 
-/**
- * Character names found in project.godot.
- *
- * @type {string[]}
- */
+/** Character names found in project.godot. @type {string[]} */
 let cachedCharacterNames = [];
+
+/** Audio channel/kind names found in project.godot's audio/channel_defaults. @type {string[]} */
+let cachedAudioChannels = [];
+
+function extractCharacterNames(text) {
+  const sectionMatch = text.match(/\[dialogic\]([\s\S]*?)(\n\[|$)/);
+  if (!sectionMatch) { return []; }
+  const dictionaryMatch = sectionMatch[1].match(/directories\/dch_directory\s*=\s*\{([\s\S]*?)\}/);
+  if (!dictionaryMatch) { return []; }
+  const keyPattern = /"([^"]+)"\s*:\s*"[^"]*"/g;
+  const names = [];
+  let match;
+  while ((match = keyPattern.exec(dictionaryMatch[1])) !== null) { names.push(match[1]); }
+  return names;
+}
+
+/**
+ * Extract audio channel names from `audio/channel_defaults = { ... }`.
+ * Each top-level key (e.g. "music", "loopSFX") is what `audio KIND "path"`
+ * expects as its first argument. Only top-level keys are followed directly
+ * by a nested "{" - the inner keys (audio_bus, fade_length, loop, volume)
+ * are followed by a plain value instead, so no bracket-depth tracking is
+ * needed to tell them apart once the outer dict body is isolated.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+function extractAudioChannels(text) {
+  const headerMatch = text.match(/audio\/channel_defaults\s*=\s*\{/);
+  if (!headerMatch) { return []; }
+
+  const openBraceIndex = headerMatch.index + headerMatch[0].length - 1;
+  const body = extractBalancedBraces(text, openBraceIndex);
+  if (body === null) { return []; }
+
+  const keyPattern = /"([^"]*)"\s*:\s*\{/g;
+  const names = [];
+  let match;
+  while ((match = keyPattern.exec(body)) !== null) { names.push(match[1]); }
+  return names;
+}
+
+/**
+ * Return the substring between `text[openBraceIndex]` (a '{') and its
+ * matching closing '}', tracking nesting depth. Needed because
+ * channel_defaults is a dict-of-dicts, unlike the flat dch_directory dict.
+ *
+ * @param {string} text
+ * @param {number} openBraceIndex
+ * @returns {string | null}
+ */
+function extractBalancedBraces(text, openBraceIndex) {
+  let depth = 0;
+  for (let i = openBraceIndex; i < text.length; i++) {
+    if (text[i] === '{') { depth++; }
+    else if (text[i] === '}') {
+      depth--;
+      if (depth === 0) { return text.slice(openBraceIndex + 1, i); }
+    }
+  }
+  return null;
+}
+
+/**
+ * Re-read project.godot and refresh both caches from a single file read.
+ */
+async function refreshProjectGodotData() {
+  const matches = await vscode.workspace.findFiles('**/project.godot', '**/.godot/**', 1);
+  if (matches.length === 0) {
+    cachedCharacterNames = [];
+    cachedAudioChannels = [];
+    return;
+  }
+  try {
+    const bytes = await vscode.workspace.fs.readFile(matches[0]);
+    const text = Buffer.from(bytes).toString('utf8');
+    cachedCharacterNames = extractCharacterNames(text);
+    cachedAudioChannels = extractAudioChannels(text);
+  } catch (error) {
+    console.error('DTL Reader: could not read project.godot', error);
+    cachedCharacterNames = [];
+    cachedAudioChannels = [];
+  }
+}
+
+
 
 /**
  * Diagnostic collection used to warn about `jump` targets that have no
@@ -613,6 +695,25 @@ function collectDocumentLabels(document) {
 // =============================================================================
 // AUDIO HELPERS
 // =============================================================================
+function createAudioKindCompletion(name) {
+  const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.EnumMember);
+  item.detail = 'Dialogic audio channel (from project.godot)';
+  return item;
+}
+
+function createAudioPathCompletion() {
+  const item = new vscode.CompletionItem('""', vscode.CompletionItemKind.Snippet);
+  item.detail = 'Audio file path';
+  item.insertText = new vscode.SnippetString('"$0"');
+  item.documentation = new vscode.MarkdownString('Path to the audio file, e.g. `res://assets/ost/my_music.mp3`.');
+  return item;
+}
+
+
+
+// =============================================================================
+// BALISE HELPERS
+// =============================================================================
 
 
 /**
@@ -691,14 +792,14 @@ function activate(context) {
   // ---------------------------------------------------------------------------
   // Initial character cache
   // ---------------------------------------------------------------------------
-  refreshCharacterNames();
+  refreshProjectGodotData();
   // ---------------------------------------------------------------------------
   // Watch project.godot
   // ---------------------------------------------------------------------------
   const watcher = vscode.workspace.createFileSystemWatcher('**/project.godot');
-  watcher.onDidChange(refreshCharacterNames);
-  watcher.onDidCreate(refreshCharacterNames);
-  watcher.onDidDelete(refreshCharacterNames);
+  watcher.onDidChange(refreshProjectGodotData);
+  watcher.onDidCreate(refreshProjectGodotData);
+  watcher.onDidDelete(refreshProjectGodotData);
   context.subscriptions.push(watcher);
   // ===========================================================================
   // HOVER PROVIDER
@@ -854,9 +955,7 @@ function activate(context) {
   // ===========================================================================
   diagnosticCollection = vscode.languages.createDiagnosticCollection('dtl');
   context.subscriptions.push(diagnosticCollection);
-
   vscode.workspace.textDocuments.forEach(updateDiagnostics);
-
   context.subscriptions.push(
     vscode.workspace.onDidOpenTextDocument(updateDiagnostics)
   );
@@ -988,6 +1087,31 @@ function activate(context) {
                   return items;
                 }
               }
+            }
+          }
+          // ===================================================================
+          // AUDIO
+          // ===================================================================
+          const audioCommandMatch = beforeCursor.match(/^\s*audio(?:\s+(.*))?$/);
+          if (audioCommandMatch) {
+            const argumentsText = audioCommandMatch[1] || '';
+            if (argumentsText === '') {
+              for (const kind of cachedAudioChannels) { items.push(createAudioKindCompletion(kind)); }
+              return items;
+            }
+            const argumentsParts = argumentsText.split(/\s+/);
+            // Kind is being typed: "audio mu|"
+            if (argumentsParts.length === 1) {
+              const prefix = argumentsParts[0].toLowerCase();
+              for (const kind of cachedAudioChannels) {
+                if (kind.toLowerCase().startsWith(prefix)) { items.push(createAudioKindCompletion(kind)); }
+              }
+              return items;
+            }
+            // Kind fully typed, waiting for the path: "audio music |"
+            if (argumentsParts.length === 2 && argumentsParts[1] === '') {
+              items.push(createAudioPathCompletion());
+              return items;
             }
           }
           // ===================================================================
