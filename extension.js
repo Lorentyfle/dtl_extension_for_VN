@@ -360,6 +360,60 @@ const DTL_MOVE_TRANS = [
   "Back",
   "Spring",
 ];
+
+/**
+ * Known value suggestions for specific attribute names, scoped per
+ * DTL_ENTRIES name so e.g. join's `animation=` offers DTL_ANIMATION_JOIN
+ * while leave's `animation=` offers DTL_ANIMATION_LEAVE instead.
+ *
+ * @type {Record<string, Record<string, string[]>>}
+ */
+const DTL_ATTRIBUTE_VALUE_SUGGESTIONS = {
+  join: { animation: DTL_ANIMATION_JOIN },
+  update: { animation: DTL_ANIMATION_UPDATE, move_trans: DTL_MOVE_TRANS, move_ease: DTL_MOVE_EASE },
+  leave: { animation: DTL_ANIMATION_LEAVE },
+  background: { transition: DTL_TRANSITION },
+};
+
+/**
+ * Completion item for a known attribute VALUE, e.g. "Bounce In" for
+ * `animation=`. Values with spaces need quoting; if the person already
+ * typed the opening quote themselves, only the bare value is inserted so
+ * the quote isn't duplicated.
+ *
+ * @param {string} value
+ * @param {boolean} alreadyQuoted
+ * @returns {vscode.CompletionItem}
+ */
+function createValueCompletion(value, alreadyQuoted) {
+  const item = new vscode.CompletionItem(value, vscode.CompletionItemKind.EnumMember);
+  item.detail = 'DTL value';
+  item.insertText = alreadyQuoted ? value : `"${value}"`;
+  return item;
+}
+
+/**
+ * Build completion items for an attribute's VALUE (the part after '='), if
+ * `entryName`/`attributeName` has a known suggestion list registered in
+ * DTL_ATTRIBUTE_VALUE_SUGGESTIONS.
+ *
+ * @param {string} entryName - DTL_ENTRIES name the attribute belongs to (e.g. "join")
+ * @param {string} attributeName - e.g. "animation"
+ * @param {string} typedValue - raw text typed so far after '=' (quote included, if any)
+ * @returns {vscode.CompletionItem[]}
+ */
+function createAttributeValueSuggestions(entryName, attributeName, typedValue) {
+  const values = DTL_ATTRIBUTE_VALUE_SUGGESTIONS[entryName] && DTL_ATTRIBUTE_VALUE_SUGGESTIONS[entryName][attributeName];
+  if (!values) {
+    return [];
+  }
+  const alreadyQuoted = typedValue.startsWith('"');
+  const prefix = (alreadyQuoted ? typedValue.slice(1) : typedValue).toLowerCase();
+  return values
+    .filter(value => value.toLowerCase().startsWith(prefix))
+    .map(value => createValueCompletion(value, alreadyQuoted));
+}
+
 // =============================================================================
 // PROJECT.GODOT CACHE (characters + audio channels)
 // =============================================================================
@@ -564,7 +618,11 @@ function createAttributeCompletion(name, doc) {
   const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Property);
   item.detail = 'DTL bracket parameter';
   item.documentation = new vscode.MarkdownString(doc);
-  item.insertText = new vscode.SnippetString(`${name}=`);
+  item.insertText = new vscode.SnippetString(`${name}=$0`);
+  item.command = {
+    command: 'editor.action.triggerSuggest',
+    title: 'Show DTL value suggestions'
+  };
   return item;
 }
 
@@ -943,7 +1001,12 @@ function activate(context) {
                     entry.name === commandName
                 );
               if (!entry) {
-                return undefined;
+                // Not a real bracket command - this is just an attribute
+                // name that happens to sit directly against '[' (e.g.
+                // join/update/leave's first inline option, "[fade=...]").
+                // Stop scanning and let the parameter-hover logic below
+                // handle it instead of giving up on hover entirely.
+                break;
               }
               const range =
                 new vscode.Range(
@@ -1016,6 +1079,30 @@ function activate(context) {
                     }
                   }
                 }
+              }
+            }
+          }
+          // -------------------------------------------------------------------
+          // Position keywords
+          //
+          // join Laripo center|
+          //             ^^^^^^ hovering this
+          // -------------------------------------------------------------------
+          const positionWordRange = document.getWordRangeAtPosition(position, /[A-Za-z_][A-Za-z0-9_]*/);
+          if (positionWordRange) {
+            const positionWord = document.getText(positionWordRange);
+            const positionEntry = DTL_POSITIONS.find(position => position.name === positionWord);
+            if (positionEntry) {
+              const beforePosition = line.substring(0, positionWordRange.start.character);
+              // Only the first token after "join <character>" / "update
+              // <character>" is really this position argument, so this
+              // stays scoped to that slot rather than any stray word that
+              // happens to match a position name (e.g. inside dialogue text).
+              if (/^\s*(join|update)\b\s+\S+\s*$/.test(beforePosition)) {
+                const markdown = new vscode.MarkdownString();
+                markdown.appendMarkdown(`**${positionEntry.name}** _(DTL character position)_\n\n`);
+                markdown.appendMarkdown(positionEntry.description);
+                return new vscode.Hover(markdown, positionWordRange);
               }
             }
           }
@@ -1244,6 +1331,13 @@ function activate(context) {
                   }
                   items.push(createAttributeCompletion(attributeName, commandEntry.variables[attributeName]));
                 }
+              } else {
+                // Mid-value, e.g. "animation=Bou|" - offer known values for
+                // this attribute (animation, move_trans, move_ease, ...) if any.
+                const equalsIndex = currentToken.indexOf('=');
+                const attributeName = currentToken.slice(0, equalsIndex);
+                const typedValue = currentToken.slice(equalsIndex + 1);
+                items.push(...createAttributeValueSuggestions(commandEntry.name, attributeName, typedValue));
               }
               return items;
             }
@@ -1297,6 +1391,16 @@ function activate(context) {
                     }
                     items.push(createAttributeCompletion(attributeName, bracketEntry.variables[attributeName]));
                   }
+                  return items;
+                }
+                // Mid-value, e.g. "[background transition=Push|" - offer
+                // known values for this attribute (transition, ...) if any.
+                const equalsIndex = currentToken.indexOf('=');
+                const attributeName = currentToken.slice(0, equalsIndex);
+                const typedValue = currentToken.slice(equalsIndex + 1);
+                const valueSuggestions = createAttributeValueSuggestions(bracketEntry.name, attributeName, typedValue);
+                if (valueSuggestions.length > 0) {
+                  items.push(...valueSuggestions);
                   return items;
                 }
               }
@@ -1374,7 +1478,7 @@ function activate(context) {
           return items;
           }
         }
-    , ' ', '[');
+    , ' ', '[','=');
   context.subscriptions.push(completionProvider);
 }
 // =============================================================================

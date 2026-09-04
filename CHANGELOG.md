@@ -4,9 +4,11 @@
 - Missing feature: suggestion for paths.
 - Missing feature: Make the extra_data become fully functionnal. [VERY COMPLEX, nice but not necessary]
 - Bug: Make in sort if, else, elif, while, - choice, increase the tabulation by one.
-- Bug: No hover documentation for `[...]` option bracket of join, update and leave if the argument is attached to `[` for example: `[fade`.
-- Bug: No hover documentation for position (left, ...).
-- Bug: No autocomplete for animation= and transition= for relevant balises.
+## [0.1.8] - 2026-09-04
+- Bug: hovering an option that sits directly against `[` (e.g. `[fade` as the first inline option of join/update/leave) now shows its documentation instead of silently doing nothing.
+- Bug: position keywords (`left`, `right`, `center`, `leftmost`, `rightmost`) now show hover documentation when used as join/update's position argument.
+- Autocomplete for known attribute VALUES: `animation=` (join, update, leave) and `transition=` (background) now suggest their real option names (e.g. `"Bounce In"`), not just the attribute name itself. `move_trans=`/`move_ease=` (update) got the same treatment.
+- README written.
 ## [0.1.7] - 2026-09-04
 - Autocomplete and hover documentation for the `[...]` options bracket of join, update and leave (was previously unsupported, only the bracket-style commands like `[wait]` had it).
 - Autocomplete and hover documentation for join/update's transform commands (`pos`, `size`, `rot`) typed between the character/position and the `[...]` bracket.

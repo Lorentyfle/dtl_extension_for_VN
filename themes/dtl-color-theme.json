@@ -93,6 +93,14 @@
       "settings": { "foreground": "#949493" }
     },
     {
+      "scope": "variable.language.all.dtl",
+      "settings": { "foreground": "#f79cd7","fontStyle": "bold" }
+    },
+    {
+      "scope": "variable.parameter.transform.dtl",
+      "settings": { "foreground": "#31af50" }
+    },
+    {
       "scope": "meta.wait.dtl",
       "settings": { "foreground": "#9b83fa" }
     },

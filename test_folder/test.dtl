@@ -1,0 +1,260 @@
+# DTL Reader — complete feature showcase
+# Use this file for screenshots, GIFs, and recordings.
+# Some lines near the end are intentionally invalid to demonstrate diagnostics.
+
+# =============================================================================
+# 1. COMMANDS + CHARACTER / POSITION AUTOCOMPLETE
+# =============================================================================
+
+join Laripo left
+join Loucas center [animation="Fade In"]
+join Trevor right [animation="Slide From Left" length=0.75 wait=true mirrored=false z_index=1 extra_data="set Emotion/Happy"]
+[wait]
+update Laripo left
+update Loucas center [animation="Heartbeat"]
+update Trevor pos=x0.3 size=x0.8 rot=5
+update Trevor right [move_time=1.0 move_trans="Linear" move_ease="In_Out" repeat=2 fade="Crossfade" fade_length=0.25]
+
+leave Laripo [animation="Slide To Left" length=0.75 wait=true]
+leave --All--
+
+set {chapter} = 4
+set {chapter} += 1
+do VnLibrary.apply_emotions()
+[end_timeline]
+
+# =============================================================================
+# 2. LABEL / JUMP + GO TO DEFINITION
+# =============================================================================
+
+jump showcase_dialogue
+
+label showcase_unused_label
+Laripo: This label is here so jump completion has multiple targets.
+jump showcase_dialogue
+
+label showcase_dialogue
+Laripo: This line is the destination of the first jump.
+
+jump showcase_end
+
+
+
+
+
+# =============================================================================
+# 3. DIALOGUE + NARRATION + WORD-BASED COMPLETION
+# =============================================================================
+join Laripo left [animation="Fade In"]
+Laripo: Hi!
+Laripo: Hello there! This is normal dialogue text. #id:unique_translation_id
+Laripo: Try typing a common word here and check the word-based suggestions. #id:unique_translation_id
+This is narration without a character name. #id:unique_translation_id
+Another narration line demonstrates the same text completion behavior. #id:unique_translation_id
+
+Laripo: Don't worry about apostrophes. It's ordinary dialogue, and don't should not look like a string. #id:unique_translation_id
+
+# =============================================================================
+# 4. BBCode-STYLE BALISES
+# =============================================================================
+
+Laripo: [b]Bold text[/b]
+Laripo: [i]Italic text[/i]
+Laripo: [u]Underlined text[/u]
+Laripo: [s]Strikethrough text[/s]
+
+Laripo: [i]Italic with [b]bold nested inside[/b][/i]
+Laripo: [b][i]Bold with italic nested inside[/i][/b]
+Laripo: [u][s]Underline with strike nested inside[/s][/u]
+
+Laripo: Mixed [b]bold[/b], [i]italic[/i], [u]underline[/u], and [s]strike[/s].
+Laripo: [b][i]Two levels [u]inside[/u][/i] still test nested highlighting.
+
+# =============================================================================
+# 5. CHOICES
+# =============================================================================
+
+Laripo: Hello!! #id:unique_translation_id
+- Ask about the weather | #id:unique_translation_id
+    Laripo: The weather is nice! #id:unique_translation_id
+- Ask about the documentation | #id:unique_translation_id
+    Laripo: I... don't  understand... #id:unique_translation_id
+- [b]Ask an important question[/b] | #id:unique_translation_id
+    Laripo: Booooring #id:unique_translation_id
+- Leave the conversation | #id:unique_translation_id
+    [end_timeline]
+- A choice with [i]formatting[/i] and a condition | [if {chapter} >= 4] #id:unique_translation_id
+    - A choice with several words before the metadata | [if {chapter} == 5] [else="Go back"] #id:unique_translation_id
+        narrator: Choices can be nested! #id:unique_translation_id
+
+[wait 1.5]
+[wait time="1.0" hide_text=false skippable=true]
+[wait_input]
+[wait_input hide_text=true]
+
+[voice path="res://assets/voices/Laripo_dialogue.mp3" volume=1.0 bus="Voice"]
+
+[clear time="1.0" step=true text=true portraits=true music=false background=false position=true style=true]
+
+[background arg="res://assets/sprite/new_background.png" fade="0.5" wait=true transition="Simple Fade"]
+[background scene="res://scenes/background.tscn" transition="Push Left" fade="1.0" wait=false]
+
+[style name="default"]
+
+[signal arg_type="dict" arg="{"Amount":100,"Effect":"Rain","Nature":"meteo","Windx":20.0,"Windy":1.0}"]
+
+[text_input text="What is your name?" var="{player_name}" placeholder="No idea" default="Unknown" allow_empty=false]
+
+[end_timeline]
+
+# =============================================================================
+# 7. AUDIO + PATH AUTOCOMPLETE
+# =============================================================================
+
+audio music "res://assets/ost/my_music.mp3"
+audio music "res://assets/ost/another_track.ogg"
+audio sfx "res://assets/audio/click.wav"
+
+# =============================================================================
+# 8. VALUE AUTOCOMPLETE TESTS
+# =============================================================================
+# Put the cursor after the '=' and invoke completion.
+# These are especially useful for screenshots of enum/value suggestions.
+
+join Laripo center [animation=""]
+join Laripo center [animation="Fa"]
+join Laripo center [animation=]
+join Laripo center [length=]
+join Laripo center [wait=]
+
+update Laripo center [animation=""]
+update Laripo center [animation="Sh"]
+update Laripo center [move_trans=""]
+update Laripo center [move_ease=""]
+
+leave Laripo [animation=""]
+leave Laripo [animation="Sl"]
+leave Laripo [length=]
+leave Laripo [wait=]
+
+[background transition=""]
+[background transition="Pu"]
+[background fade=]
+[background wait=]
+
+# =============================================================================
+# 9. PARAMETER-NAME AUTOCOMPLETE
+# =============================================================================
+# Delete/partially type a parameter name after '[' or inside a trailing
+# character-options bracket, then open completion.
+
+[wait t]
+[wait h]
+[wait s]
+
+[voice p]
+[voice v]
+[voice b]
+
+[clear t]
+[clear p]
+[clear m]
+[clear b]
+
+[background a]
+[background s]
+[background tr]
+[background f]
+[background w]
+
+[style n]
+[signal a]
+[text_input t]
+[text_input v]
+[text_input p]
+
+join Laripo center [an]
+join Laripo center [mi]
+join Laripo center [z]
+join Laripo center [ex]
+
+update Laripo center [an]
+update Laripo center [mo]
+update Laripo center [fa]
+update Laripo center [re]
+
+leave Laripo [an]
+
+# =============================================================================
+# 10. HOVER DOCUMENTATION TARGETS
+# =============================================================================
+# Hover these words in VS Code:
+# label, jump, join, update, leave, wait, background, animation, transition,
+# center, left, right, pos, size, rot
+
+join Laripo center [animation="Bounce In"]
+update Laripo left [move_trans="Sine" move_ease="Out"]
+[background transition="Swipe Left To Right"]
+[wait time="1.0"]
+
+# =============================================================================
+# 11. DIAGNOSTIC TESTS
+# =============================================================================
+# The following two lines are intentionally wrong.
+# They should demonstrate the unresolved-jump and unclosed-balise diagnostics.
+
+jump this_label_does_not_exist
+Laripo: This is [b]an intentionally unclosed balise.
+
+# =============================================================================
+# 12. END / GO-TO-DEFINITION DESTINATION
+# =============================================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+label showcase_end
+Laripo: End of the DTL Reader showcase.
+[end_timeline]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+join Laripo left
+Laripo: Hello there! [b]Welcome[/b] to the documentation.
+
+- Ask about the weather | #id:choice_weather
+- Leave                 | #id:choice_leave
+
+label ending
+[end_timeline]

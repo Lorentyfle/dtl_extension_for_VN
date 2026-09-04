@@ -56,7 +56,9 @@
         { "name": "keyword.control.command.dtl", "match": "\\b(join|leave|update|audio|do|return)\\b" },
         { "name": "support.type.audio-kind.dtl", "match": "(?<=\\baudio\\b)\\s+([^\\s\"]+)" },
         { "name": "constant.language.position.dtl", "match": "\\b(left|right|center|rightmost|leftmost)\\b" },
-        { "name": "entity.name.character.dtl", "match": "(?<=\\b(join|update|leave)\\s)[\\p{L}_][\\p{L}0-9_]*" }
+        { "name": "entity.name.character.dtl", "match": "(?<=\\b(join|update|leave)\\s)[\\p{L}_][\\p{L}0-9_]*" },
+        { "name": "variable.language.all.dtl", "match": "^\\s*leave\\s+(--All--)"},
+        { "name": "variable.parameter.transform.dtl", "match": "(?<=^\\s*(?:join|update)[^\\r\\n]*)\\b(pos|size|rot)\\b(?=\\s*=)"}
       ]
     },
 
