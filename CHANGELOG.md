@@ -4,6 +4,7 @@
 - BBCode balises highlight.
 - Add documentation and suggestion for each of the possible entries for [] entries (hoover + autocomplete).
 - Bug: the color of the choice continues even after the | where it should stop.
+- Bug: Accents are not counted as possible character name. Of example: Léa.
 - if `[wait]` is inside dialogue text it will not have good color.
 ## [0.1.0] - 2026-09-03
 - Syntax highlight for the important commands.
