@@ -178,33 +178,17 @@
     },
 
     "choices": {
-      "comment": "'- choice text | [if ...] [else=...] #id:xyz'. The leading dash is punctuation. Only the choice WORDING (before the first '|') gets the markup.list.choice.dtl color: it lives in its own nested begin/end that stops at the first '|' (or end of line) via lookahead, so it never applies to the conditions/#id: that follow - those fall through to the normal option/translation-id/bracket-command highlighting instead.",
+      "comment": "'- choice text | [if ...] [else=...] #id:xyz'. The leading dash is punctuation. Only the choice wording gets the choice color and stops before |, #, or the end of the line.",
       "patterns": [
         {
           "begin": "^(\\s*)(-)(\\s)",
           "beginCaptures": {
             "2": { "name": "punctuation.definition.list.begin.dtl" }
           },
-          "end": "$",
+          "end": "\\r?$",
           "patterns": [
-            {
-              "name": "markup.list.choice.dtl",
-              "begin": "(?=\\S)",
-              "end": "(?=\\||$)",
-              "patterns": [
-                { "include": "#balises" },
-                { "include": "#signals" },
-                { "include": "#wait" },
-                { "include": "#audio" },
-                { "include": "#clear" },
-                { "include": "#images" },
-                { "include": "#text_input" },
-                { "include": "#end_timeline" },
-                { "include": "#options" },
-                { "include": "#variables" }
-              ]
-            },
-            { "name": "punctuation.separator.choice.dtl", "match": "\\|" },
+            { "name": "markup.list.choice.dtl", "match": "\\S(?:[^|#\\r\\n]*?)(?=\\||#|\\r?$)"},
+            { "name": "punctuation.separator.choice.dtl", "match": "\\|"},
             { "include": "#translationid" },
             { "include": "#balises" },
             { "include": "#signals" },

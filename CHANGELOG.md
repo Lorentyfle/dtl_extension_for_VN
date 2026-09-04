@@ -3,6 +3,7 @@
 ## [Unreleased]
 - Missing feature: suggestion for paths.
 - Missing feature: Make the extra_data become fully functionnal. [VERY COMPLEX, nice but not necessary]
+- Bug: CRITICAL: Choice color the full line even with | and #id:xyz
 - Bug: Make in sort if, else, elif, while, - choice, increase the tabulation by one.
 - Bug: No hover documentation for `[...]` option bracket of join, update and leave if the argument is attached to `[` for example: `[fade`.
 - Bug: No hover documentation for position (left, ...).
