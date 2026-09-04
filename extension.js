@@ -6,10 +6,10 @@
 // - Character autocomplete from project.godot
 // - Command autocomplete
 // - Contextual character/position autocomplete for join/leave/update
-// - Word-based autocomplete for spoken dialogue text
-// - Hover documentation for commands
+// - Word-based autocomplete for spoken dialogue text (named or narration)
+// - Hover documentation for commands and balises
 // - Go to Definition for `jump NAME` -> `label NAME`
-// - Diagnostics warning about `jump` targets with no matching `label`
+// - Diagnostics: unresolved `jump` targets, unclosed [balise] tags
 // -----------------------------------------------------------------------------
 
 const vscode = require('vscode');
@@ -196,6 +196,20 @@ const DTL_ENTRIES = [
     example: '[end_timeline]',
     variables: {
     }
+  },
+  {
+    name: 'b',
+    type: 'bracket',
+    syntax: '[b] ... [\\b]',
+    description: 'BBCode-style balise: wraps the enclosed dialogue/narration/choice text in bold. Note the closing tag uses a backslash, not a forward slash.',
+    example: 'Laripo: This is [b]important[\\b].'
+  },
+  {
+    name: 'i',
+    type: 'bracket',
+    syntax: '[i] ... [\\i]',
+    description: 'BBCode-style balise: wraps the enclosed dialogue/narration/choice text in italics. Note the closing tag uses a backslash, not a forward slash.',
+    example: 'Laripo: This is [i]interesting[\\i].'
   }
 ];
 // =============================================================================
@@ -408,6 +422,24 @@ function isBareNarrationLine(beforeCursor) {
 }
 
 /**
+ * True when a full line of source is player-facing text: a `Character:`
+ * dialogue line, a `- choice` line, or a bare narration line. Balises are
+ * only meaningful on these lines, so diagnostics are scoped to them.
+ *
+ * @param {string} lineText
+ * @returns {boolean}
+ */
+function isPlayerFacingTextLine(lineText) {
+  if (/^\s*[A-Za-z_][A-Za-z0-9_]*\s*:/.test(lineText)) {
+    return true; // Character: ...
+  }
+  if (/^\s*-\s/.test(lineText)) {
+    return true; // choice
+  }
+  return isBareNarrationLine(lineText);
+}
+
+/**
  * Collect every unique "word" (letters, apostrophes, hyphens - so accented
  * names and contractions like "don't" work too) already used anywhere in
  * the document. Used to power VS Code-style word-based suggestions for
@@ -476,17 +508,26 @@ function findLabelLocation(document, labelName) {
 }
 
 /**
- * Re-scan a `.dtl` document and flag every `jump NAME` whose target has no
- * matching `label NAME` anywhere in the same file, so a broken jump shows
- * up as a warning even when it can't be resolved by "Go to Definition".
+ * Reserved bracket command names that are NOT balises, even though they
+ * share the bare `[name]` shape (e.g. `[wait]`, `[end_timeline]`). Mirrors
+ * the negative lookahead in the grammar's `#balises` rule.
+ *
+ * @type {Set<string>}
+ */
+const RESERVED_BRACKET_NAMES = new Set([
+  'wait', 'wait_input', 'audio', 'voice', 'clear',
+  'background', 'style', 'signal', 'text_input', 'end_timeline'
+]);
+
+/**
+ * Scan every `jump NAME` line and flag targets with no matching `label
+ * NAME` anywhere in the same file, so a broken jump shows up as a warning
+ * even when it can't be resolved by "Go to Definition".
  *
  * @param {vscode.TextDocument} document
+ * @returns {vscode.Diagnostic[]}
  */
-function updateJumpDiagnostics(document) {
-  if (document.languageId !== 'dtl') {
-    return;
-  }
-
+function findUnresolvedJumpDiagnostics(document) {
   const declaredLabels = new Set();
   for (let line = 0; line < document.lineCount; line++) {
     const match = document.lineAt(line).text.match(/^\s*label\s+([A-Za-z_][A-Za-z0-9_]*)/);
@@ -518,6 +559,73 @@ function updateJumpDiagnostics(document) {
       vscode.DiagnosticSeverity.Warning
     ));
   }
+
+  return diagnostics;
+}
+
+/**
+ * Scan dialogue/narration/choice lines for a BBCode-style balise such as
+ * `[b]` or `[MyEffect]` that has no matching `[\name]` closer on the same
+ * line. Reserved bracket commands like `[wait]` are skipped since they
+ * aren't balises. A broken balise flags the whole line (rather than just
+ * the tag) so it's easy to spot at a glance, mirroring the grammar's own
+ * end-of-line fallback for the same unclosed-tag case.
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {vscode.Diagnostic[]}
+ */
+function findUnclosedBaliseDiagnostics(document) {
+  const diagnostics = [];
+  const openTagPattern = /\[([A-Za-z_][A-Za-z0-9_]*)\]/g;
+
+  for (let line = 0; line < document.lineCount; line++) {
+    const text = document.lineAt(line).text;
+    if (!isPlayerFacingTextLine(text)) {
+      continue;
+    }
+
+    openTagPattern.lastIndex = 0;
+    let match;
+    while ((match = openTagPattern.exec(text)) !== null) {
+      const tagName = match[1];
+      if (RESERVED_BRACKET_NAMES.has(tagName)) {
+        continue;
+      }
+
+      const closingTag = `[/${tagName}]`;
+      if (text.includes(closingTag)) {
+        continue; // properly closed
+      }
+
+      const range = new vscode.Range(line, 0, line, text.length);
+      diagnostics.push(new vscode.Diagnostic(
+        range,
+        `"[${tagName}]" has no matching "${closingTag}" on this line - the balise is unclosed.`,
+        vscode.DiagnosticSeverity.Warning
+      ));
+      break; // one whole-line warning per line is enough, even if several tags are broken
+    }
+  }
+
+  return diagnostics;
+}
+
+/**
+ * Re-scan a `.dtl` document for every diagnostic this extension knows how
+ * to produce (unresolved jumps, unclosed balises) and publish the merged
+ * result.
+ *
+ * @param {vscode.TextDocument} document
+ */
+function updateDiagnostics(document) {
+  if (document.languageId !== 'dtl') {
+    return;
+  }
+
+  const diagnostics = [
+    ...findUnresolvedJumpDiagnostics(document),
+    ...findUnclosedBaliseDiagnostics(document)
+  ];
 
   diagnosticCollection.set(document.uri, diagnostics);
 }
@@ -663,18 +771,18 @@ function activate(context) {
     );
   context.subscriptions.push(definitionProvider);
   // ===========================================================================
-  // DIAGNOSTICS (warn when a `jump` target has no matching `label`)
+  // DIAGNOSTICS (unresolved `jump` targets, unclosed BBCode-style balises)
   // ===========================================================================
   diagnosticCollection = vscode.languages.createDiagnosticCollection('dtl');
   context.subscriptions.push(diagnosticCollection);
 
-  vscode.workspace.textDocuments.forEach(updateJumpDiagnostics);
+  vscode.workspace.textDocuments.forEach(updateDiagnostics);
 
   context.subscriptions.push(
-    vscode.workspace.onDidOpenTextDocument(updateJumpDiagnostics)
+    vscode.workspace.onDidOpenTextDocument(updateDiagnostics)
   );
   context.subscriptions.push(
-    vscode.workspace.onDidChangeTextDocument(event => updateJumpDiagnostics(event.document))
+    vscode.workspace.onDidChangeTextDocument(event => updateDiagnostics(event.document))
   );
   context.subscriptions.push(
     vscode.workspace.onDidCloseTextDocument(document => diagnosticCollection.delete(document.uri))
