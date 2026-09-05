@@ -847,6 +847,37 @@ function createCharacterCompletion(name) {
 }
 
 /**
+ * Isolate the `key=value` (or bare `key`) token currently being typed
+ * inside a `[...]` bracket's argument text, e.g. the last token in
+ * `time=1.5 fade` is `fade`.
+ *
+ * A plain `lastIndexOf(' ')` split breaks as soon as a value itself
+ * contains a space - e.g. `extra_data="set ` has a space *inside* the
+ * open quote, so naively splitting on the last space would throw away
+ * `extra_data="` and see only `` (or a stray word), leaving `set ...`
+ * value completions (like the emotion node-path autocomplete) with
+ * nothing to work from. This instead checks whether an odd number of `"`
+ * puts us inside an open string, and if so, keeps the whole
+ * `key="partial value` back to that key's `=`.
+ *
+ * @param {string} argumentsText - bracket content typed so far (no brackets)
+ * @returns {string}
+ */
+function getCurrentBracketToken(argumentsText) {
+  const insideOpenString = (argumentsText.match(/"/g) || []).length % 2 === 1;
+  if (insideOpenString) {
+    const lastQuoteIndex = argumentsText.lastIndexOf('"');
+    const beforeQuote = argumentsText.slice(0, lastQuoteIndex);
+    const lastSpaceBeforeQuote = beforeQuote.lastIndexOf(' ');
+    const keyPart = beforeQuote.slice(lastSpaceBeforeQuote + 1);
+    const valuePart = argumentsText.slice(lastQuoteIndex);
+    return keyPart + valuePart;
+  }
+  const lastSpaceIndex = argumentsText.lastIndexOf(' ');
+  return argumentsText.slice(lastSpaceIndex + 1);
+}
+
+/**
  * Completion item for a bracket command's parameter name, e.g. `time` in
  * `[wait time=1.5]`. Inserts `name=` (via a snippet) so the cursor lands
  * right after the `=`, ready for the value.
@@ -1745,8 +1776,7 @@ function activate(context) {
             );
             if (commandEntry && commandEntry.variables) {
               const bracketArgumentsText = trailingOptionsMatch[2];
-              const lastSpaceIndex = bracketArgumentsText.lastIndexOf(' ');
-              const currentToken = bracketArgumentsText.slice(lastSpaceIndex + 1);
+              const currentToken = getCurrentBracketToken(bracketArgumentsText);
               // Only suggest a parameter NAME while not already mid-value.
               if (!currentToken.includes('=')) {
                 const prefix = currentToken.toLowerCase();
@@ -1810,8 +1840,7 @@ function activate(context) {
               );
               if (bracketEntry && bracketEntry.variables) {
                 const afterCommandName = bracketContent.slice(commandNameMatch[0].length);
-                const lastSpaceIndex = afterCommandName.lastIndexOf(' ');
-                const currentToken = afterCommandName.slice(lastSpaceIndex + 1);
+                const currentToken = getCurrentBracketToken(afterCommandName);
                 // Only suggest a parameter NAME while not already mid-value
                 // (i.e. the token being typed has no '=' in it yet).
                 if (!currentToken.includes('=')) {
