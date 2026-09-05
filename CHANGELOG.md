@@ -1,9 +1,15 @@
 # Changelog
 
 ## [Unreleased]
-- Missing feature: suggestion for paths.
-- Missing feature: Make the extra_data become fully functionnal. [VERY COMPLEX, nice but not necessary]
+- Missing feature: Make the extra_data autocomplete for LayeredSprite + make the mood autocomplete [VERY COMPLEX, nice but not necessary]
 - Bug: Make in sort if, else, elif, while, - choice, increase the tabulation by one.
+- Bug: leave --All-- do not have its special color
+## [0.1.9] - 2026-09-05
+- Autocomplete for `res://` resource paths: `[voice path="..."]`, `[background arg="..." scene="..."]`, and `audio KIND "..."` now suggest real files from the Godot project, read live from the project.godot folder (same refresh mechanism as character names).
+- Mood/emotion highlighting: `join John (default) left`, `update John (sad) center`, and a dialogue speaker's `John (angry): ...` all color the `(mood)` tag with a new shared "emotion" scope.
+- `extra_data="set Emotion/Happy"` now colors the `Emotion/Happy` part with that same emotion scope, so it visually matches the `(mood)` tags above - the literal `"set "` stays a dim string color.
+- The bundled DTL Dark theme now styles the general VS Code UI (activity bar, sidebar, status bar, tabs, panels, buttons, lists, scrollbars, git decorations) instead of only the editor's text colors.
+- Three new bundled themes, all following the same DTL scope structure as DTL Dark: **DTL Light** (Atom One Light-inspired), **DTL Dracula** (palette based on the Dracula theme, credited to Derek S.), and **DTL Godot-like** (inspired by the Godot 4 script editor's default look).
 ## [0.1.8] - 2026-09-04
 - Bug: hovering an option that sits directly against `[` (e.g. `[fade` as the first inline option of join/update/leave) now shows its documentation instead of silently doing nothing.
 - Bug: position keywords (`left`, `right`, `center`, `leftmost`, `rightmost`) now show hover documentation when used as join/update's position argument.

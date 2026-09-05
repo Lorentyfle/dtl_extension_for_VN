@@ -19,8 +19,11 @@ Syntax highlighting, autocomplete, and IDE tooling for **DTL** (`.dtl`) files - 
   - Parameters inside `[...]` brackets, including join/update/leave's own trailing options bracket.
   - Known parameter **values**, e.g. `animation=` or `transition=` suggest their real option names.
   - Audio channel names, read live from `project.godot`.
+  - `res://` resource paths for `[voice path=...]`, `[background arg=...]`/`[background scene=...]`, and `audio KIND "..."`, read live from the Godot project's files.
   - `jump` targets, based on `label`s already declared in the file.
   - Word-based suggestions inside dialogue text, similar to plain `.txt` editing.
+
+- **Mood/emotion highlighting**: an optional `(mood)` tag right after a character name - `join John (default) left`, `update John (sad) center`, or a dialogue speaker like `John (angry): ...` - is colored as emotion. `extra_data="set Emotion/Happy"` gets the same treatment on its value as it affects LayeredSprite which is used for LayeredPortraits.
 
 ![Autocomplete dropdown popping up over a partially-typed `join` command, showing character names.](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/join_character.gif)
 
@@ -35,7 +38,11 @@ Syntax highlighting, autocomplete, and IDE tooling for **DTL** (`.dtl`) files - 
 ## Installation
 
 1. Install **DTL Reader** from the VS Code Marketplace, or install the `.vsix` manually via *Extensions → ... → Install from VSIX*.
-2. Open the Command Palette (`Ctrl+Shift+P`) → **Preferences: Color Theme** → select **DTL Dark** for full color support.
+2. Open the Command Palette (`Ctrl+Shift+P`) → **Preferences: Color Theme** → pick one of the bundled themes for full color support:
+   - **DTL Dark** - the default, also themes the general VS Code UI.
+   - **DTL Light** - an Atom One Light-inspired palette.
+   - **DTL Dracula** - palette based on the Dracula theme, credit to Derek S. for the color choices.
+   - **DTL Godot-like** - inspired by the Godot 4 script editor's default look.
 
 ## Getting Started
 
@@ -60,7 +67,6 @@ A few intentional choices differ from writing directly in the Godot/Dialogic edi
 - Apostrophes (`'`) are **not** treated as string delimiters, since they're used for plain English contractions (`don't`, `it's`). Highlighting them as strings would make dialogue nearly unreadable.
 - Labels and character names must **not** contain spaces or brackets.
 - BBCode-style balise nesting (`[i][b]...[/b][/i]`) is combined and colored correctly up to 2 nested tags. Beyond that, only the innermost tag's style is shown - this is a display limitation of the extension, not of Dialogic itself, which supports arbitrary nesting.
-- Emotions are not taken into account ex: (happy). As the creator uses LayeredSprite and do not use the mood system. The full implementation of LayeredSprite into the editor will be implemented at some point.
 
 ## Known Limitations
 

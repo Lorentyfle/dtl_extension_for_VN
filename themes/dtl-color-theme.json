@@ -4,7 +4,97 @@
   "colors": {
     "editor.background": "#1e1e1e",
     "editor.foreground": "#d4d4d4",
-    "editorLineNumber.foreground": "#5a5a5a"
+    "editorLineNumber.foreground": "#5a5a5a",
+    "editorLineNumber.activeForeground": "#d4d4d4",
+    "editorCursor.foreground": "#61afef",
+    "editor.selectionBackground": "#264f78",
+    "editor.selectionHighlightBackground": "#3a3d41",
+    "editor.inactiveSelectionBackground": "#3a3d41",
+    "editor.lineHighlightBackground": "#2a2a2a",
+    "editor.findMatchBackground": "#515c6a",
+    "editor.findMatchHighlightBackground": "#3a3d41",
+    "editorWhitespace.foreground": "#3b3b3b",
+    "editorIndentGuide.background1": "#3b3b3b",
+    "editorIndentGuide.activeBackground1": "#707070",
+    "editorBracketMatch.background": "#264f78",
+    "editorBracketMatch.border": "#61afef",
+
+    "editorWidget.background": "#252526",
+    "editorWidget.foreground": "#d4d4d4",
+    "editorWidget.border": "#454545",
+    "editorHoverWidget.background": "#252526",
+    "editorHoverWidget.border": "#454545",
+    "editorSuggestWidget.background": "#252526",
+    "editorSuggestWidget.border": "#454545",
+    "editorSuggestWidget.selectedBackground": "#062f4a",
+    "editorSuggestWidget.highlightForeground": "#61afef",
+
+    "activityBar.background": "#181818",
+    "activityBar.foreground": "#d4d4d4",
+    "activityBar.inactiveForeground": "#6c6c6c",
+    "activityBarBadge.background": "#e5c07b",
+    "activityBarBadge.foreground": "#1e1e1e",
+
+    "sideBar.background": "#1a1a1a",
+    "sideBar.foreground": "#cccccc",
+    "sideBarTitle.foreground": "#d4d4d4",
+    "sideBarSectionHeader.background": "#1a1a1a",
+    "list.activeSelectionBackground": "#2a2d2e",
+    "list.activeSelectionForeground": "#ffffff",
+    "list.inactiveSelectionBackground": "#242424",
+    "list.hoverBackground": "#232323",
+    "list.highlightForeground": "#61afef",
+
+    "statusBar.background": "#181818",
+    "statusBar.foreground": "#cccccc",
+    "statusBar.noFolderBackground": "#181818",
+    "statusBar.debuggingBackground": "#c586c0",
+    "statusBar.debuggingForeground": "#1e1e1e",
+
+    "titleBar.activeBackground": "#181818",
+    "titleBar.activeForeground": "#cccccc",
+    "titleBar.inactiveBackground": "#181818",
+    "titleBar.inactiveForeground": "#6c6c6c",
+
+    "tab.activeBackground": "#1e1e1e",
+    "tab.activeForeground": "#ffffff",
+    "tab.inactiveBackground": "#181818",
+    "tab.inactiveForeground": "#8a8a8a",
+    "tab.border": "#1a1a1a",
+    "tab.activeBorderTop": "#e5c07b",
+    "editorGroupHeader.tabsBackground": "#181818",
+
+    "panel.background": "#181818",
+    "panel.border": "#2b2b2b",
+    "panelTitle.activeForeground": "#d4d4d4",
+    "panelTitle.activeBorder": "#e5c07b",
+    "terminal.background": "#1e1e1e",
+    "terminal.foreground": "#d4d4d4",
+
+    "button.background": "#3a5f7d",
+    "button.foreground": "#ffffff",
+    "button.hoverBackground": "#456f92",
+    "input.background": "#2a2a2a",
+    "input.foreground": "#d4d4d4",
+    "input.border": "#3b3b3b",
+    "dropdown.background": "#2a2a2a",
+    "dropdown.foreground": "#d4d4d4",
+
+    "scrollbarSlider.background": "#4a4a4a80",
+    "scrollbarSlider.hoverBackground": "#5a5a5a80",
+    "scrollbarSlider.activeBackground": "#6a6a6a80",
+
+    "badge.background": "#4fcc96",
+    "badge.foreground": "#1e1e1e",
+    "progressBar.background": "#61afef",
+
+    "gitDecoration.modifiedResourceForeground": "#e2c08d",
+    "gitDecoration.addedResourceForeground": "#4fcc96",
+    "gitDecoration.deletedResourceForeground": "#f44747",
+    "gitDecoration.untrackedResourceForeground": "#4fcc96",
+
+    "focusBorder": "#3a5f7d",
+    "widget.shadow": "#00000066"
   },
   "tokenColors": [
     {
@@ -115,6 +205,20 @@
     {
       "scope": "support.type.audio-kind.dtl",
       "settings": { "foreground": "#56b6c2" }
+    },
+    {
+      "comment": "-- Mood/emotion: one shared scope for join/update's '(mood)' tag, the dialogue speaker's '(mood)' tag, and extra_data=\"set Path/To/Mood\" - all three refer to the same LayeredSprite emotion concept, so they read as one color. --",
+      "scope": "variable.other.emotion.dtl",
+      "settings": { "foreground": "#f5a623", "fontStyle": "bold" }
+    },
+    {
+      "scope": ["punctuation.definition.emotion.begin.dtl", "punctuation.definition.emotion.end.dtl"],
+      "settings": { "foreground": "#f5a623" }
+    },
+    {
+      "comment": "The literal 'set ' inside extra_data=\"set ...\" stays a dim, string-like color so only the emotion value itself (variable.other.emotion.dtl) pops out.",
+      "scope": "keyword.control.emotion-set.dtl",
+      "settings": { "foreground": "#ce9178", "fontStyle": "italic" }
     },
     {
       "comment": "-- BBCode-style balise formatting inside dialogue/narration/choice text. fontStyle is what makes the enclosed text actually render bold/italic/underline/strikethrough - the grammar only ever applies these scopes to text strictly between a matched opening and closing tag, never beyond. --",

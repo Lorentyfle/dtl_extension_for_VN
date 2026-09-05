@@ -1,0 +1,401 @@
+{
+  "name": "DTL Godot-like",
+  "type": "dark",
+  "colors": {
+    "editor.background": "#202531",
+    "editor.foreground": "#dbdde3",
+    "editorLineNumber.foreground": "#4b5062",
+    "editorLineNumber.activeForeground": "#dbdde3",
+    "editorCursor.foreground": "#a5cfff",
+    "editor.selectionBackground": "#2d3341",
+    "editor.selectionHighlightBackground": "#2a2f3d",
+    "editor.inactiveSelectionBackground": "#262b38",
+    "editor.lineHighlightBackground": "#262b38",
+    "editorWhitespace.foreground": "#333a4a",
+    "editorIndentGuide.background1": "#2d3341",
+    "editorIndentGuide.activeBackground1": "#4b5062",
+    "editorBracketMatch.background": "#2d3341",
+    "editorBracketMatch.border": "#5fb2f0",
+    "editorWidget.background": "#181b24",
+    "editorWidget.border": "#12141b",
+    "editorHoverWidget.background": "#181b24",
+    "editorHoverWidget.border": "#12141b",
+    "editorSuggestWidget.background": "#181b24",
+    "editorSuggestWidget.selectedBackground": "#2d3341",
+    "editorSuggestWidget.highlightForeground": "#5fb2f0",
+    "activityBar.background": "#181b24",
+    "activityBar.foreground": "#dbdde3",
+    "activityBar.inactiveForeground": "#4b5062",
+    "activityBarBadge.background": "#5fb2f0",
+    "activityBarBadge.foreground": "#181b24",
+    "sideBar.background": "#181b24",
+    "sideBar.foreground": "#dbdde3",
+    "sideBarTitle.foreground": "#dbdde3",
+    "sideBarSectionHeader.background": "#181b24",
+    "list.activeSelectionBackground": "#2d3341",
+    "list.activeSelectionForeground": "#ffffff",
+    "list.hoverBackground": "#262b38",
+    "list.highlightForeground": "#5fb2f0",
+    "statusBar.background": "#171a23",
+    "statusBar.foreground": "#dbdde3",
+    "statusBar.debuggingBackground": "#ff7085",
+    "statusBar.debuggingForeground": "#181b24",
+    "titleBar.activeBackground": "#171a23",
+    "titleBar.activeForeground": "#dbdde3",
+    "tab.activeBackground": "#202531",
+    "tab.activeForeground": "#ffffff",
+    "tab.inactiveBackground": "#181b24",
+    "tab.inactiveForeground": "#6f727e",
+    "tab.activeBorderTop": "#5fb2f0",
+    "editorGroupHeader.tabsBackground": "#171a23",
+    "panel.background": "#181b24",
+    "panel.border": "#12141b",
+    "panelTitle.activeBorder": "#5fb2f0",
+    "terminal.background": "#202531",
+    "terminal.foreground": "#dbdde3",
+    "button.background": "#4ea1f3",
+    "button.foreground": "#ffffff",
+    "button.hoverBackground": "#5fb2f0",
+    "input.background": "#181b24",
+    "input.border": "#12141b",
+    "dropdown.background": "#181b24",
+    "focusBorder": "#4ea1f3",
+    "badge.background": "#83d3c9",
+    "badge.foreground": "#181b24",
+    "progressBar.background": "#5fb2f0",
+    "gitDecoration.modifiedResourceForeground": "#ffeda1",
+    "gitDecoration.addedResourceForeground": "#83d3c9",
+    "gitDecoration.deletedResourceForeground": "#ff5f5f",
+    "gitDecoration.untrackedResourceForeground": "#83d3c9"
+  },
+  "tokenColors": [
+    {
+      "comment": "-- DTL Godot-like: inspired by (not pixel-extracted from) the Godot 4 script editor's default look - navy background, pink/red keywords, soft blue base types, teal engine/bracket accents, warm yellow strings. An approximation for a familiar feel, not a byte-exact port. --"
+    },
+    {
+      "comment": "-- Baseline (Dark+-like) rules for ordinary code scopes --",
+      "settings": {
+        "foreground": "#dbdde3"
+      }
+    },
+    {
+      "scope": "comment",
+      "settings": {
+        "foreground": "#6f727e",
+        "fontStyle": "italic"
+      }
+    },
+    {
+      "scope": "string",
+      "settings": {
+        "foreground": "#ffeda1"
+      }
+    },
+    {
+      "scope": "constant.numeric",
+      "settings": {
+        "foreground": "#a1ffe0"
+      }
+    },
+    {
+      "scope": "constant.language",
+      "settings": {
+        "foreground": "#a5cfff"
+      }
+    },
+    {
+      "scope": "keyword",
+      "settings": {
+        "foreground": "#ff7085"
+      }
+    },
+    {
+      "scope": "keyword.operator",
+      "settings": {
+        "foreground": "#dbdde3"
+      }
+    },
+    {
+      "scope": "support.function",
+      "settings": {
+        "foreground": "#66e6ec"
+      }
+    },
+    {
+      "scope": "punctuation",
+      "settings": {
+        "foreground": "#b6bdc7"
+      }
+    },
+    {
+      "comment": "-- DTL-specific scopes: each concept gets its own color, independent of the generic rules above --",
+      "scope": "entity.name.translationid.dtl",
+      "settings": {
+        "foreground": "#6f727e",
+        "fontStyle": "italic"
+      }
+    },
+    {
+      "scope": "entity.name.character.dtl",
+      "settings": {
+        "foreground": "#a5cfff",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "comment": "Spoken dialogue text is left uncolored on purpose: it inherits editor.foreground (#d4d4d4) like plain prose, instead of a distinct string color. Add a 'foreground' here if you'd rather it stood out.",
+      "scope": "string.unquoted.dialogue.dtl",
+      "settings": {
+        "foreground": "#dbdde3"
+      }
+    },
+    {
+      "comment": "Choice wording ('- text') gets its own color so it reads as content rather than plain code text.",
+      "scope": "markup.list.choice.dtl",
+      "settings": {
+        "foreground": "#66e6ec"
+      }
+    },
+    {
+      "comment": "Target name after 'label' / 'jump'.",
+      "scope": "entity.name.label.dtl",
+      "settings": {
+        "foreground": "#ff8ccc",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "scope": [
+        "punctuation.definition.tag.begin.signal.dtl",
+        "punctuation.definition.tag.end.signal.dtl"
+      ],
+      "settings": {
+        "foreground": "#ff5f5f"
+      }
+    },
+    {
+      "scope": "meta.text_input.dtl",
+      "settings": {
+        "foreground": "#ffb3de"
+      }
+    },
+    {
+      "scope": "variable.parameter.signal.dtl",
+      "settings": {
+        "foreground": "#ff8a8a"
+      }
+    },
+    {
+      "scope": [
+        "punctuation.definition.tag.begin.dtl",
+        "punctuation.definition.tag.end.dtl"
+      ],
+      "settings": {
+        "foreground": "#83d3c9"
+      }
+    },
+    {
+      "scope": "entity.other.attribute-name.dtl",
+      "settings": {
+        "foreground": "#a9d3ff"
+      }
+    },
+    {
+      "scope": "keyword.control.choice.dtl",
+      "settings": {
+        "foreground": "#ff8ccc"
+      }
+    },
+    {
+      "scope": "punctuation.definition.list.begin.dtl",
+      "settings": {
+        "foreground": "#66e6ec",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "scope": "punctuation.separator.choice.dtl",
+      "settings": {
+        "foreground": "#ff7085"
+      }
+    },
+    {
+      "scope": [
+        "punctuation.definition.variable.begin.dtl",
+        "punctuation.definition.variable.end.dtl"
+      ],
+      "settings": {
+        "foreground": "#83d3c9"
+      }
+    },
+    {
+      "scope": "meta.endtimeline.dtl",
+      "settings": {
+        "foreground": "#ff7085",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "scope": "meta.images.dtl",
+      "settings": {
+        "foreground": "#ffeda1",
+        "fontStyle": "italic"
+      }
+    },
+    {
+      "scope": "meta.clear.dtl",
+      "settings": {
+        "foreground": "#6f727e"
+      }
+    },
+    {
+      "scope": "variable.language.all.dtl",
+      "settings": {
+        "foreground": "#ff8ccc",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "scope": "variable.parameter.transform.dtl",
+      "settings": {
+        "foreground": "#a1ffe0"
+      }
+    },
+    {
+      "scope": "meta.wait.dtl",
+      "settings": {
+        "foreground": "#c6a1ff"
+      }
+    },
+    {
+      "scope": "variable.other.property.dtl",
+      "settings": {
+        "foreground": "#a9d3ff"
+      }
+    },
+    {
+      "scope": "punctuation.accessor.dtl",
+      "settings": {
+        "foreground": "#b6bdc7"
+      }
+    },
+    {
+      "scope": "support.type.audio-kind.dtl",
+      "settings": {
+        "foreground": "#83d3c9"
+      }
+    },
+    {
+      "comment": "-- Mood/emotion: one shared scope for join/update's '(mood)' tag, the dialogue speaker's '(mood)' tag, and extra_data=\"set Path/To/Mood\" - all three refer to the same LayeredSprite emotion concept, so they read as one color. --",
+      "scope": "variable.other.emotion.dtl",
+      "settings": {
+        "foreground": "#ffb347",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "scope": [
+        "punctuation.definition.emotion.begin.dtl",
+        "punctuation.definition.emotion.end.dtl"
+      ],
+      "settings": {
+        "foreground": "#ffb347"
+      }
+    },
+    {
+      "comment": "The literal 'set ' inside extra_data=\"set ...\" stays a dim, string-like color so only the emotion value itself (variable.other.emotion.dtl) pops out.",
+      "scope": "keyword.control.emotion-set.dtl",
+      "settings": {
+        "foreground": "#ffeda1",
+        "fontStyle": "italic"
+      }
+    },
+    {
+      "comment": "-- BBCode-style balise formatting inside dialogue/narration/choice text. fontStyle is what makes the enclosed text actually render bold/italic/underline/strikethrough - the grammar only ever applies these scopes to text strictly between a matched opening and closing tag, never beyond. --",
+      "scope": "markup.bold.dtl",
+      "settings": {
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "scope": "markup.italic.dtl",
+      "settings": {
+        "fontStyle": "italic"
+      }
+    },
+    {
+      "scope": "markup.underline.dtl",
+      "settings": {
+        "fontStyle": "underline"
+      }
+    },
+    {
+      "scope": "markup.strikethrough.dtl",
+      "settings": {
+        "fontStyle": "strikethrough"
+      }
+    },
+    {
+      "comment": "Any custom/personalized balise whose effect isn't one of the four known ones above - given its own color since the actual visual effect is unknown to the editor.",
+      "scope": "markup.custom-balise.dtl",
+      "settings": {
+        "foreground": "#c6a1ff"
+      }
+    },
+    {
+      "comment": "-- Combined balise styles. Plain nested scopes don't auto-merge fontStyle in VS Code (the innermost tag would otherwise silently win and the outer style would be lost), so each 2-tag pairing gets its own explicit rule, in both nesting orders (e.g. [b][i] and [i][b] both need to match). 3+ levels of nesting aren't covered and fall back to the innermost tag's single style. --",
+      "scope": [
+        "markup.bold.dtl markup.italic.dtl",
+        "markup.italic.dtl markup.bold.dtl"
+      ],
+      "settings": {
+        "fontStyle": "bold italic"
+      }
+    },
+    {
+      "scope": [
+        "markup.bold.dtl markup.underline.dtl",
+        "markup.underline.dtl markup.bold.dtl"
+      ],
+      "settings": {
+        "fontStyle": "bold underline"
+      }
+    },
+    {
+      "scope": [
+        "markup.bold.dtl markup.strikethrough.dtl",
+        "markup.strikethrough.dtl markup.bold.dtl"
+      ],
+      "settings": {
+        "fontStyle": "bold strikethrough"
+      }
+    },
+    {
+      "scope": [
+        "markup.italic.dtl markup.underline.dtl",
+        "markup.underline.dtl markup.italic.dtl"
+      ],
+      "settings": {
+        "fontStyle": "italic underline"
+      }
+    },
+    {
+      "scope": [
+        "markup.italic.dtl markup.strikethrough.dtl",
+        "markup.strikethrough.dtl markup.italic.dtl"
+      ],
+      "settings": {
+        "fontStyle": "italic strikethrough"
+      }
+    },
+    {
+      "scope": [
+        "markup.underline.dtl markup.strikethrough.dtl",
+        "markup.strikethrough.dtl markup.underline.dtl"
+      ],
+      "settings": {
+        "fontStyle": "underline strikethrough"
+      }
+    }
+  ]
+}

@@ -2,7 +2,7 @@
   "name": "dtl-reader",
   "displayName": "DTL Reader",
   "description": "Syntax highlighting for Dialogic2 TimeLine (.dtl) files",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "publisher": "lorentyfle",
   "icon": "./icons/favicon.png",
   "engines": {
@@ -47,6 +47,24 @@
         "label": "DTL Dark",
         "uiTheme": "vs-dark",
         "path": "./themes/dtl-color-theme.json"
+      },
+      {
+        "id": "dtl-light",
+        "label": "DTL Light",
+        "uiTheme": "vs",
+        "path": "./themes/dtl-color-theme-light.json"
+      },
+      {
+        "id": "dtl-dracula",
+        "label": "DTL Dracula",
+        "uiTheme": "vs-dark",
+        "path": "./themes/dtl-color-theme-dracula.json"
+      },
+      {
+        "id": "dtl-godot",
+        "label": "DTL Godot-like",
+        "uiTheme": "vs-dark",
+        "path": "./themes/dtl-color-theme-godot.json"
       }
     ],
     "configurationDefaults": {

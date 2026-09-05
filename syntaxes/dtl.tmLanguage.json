@@ -57,6 +57,15 @@
         { "name": "support.type.audio-kind.dtl", "match": "(?<=\\baudio\\b)\\s+([^\\s\"]+)" },
         { "name": "constant.language.position.dtl", "match": "\\b(left|right|center|rightmost|leftmost)\\b" },
         { "name": "entity.name.character.dtl", "match": "(?<=\\b(join|update|leave)\\s)[\\p{L}_][\\p{L}0-9_]*" },
+        {
+          "comment": "Optional mood/emotion tag right after the character name, e.g. 'join John (default) left'. Reuses the same variable.other.emotion.dtl scope as extra_data=\"set ...\" below and the dialogue-speaker mood tag in #dialogue, so all three read as one consistent concept in the theme.",
+          "match": "(?<=\\b(?:join|update)\\s+[\\p{L}_][\\p{L}0-9_]*\\s)(\\()([\\p{L}_][\\p{L}0-9_]*)(\\))",
+          "captures": {
+            "1": { "name": "punctuation.definition.emotion.begin.dtl" },
+            "2": { "name": "variable.other.emotion.dtl" },
+            "3": { "name": "punctuation.definition.emotion.end.dtl" }
+          }
+        },
         { "name": "variable.language.all.dtl", "match": "^\\s*leave\\s+(--All--)"},
         { "name": "variable.parameter.transform.dtl", "match": "(?<=^\\s*(?:join|update)[^\\r\\n]*)\\b(pos|size|rot)\\b(?=\\s*=)"}
       ]
@@ -135,7 +144,16 @@
     "dialogue": {
       "comment": "Speaker line 'Name: text [inline=options] #id:xyz'. The spoken text is a begin/end region so inline markup like [pause=1.5], [b]bold[\\b], and {variable} references still highlight.",
       "patterns": [
-        { "name": "entity.name.character.dtl", "match": "^\\s*(?!(?:if|else|elif|set|label|while|jump)\\s*:)[\\p{L}_][\\p{L}0-9_]*(?=\\s*:)" },
+        { "name": "entity.name.character.dtl", "match": "^\\s*(?!(?:if|else|elif|set|label|while|jump)\\s*:)[\\p{L}_][\\p{L}0-9_]*(?=\\s*(?:\\([\\p{L}_][\\p{L}0-9_]*\\)\\s*)?:)" },
+        {
+          "comment": "Optional mood/emotion tag between the speaker name and the colon, e.g. 'John (angry): blabla'. Same variable.other.emotion.dtl scope as join/update's mood tag and extra_data=\"set ...\".",
+          "match": "(?<=^\\s*[\\p{L}_][\\p{L}0-9_]*\\s*)(\\()([\\p{L}_][\\p{L}0-9_]*)(\\))(?=\\s*:)",
+          "captures": {
+            "1": { "name": "punctuation.definition.emotion.begin.dtl" },
+            "2": { "name": "variable.other.emotion.dtl" },
+            "3": { "name": "punctuation.definition.emotion.end.dtl" }
+          }
+        },
         {
           "name": "string.unquoted.dialogue.dtl",
           "begin": "(?<=:)\\s",
@@ -356,6 +374,15 @@
           "patterns": [
             { "name": "keyword.control.choice.dtl", "match": "\\b(if|elif|else)\\b" },
             { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=)" },
+            {
+              "comment": "extra_data=\"set Emotion/Happy\" - only the 'set ...' shape gets the emotion scope on its payload, so a theme can make Emotion/Happy read the same way as a mood tag like 'John (happy):'. Anything not starting with 'set ' stays a plain string.",
+              "match": "(?<=extra_data\\s*=)(\")(set\\s+)([^\"]*)(\")",
+              "name": "string.quoted.double.dtl",
+              "captures": {
+                "2": { "name": "keyword.control.emotion-set.dtl" },
+                "3": { "name": "variable.other.emotion.dtl" }
+              }
+            },
             { "include": "#operator" },
             { "include": "#strings" },
             { "include": "#numbers" },

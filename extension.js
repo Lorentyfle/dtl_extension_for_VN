@@ -376,6 +376,20 @@ const DTL_ATTRIBUTE_VALUE_SUGGESTIONS = {
 };
 
 /**
+ * Bracket-command attributes whose value is a Godot `res://` resource path,
+ * e.g. `[voice path="res://..."]`. Keyed the same way as
+ * DTL_ATTRIBUTE_VALUE_SUGGESTIONS (entry name -> list of attribute names),
+ * so createAttributeValueSuggestions can fall back to path suggestions
+ * when no fixed enum of values applies.
+ *
+ * @type {Record<string, string[]>}
+ */
+const DTL_PATH_ATTRIBUTES = {
+  voice: ['path'],
+  background: ['arg', 'scene'],
+};
+
+/**
  * Completion item for a known attribute VALUE, e.g. "Bounce In" for
  * `animation=`. Values with spaces need quoting; if the person already
  * typed the opening quote themselves, only the bare value is inserted so
@@ -404,14 +418,48 @@ function createValueCompletion(value, alreadyQuoted) {
  */
 function createAttributeValueSuggestions(entryName, attributeName, typedValue) {
   const values = DTL_ATTRIBUTE_VALUE_SUGGESTIONS[entryName] && DTL_ATTRIBUTE_VALUE_SUGGESTIONS[entryName][attributeName];
-  if (!values) {
-    return [];
+  if (values) {
+    const alreadyQuoted = typedValue.startsWith('"');
+    const prefix = (alreadyQuoted ? typedValue.slice(1) : typedValue).toLowerCase();
+    return values
+      .filter(value => value.toLowerCase().startsWith(prefix))
+      .map(value => createValueCompletion(value, alreadyQuoted));
   }
+  const pathAttributes = DTL_PATH_ATTRIBUTES[entryName];
+  if (pathAttributes && pathAttributes.includes(attributeName)) {
+    return createPathSuggestions(typedValue);
+  }
+  return [];
+}
+
+/**
+ * Completion item for a Godot `res://` resource path.
+ *
+ * @param {string} path - e.g. "res://assets/ost/my_music.mp3"
+ * @param {boolean} alreadyQuoted
+ * @returns {vscode.CompletionItem}
+ */
+function createPathCompletion(path, alreadyQuoted) {
+  const item = new vscode.CompletionItem(path, vscode.CompletionItemKind.File);
+  item.detail = 'Godot resource path';
+  item.insertText = alreadyQuoted ? path : `"${path}"`;
+  return item;
+}
+
+/**
+ * Build completion items for a `res://` path attribute, filtered by
+ * whatever has been typed so far after the opening quote (if any).
+ * Backed by cachedResourcePaths, refreshed alongside project.godot.
+ *
+ * @param {string} typedValue - raw text typed so far after '=' (quote included, if any)
+ * @returns {vscode.CompletionItem[]}
+ */
+function createPathSuggestions(typedValue) {
   const alreadyQuoted = typedValue.startsWith('"');
   const prefix = (alreadyQuoted ? typedValue.slice(1) : typedValue).toLowerCase();
-  return values
-    .filter(value => value.toLowerCase().startsWith(prefix))
-    .map(value => createValueCompletion(value, alreadyQuoted));
+  return cachedResourcePaths
+    .filter(path => path.toLowerCase().startsWith(prefix))
+    .map(path => createPathCompletion(path, alreadyQuoted));
 }
 
 // =============================================================================
@@ -423,6 +471,12 @@ let cachedCharacterNames = [];
 
 /** Audio channel/kind names found in project.godot's audio/channel_defaults. @type {string[]} */
 let cachedAudioChannels = [];
+
+/** Folder containing project.godot, i.e. the Godot project root. @type {vscode.Uri | null} */
+let projectRootUri = null;
+
+/** Every workspace file, expressed as a `res://`-relative path from the project root. @type {string[]} */
+let cachedResourcePaths = [];
 
 function extractCharacterNames(text) {
   const sectionMatch = text.match(/\[dialogic\]([\s\S]*?)(\n\[|$)/);
@@ -491,8 +545,11 @@ async function refreshProjectGodotData() {
   if (matches.length === 0) {
     cachedCharacterNames = [];
     cachedAudioChannels = [];
+    projectRootUri = null;
+    cachedResourcePaths = [];
     return;
   }
+  projectRootUri = vscode.Uri.joinPath(matches[0], '..');
   try {
     const bytes = await vscode.workspace.fs.readFile(matches[0]);
     const text = Buffer.from(bytes).toString('utf8');
@@ -502,6 +559,31 @@ async function refreshProjectGodotData() {
     console.error('DTL Reader: could not read project.godot', error);
     cachedCharacterNames = [];
     cachedAudioChannels = [];
+  }
+  await refreshResourcePaths();
+}
+
+/**
+ * Re-list every file under the Godot project root and cache each one as a
+ * `res://`-relative path, for the `[voice path="..."]` / `[background
+ * arg="..."]`-style path autocomplete. No-op if project.godot hasn't been
+ * found yet.
+ */
+async function refreshResourcePaths() {
+  if (!projectRootUri) {
+    cachedResourcePaths = [];
+    return;
+  }
+  try {
+    const files = await vscode.workspace.findFiles('**/*', '**/{.git,.godot,node_modules}/**');
+    const rootPath = projectRootUri.fsPath.replace(/\\/g, '/');
+    cachedResourcePaths = files
+      .map(uri => uri.fsPath.replace(/\\/g, '/'))
+      .filter(fsPath => fsPath.startsWith(rootPath))
+      .map(fsPath => 'res://' + fsPath.slice(rootPath.length).replace(/^\/+/, ''));
+  } catch (error) {
+    console.error('DTL Reader: could not list project resource files', error);
+    cachedResourcePaths = [];
   }
 }
 
@@ -965,6 +1047,13 @@ function activate(context) {
   watcher.onDidCreate(refreshProjectGodotData);
   watcher.onDidDelete(refreshProjectGodotData);
   context.subscriptions.push(watcher);
+  // Resource files only need a re-list on create/delete (a file's content
+  // changing doesn't affect its res:// path), so change events are ignored
+  // to avoid needless rescans while e.g. an image is being edited.
+  const resourceWatcher = vscode.workspace.createFileSystemWatcher('**/*', false, true, false);
+  resourceWatcher.onDidCreate(refreshResourcePaths);
+  resourceWatcher.onDidDelete(refreshResourcePaths);
+  context.subscriptions.push(resourceWatcher);
   // ===========================================================================
   // HOVER PROVIDER
   // ===========================================================================
@@ -1425,9 +1514,15 @@ function activate(context) {
               }
               return items;
             }
-            // Kind fully typed, waiting for the path: "audio music |"
-            if (argumentsParts.length === 2 && argumentsParts[1] === '') {
-              items.push(createAudioPathCompletion());
+            // Kind fully typed, waiting for or typing the path:
+            // "audio music |" or "audio music "res:/|"
+            if (argumentsParts.length === 2) {
+              const typedValue = argumentsParts[1];
+              if (typedValue === '') {
+                items.push(createAudioPathCompletion());
+              } else {
+                items.push(...createPathSuggestions(typedValue));
+              }
               return items;
             }
           }
