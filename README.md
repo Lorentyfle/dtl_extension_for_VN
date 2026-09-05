@@ -1,6 +1,6 @@
 # DTL Reader
 
-Syntax highlighting, autocomplete, and IDE tooling for **DTL** (`.dtl`) files - the timeline format used by the [Dialogic 2](https://docs.dialogic.pro/) addon for writing visual novel dialogue in Godot.
+Syntax highlighting, autocomplete, and IDE tooling for **DTL** (`.dtl`) files - the timeline format used by the [Dialogic 2](https://github.com/dialogic-godot/dialogic) addon for writing visual novel dialogue in Godot.
 
 ![A short screen recording scrolling through a highlighted `.dtl` file, showing the DTL Dark theme in action.](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/what_dtl_looks_like.gif)
 
