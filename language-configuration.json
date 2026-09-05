@@ -20,11 +20,13 @@
     ["\"", "\""]
   ],
   "indentationRules": {
-    "increaseIndentPattern": "^\\s*((if|elif|else)\\b.*:|-\\s.*)\\s*$"
+    "increaseIndentPattern": "^\\s*((if|elif|else|while)\\b.*:|-\\s.*)(?:\\s*#.*)?\\s*$",
+    "decreaseIndentPattern": "^\\s*(elif|else)\\b.*:(?:\\s*#.*)?\\s*$"
   },
   "onEnterRules": [
     {
-      "beforeText": "^\\s*((if|elif|else|while)\\b.*:|-\\s.*)\\s*$",
+      "comment": "Kept in sync with indentationRules above (same keyword list, same optional trailing-comment allowance) so Enter behaves identically whether autoIndent resolves via onEnterRules or falls back to indentationRules. 'while' was previously listed here but missing from increaseIndentPattern - that asymmetry is why some lines indented and others didn't.",
+      "beforeText": "^\\s*((if|elif|else|while)\\b.*:|-\\s.*)(?:\\s*#.*)?\\s*$",
       "action": { "indentAction": "indent" }
     }
   ]

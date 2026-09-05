@@ -1,9 +1,11 @@
 # Changelog
 
 ## [Unreleased]
-- Missing feature: Make the extra_data autocomplete for LayeredSprite + make the mood autocomplete [VERY COMPLEX, nice but not necessary]
-- Bug: Make in sort if, else, elif, while, - choice, increase the tabulation by one.
-- Bug: leave --All-- do not have its special color
+- Bug: The extra_data set does not work, there is no suggestion.
+## [0.1.10] - 2026-09-05
+- Bug: `leave --All--` had lost its color - `keyword.control.command.dtl` (matched first) always won the tie for where `leave` starts, consuming just the word `leave` and leaving the old `^\s*leave\s+(--All--)` rule's line-start anchor unable to ever fire again. Rewritten as a lookbehind so it no longer needs that anchor.
+- Bug: pressing Enter after `if`/`elif`/`else`/`while`/`- choice` didn't increase indentation - `while` was missing from `indentationRules.increaseIndentPattern` (only listed in the separate `onEnterRules`), and there was no `decreaseIndentPattern` at all, so `elif`/`else` never snapped back to their matching `if`'s indent. Both are now unified into one pattern (also tolerant of a trailing `# comment` after the colon), matching how Python blocks behave.
+- **Emotion/mood autocomplete**: typing `John (` (as a dialogue speaker, or after `join`/`update`) now suggests that character's moods, read from their `.dch` file's `portraits` dictionary (resolved via `project.godot`'s `directories/dch_directory`). Moods backed by a LayeredPortrait `scene` additionally power `extra_data="set ..."` autocomplete, which walks that scene's `.tscn` node tree one path segment at a time (e.g. `set Body/` suggests `Body`'s children).
 ## [0.1.9] - 2026-09-05
 - Autocomplete for `res://` resource paths: `[voice path="..."]`, `[background arg="..." scene="..."]`, and `audio KIND "..."` now suggest real files from the Godot project, read live from the project.godot folder (same refresh mechanism as character names).
 - Mood/emotion highlighting: `join John (default) left`, `update John (sad) center`, and a dialogue speaker's `John (angry): ...` all color the `(mood)` tag with a new shared "emotion" scope.

@@ -20,10 +20,11 @@ Syntax highlighting, autocomplete, and IDE tooling for **DTL** (`.dtl`) files - 
   - Known parameter **values**, e.g. `animation=` or `transition=` suggest their real option names.
   - Audio channel names, read live from `project.godot`.
   - `res://` resource paths for `[voice path=...]`, `[background arg=...]`/`[background scene=...]`, and `audio KIND "..."`, read live from the Godot project's files.
+  - Mood names in a `(mood)` tag - `join John (`, `update John (`, or a dialogue speaker `John (` - read live from that character's `.dch` file.
+  - `extra_data="set ..."` node paths, one path segment at a time, read live from a mood's LayeredPortrait `.tscn` scene.
   - `jump` targets, based on `label`s already declared in the file.
   - Word-based suggestions inside dialogue text, similar to plain `.txt` editing.
-
-- **Mood/emotion highlighting**: an optional `(mood)` tag right after a character name - `join John (default) left`, `update John (sad) center`, or a dialogue speaker like `John (angry): ...` - is colored as emotion. `extra_data="set Emotion/Happy"` gets the same treatment on its value as it affects LayeredSprite which is used for LayeredPortraits.
+  - **Mood/emotion highlighting**: an optional `(mood)` tag right after a character name - `join John (default) left`, `update John (sad) center`, or a dialogue speaker like `John (angry): ...` - is colored as emotion. `extra_data="set Emotion/Happy"` gets the same treatment on its value.
 
 ![Autocomplete dropdown popping up over a partially-typed `join` command, showing character names.](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/join_character.gif)
 

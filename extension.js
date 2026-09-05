@@ -65,7 +65,7 @@ const DTL_ENTRIES = [
       'wait':"Await for the animation to finish before doing anything else. CAN ONLY BE SET WITH animation.",
       'mirrored':"Is the sprite mirrored along the x axis?",
       'z_index':"Modify the z_index of the sprite, higher z_index means more in front, lower means more in the back. It is not using godot's z-index and instead sorting the characters manually!",
-      'extra_data':"Supplementary data to pass to the joining of the character. IF you have a LayeredSprite2D then you change the elements of the sprite by doing: set Arm/Happy set Emotion/Angry.",
+      'extra_data':"Supplementary data to pass to the joining of the character. IF you have a LayeredSprite2D then you change the elements of the sprite by doing: set Arm/Happy set Emotion/Angry. The node path after 'set ' autocompletes from the character's LayeredPortrait scene, one segment at a time.",
     }
   },
   {
@@ -93,7 +93,7 @@ const DTL_ENTRIES = [
       'repeat':"The animation repeat setting allows repeating the animation multiple times. CAN ONLY BE SET WITH move_trans or move_time.",
       'move_ease':"On Update events that change the position you can set the time (in seconds), transition and easing used to tween from the old to the new position.",
       'fade_length':"Defines the length of the fade in seconds.",
-      'extra_data':"Supplementary data to pass to the joining of the character. IF you have a LayeredSprite2D then you change the elements of the sprite by doing: set Arm/Happy set Emotion/Angry.",
+      'extra_data':"Supplementary data to pass to the joining of the character. IF you have a LayeredSprite2D then you change the elements of the sprite by doing: set Arm/Happy set Emotion/Angry. The node path after 'set ' autocompletes from the character's LayeredPortrait scene, one segment at a time.",
     }
   },
   {
@@ -478,6 +478,17 @@ let projectRootUri = null;
 /** Every workspace file, expressed as a `res://`-relative path from the project root. @type {string[]} */
 let cachedResourcePaths = [];
 
+/**
+ * Per character, every mood declared in their `.dch` file's "portraits"
+ * dict, mapped to that mood's parsed LayeredPortrait node tree - or
+ * `null` for a plain single-image mood (no "scene" key), which has no
+ * node tree to offer. Powers both the `(mood)` tag autocomplete and the
+ * `extra_data="set ..."` node-path autocomplete.
+ *
+ * @type {Map<string, Map<string, Map<string, string[]> | null>>}
+ */
+let cachedCharacterMoods = new Map();
+
 function extractCharacterNames(text) {
   const sectionMatch = text.match(/\[dialogic\]([\s\S]*?)(\n\[|$)/);
   if (!sectionMatch) { return []; }
@@ -538,6 +549,113 @@ function extractBalancedBraces(text, openBraceIndex) {
 }
 
 /**
+ * Resolve a `res://`-style path to a filesystem Uri, relative to the
+ * Godot project root (projectRootUri).
+ *
+ * @param {string} resPath - e.g. "res://dialogic/character/night/John.dch"
+ * @returns {vscode.Uri}
+ */
+function resolveResourcePath(resPath) {
+  return vscode.Uri.joinPath(projectRootUri, resPath.replace(/^res:\/\//, ''));
+}
+
+/**
+ * Extract character name -> `res://` `.dch` path from project.godot's
+ * `directories/dch_directory` dict, e.g. `{"John": "res://.../John.dch"}`.
+ * Companion to extractCharacterNames, which only keeps the keys.
+ *
+ * @param {string} text - raw project.godot content
+ * @returns {Map<string, string>}
+ */
+function extractCharacterPaths(text) {
+  const sectionMatch = text.match(/\[dialogic\]([\s\S]*?)(\n\[|$)/);
+  if (!sectionMatch) { return new Map(); }
+  const dictionaryMatch = sectionMatch[1].match(/directories\/dch_directory\s*=\s*\{([\s\S]*?)\}/);
+  if (!dictionaryMatch) { return new Map(); }
+  const entryPattern = /"([^"]+)"\s*:\s*"([^"]*)"/g;
+  const paths = new Map();
+  let match;
+  while ((match = entryPattern.exec(dictionaryMatch[1])) !== null) { paths.set(match[1], match[2]); }
+  return paths;
+}
+
+/**
+ * Split a dictionary body (the text already inside its outer '{'...'}')
+ * into its top-level `"key": { ... }` entries, ignoring anything nested
+ * deeper. Generic enough to reuse for any GDScript-ish nested dictionary;
+ * currently only used by parseDchPortraits for the mood -> portrait dict.
+ *
+ * @param {string} dictBody
+ * @returns {{key: string, body: string}[]}
+ */
+function extractTopLevelDictEntries(dictBody) {
+  const entries = [];
+  const keyPattern = /&?"([^"]+)"\s*:\s*\{/g;
+  let match;
+  while ((match = keyPattern.exec(dictBody)) !== null) {
+    const openBraceIndex = match.index + match[0].length - 1;
+    const body = extractBalancedBraces(dictBody, openBraceIndex);
+    if (body === null) { continue; }
+    entries.push({ key: match[1], body });
+    keyPattern.lastIndex = openBraceIndex + body.length + 2; // skip past this nested block entirely
+  }
+  return entries;
+}
+
+/**
+ * Parse a `.dch` character file's `"portraits"` dictionary into mood name
+ * -> declared scene `res://` path (or `null` for a plain/single-image
+ * portrait with no `"scene"` key). The file uses GDScript-ish resource
+ * syntax (`&"key": value` dictionaries), so this walks brace-balanced
+ * blocks rather than treating it as JSON.
+ *
+ * @param {string} text - raw .dch file content
+ * @returns {Map<string, string|null>}
+ */
+function parseDchPortraits(text) {
+  const portraits = new Map();
+  const portraitsHeaderMatch = text.match(/&?"portraits"\s*:\s*\{/);
+  if (!portraitsHeaderMatch) { return portraits; }
+  const openBraceIndex = portraitsHeaderMatch.index + portraitsHeaderMatch[0].length - 1;
+  const body = extractBalancedBraces(text, openBraceIndex);
+  if (body === null) { return portraits; }
+
+  for (const { key, body: moodBody } of extractTopLevelDictEntries(body)) {
+    const sceneMatch = moodBody.match(/&?"scene"\s*:\s*"([^"]*)"/);
+    portraits.set(key, sceneMatch ? sceneMatch[1] : null);
+  }
+  return portraits;
+}
+
+/**
+ * Parse a LayeredPortrait `.tscn` scene into a parent-path -> child-names
+ * map, e.g. `tree.get(".")` is the scene root's direct children,
+ * `tree.get("Head/Left_Eye")` is that node's children. Godot writes each
+ * node's full parent path (not just its immediate parent's name) in its
+ * `parent="..."` attribute, so that value can be used directly as the map
+ * key with no path-walking needed. The scene root itself never has a
+ * `parent=` attribute, so it's naturally never suggested - no special
+ * "skip the CanvasGroup" case required.
+ *
+ * Assumes `name=` appears before `parent=` on the same `[node ...]` line,
+ * which matches Godot's own attribute ordering.
+ *
+ * @param {string} text - raw .tscn file content
+ * @returns {Map<string, string[]>}
+ */
+function parseTscnNodeTree(text) {
+  const childrenByParent = new Map();
+  const nodePattern = /\[node\s+name="([^"]+)"[^\]]*?\bparent="([^"]*)"[^\]]*\]/g;
+  let match;
+  while ((match = nodePattern.exec(text)) !== null) {
+    const [, name, parent] = match;
+    if (!childrenByParent.has(parent)) { childrenByParent.set(parent, []); }
+    childrenByParent.get(parent).push(name);
+  }
+  return childrenByParent;
+}
+
+/**
  * Re-read project.godot and refresh both caches from a single file read.
  */
 async function refreshProjectGodotData() {
@@ -545,6 +663,7 @@ async function refreshProjectGodotData() {
   if (matches.length === 0) {
     cachedCharacterNames = [];
     cachedAudioChannels = [];
+    cachedCharacterMoods = new Map();
     projectRootUri = null;
     cachedResourcePaths = [];
     return;
@@ -555,12 +674,52 @@ async function refreshProjectGodotData() {
     const text = Buffer.from(bytes).toString('utf8');
     cachedCharacterNames = extractCharacterNames(text);
     cachedAudioChannels = extractAudioChannels(text);
+    await refreshCharacterMoods(extractCharacterPaths(text));
   } catch (error) {
     console.error('DTL Reader: could not read project.godot', error);
     cachedCharacterNames = [];
     cachedAudioChannels = [];
+    cachedCharacterMoods = new Map();
   }
   await refreshResourcePaths();
+}
+
+/**
+ * For every known character, read their `.dch` file and (for moods backed
+ * by a LayeredPortrait scene) that scene's `.tscn` file, so `(mood)` tags
+ * and `extra_data="set ..."` node paths can be autocompleted without
+ * touching disk on every keystroke. Populates cachedCharacterMoods. A
+ * character with an unreadable or malformed `.dch` file is simply left
+ * out rather than failing the whole refresh.
+ *
+ * @param {Map<string, string>} characterPaths - name -> res:// .dch path
+ */
+async function refreshCharacterMoods(characterPaths) {
+  const moodsByCharacter = new Map();
+  for (const [name, dchPath] of characterPaths) {
+    try {
+      const dchBytes = await vscode.workspace.fs.readFile(resolveResourcePath(dchPath));
+      const portraits = parseDchPortraits(Buffer.from(dchBytes).toString('utf8'));
+
+      const moods = new Map();
+      for (const [moodName, scenePath] of portraits) {
+        if (!scenePath) {
+          moods.set(moodName, null);
+          continue;
+        }
+        try {
+          const tscnBytes = await vscode.workspace.fs.readFile(resolveResourcePath(scenePath));
+          moods.set(moodName, parseTscnNodeTree(Buffer.from(tscnBytes).toString('utf8')));
+        } catch (error) {
+          moods.set(moodName, null); // scene referenced but unreadable - mood name still valid
+        }
+      }
+      moodsByCharacter.set(name, moods);
+    } catch (error) {
+      // No readable .dch file for this character - just no mood data for them.
+    }
+  }
+  cachedCharacterMoods = moodsByCharacter;
 }
 
 /**
@@ -955,6 +1114,168 @@ function createAudioPathCompletion() {
   return item;
 }
 
+// =============================================================================
+// MOOD / EMOTION HELPERS
+// =============================================================================
+
+/**
+ * Line-start keywords that are never a character name, even though they
+ * can be immediately followed by '(' in valid DTL (e.g. a boolean
+ * expression like `if (x)`). Keeps detectMoodContext from mistaking that
+ * for a `Character (mood)` tag.
+ *
+ * @type {Set<string>}
+ */
+const RESERVED_LINE_KEYWORDS = new Set([
+  'if', 'else', 'elif', 'set', 'label', 'jump', 'while', 'join', 'update', 'leave', 'audio', 'do', 'return'
+]);
+
+/**
+ * Detect a `(mood` being typed right after a character name - either as a
+ * dialogue speaker's mood tag (`John (happy`) or after join/update's
+ * character argument (`join John (happy`).
+ *
+ * @param {string} beforeCursor
+ * @returns {{character: string, typedMood: string} | null}
+ */
+function detectMoodContext(beforeCursor) {
+  const dialogueMatch = beforeCursor.match(/^\s*([\p{L}_][\p{L}0-9_]*)\s*\(([\p{L}_][\p{L}0-9_]*)?$/u);
+  if (dialogueMatch && !RESERVED_LINE_KEYWORDS.has(dialogueMatch[1])) {
+    return { character: dialogueMatch[1], typedMood: dialogueMatch[2] || '' };
+  }
+  const commandMatch = beforeCursor.match(/^\s*(?:join|update)\s+([\p{L}_][\p{L}0-9_]*)\s*\(([\p{L}_][\p{L}0-9_]*)?$/u);
+  if (commandMatch) {
+    return { character: commandMatch[1], typedMood: commandMatch[2] || '' };
+  }
+  return null;
+}
+
+/**
+ * Completion item for a mood name, e.g. `happy` in `John (happy):`.
+ *
+ * @param {string} name
+ * @param {boolean} hasSceneTree - true if this mood is a LayeredPortrait
+ *   backed by a parsed .tscn scene (vs. a plain single-image portrait)
+ * @returns {vscode.CompletionItem}
+ */
+function createMoodCompletion(name, hasSceneTree) {
+  const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.EnumMember);
+  item.detail = hasSceneTree ? 'DTL mood (LayeredPortrait)' : 'DTL mood';
+  return item;
+}
+
+/**
+ * Build `(mood)` completions for a character, from cachedCharacterMoods.
+ *
+ * @param {string} character
+ * @param {string} typedMood - mood text typed so far
+ * @returns {vscode.CompletionItem[]}
+ */
+function createMoodSuggestions(character, typedMood) {
+  const moods = cachedCharacterMoods.get(character);
+  if (!moods) { return []; }
+  const prefix = typedMood.toLowerCase();
+  const items = [];
+  for (const [moodName, tree] of moods) {
+    if (moodName.toLowerCase().startsWith(prefix)) {
+      items.push(createMoodCompletion(moodName, !!tree));
+    }
+  }
+  return items;
+}
+
+/**
+ * Find the character named on a `join`/`update` line, resolve their mood
+ * (from a `(mood)` tag if present and it has a scene, else whichever
+ * portrait does have a scene - `leave` is excluded since its `variables`
+ * don't include `extra_data` at all), and return that mood's parsed
+ * LayeredPortrait node tree, if any.
+ *
+ * @param {string} lineText
+ * @returns {Map<string, string[]> | null}
+ */
+function findMoodTreeForLine(lineText) {
+  const commandMatch = lineText.match(/^\s*(?:join|update)\s+([\p{L}_][\p{L}0-9_]*)/u);
+  if (!commandMatch) { return null; }
+  const moods = cachedCharacterMoods.get(commandMatch[1]);
+  if (!moods) { return null; }
+
+  const moodTagMatch = lineText.match(/^\s*(?:join|update)\s+[\p{L}_][\p{L}0-9_]*\s*\(([\p{L}_][\p{L}0-9_]*)\)/u);
+  if (moodTagMatch && moods.get(moodTagMatch[1])) {
+    return moods.get(moodTagMatch[1]);
+  }
+  // No usable mood tag typed yet - fall back to whichever portrait does
+  // have a scene, since that's the only one extra_data's node path could
+  // possibly refer to.
+  for (const tree of moods.values()) {
+    if (tree) { return tree; }
+  }
+  return null;
+}
+
+/**
+ * The full path of a tree node, in the same "parent/child" shape Godot
+ * itself uses for `parent="..."` attributes - i.e. how a node's own path
+ * looks when used to look up ITS children.
+ *
+ * @param {string} parentPath - "." for the scene root
+ * @param {string} name
+ * @returns {string}
+ */
+function childNodePath(parentPath, name) {
+  return parentPath === '.' ? name : `${parentPath}/${name}`;
+}
+
+/**
+ * Completion item for one segment of an `extra_data="set ..."` node path.
+ * Nodes with children of their own re-trigger suggestions once '/' is
+ * typed, via the Folder kind plus a re-trigger command.
+ *
+ * @param {string} name
+ * @param {boolean} hasChildren
+ * @returns {vscode.CompletionItem}
+ */
+function createEmotionNodeCompletion(name, hasChildren) {
+  const item = new vscode.CompletionItem(name, hasChildren ? vscode.CompletionItemKind.Folder : vscode.CompletionItemKind.EnumMember);
+  item.detail = 'LayeredPortrait node';
+  if (hasChildren) {
+    item.command = { command: 'editor.action.triggerSuggest', title: 'Show DTL child nodes' };
+  }
+  return item;
+}
+
+/**
+ * Build `extra_data="set ..."` node-path completions for the character
+ * (and mood, if typed) on the given line, walking the parsed
+ * LayeredPortrait node tree one path segment at a time - typing
+ * `Head/Left_Eye/` lists that node's children, matching how the tree
+ * itself is nested.
+ *
+ * @param {string} lineText - full text of the current line
+ * @param {string} typedValue - raw text typed so far after `extra_data=` (quote included, if any)
+ * @returns {vscode.CompletionItem[]}
+ */
+function createEmotionPathSuggestions(lineText, typedValue) {
+  const afterQuote = typedValue.startsWith('"') ? typedValue.slice(1) : typedValue;
+  // Only "set <path>" values carry a node path - anything else (or "set "
+  // not typed yet) has nothing to suggest.
+  const setMatch = afterQuote.match(/^set\s+(.*)$/);
+  if (!setMatch) { return []; }
+  const typedPath = setMatch[1];
+
+  const tree = findMoodTreeForLine(lineText);
+  if (!tree) { return []; }
+
+  const lastSlash = typedPath.lastIndexOf('/');
+  const parentPath = lastSlash === -1 ? '.' : (typedPath.slice(0, lastSlash) || '.');
+  const prefix = (lastSlash === -1 ? typedPath : typedPath.slice(lastSlash + 1)).toLowerCase();
+
+  const children = tree.get(parentPath) || [];
+  return children
+    .filter(name => name.toLowerCase().startsWith(prefix))
+    .map(name => createEmotionNodeCompletion(name, tree.has(childNodePath(parentPath, name))));
+}
+
 
 
 // =============================================================================
@@ -1054,6 +1375,15 @@ function activate(context) {
   resourceWatcher.onDidCreate(refreshResourcePaths);
   resourceWatcher.onDidDelete(refreshResourcePaths);
   context.subscriptions.push(resourceWatcher);
+  // .dch (character) and .tscn (LayeredPortrait scene) files feed the
+  // (mood) and extra_data="set ..." autocomplete - a full project.godot
+  // refresh is simple and cheap enough to just re-run on any of them
+  // changing, rather than tracking per-character invalidation by hand.
+  const moodWatcher = vscode.workspace.createFileSystemWatcher('**/*.{dch,tscn}');
+  moodWatcher.onDidChange(refreshProjectGodotData);
+  moodWatcher.onDidCreate(refreshProjectGodotData);
+  moodWatcher.onDidDelete(refreshProjectGodotData);
+  context.subscriptions.push(moodWatcher);
   // ===========================================================================
   // HOVER PROVIDER
   // ===========================================================================
@@ -1293,6 +1623,16 @@ function activate(context) {
           const beforeCursor = line.substring(0,position.character);
           const items = [];
           // ===================================================================
+          // MOOD TAG: "John (happy" or "join John (happy" - checked first
+          // since the JOIN/LEAVE/UPDATE block below would otherwise treat
+          // the '(' as a stray token and return an empty list before this
+          // ever gets a chance to run.
+          // ===================================================================
+          const moodContext = detectMoodContext(beforeCursor);
+          if (moodContext) {
+            return createMoodSuggestions(moodContext.character, moodContext.typedMood);
+          }
+          // ===================================================================
           // JOIN / LEAVE / UPDATE
           // ===================================================================
           const characterCommandMatch = beforeCursor.match(/^\s*(join|leave|update)(?:\s+(.*))?$/);
@@ -1422,11 +1762,17 @@ function activate(context) {
                 }
               } else {
                 // Mid-value, e.g. "animation=Bou|" - offer known values for
-                // this attribute (animation, move_trans, move_ease, ...) if any.
+                // this attribute (animation, move_trans, move_ease, ...) if
+                // any. extra_data gets its own LayeredPortrait node-path
+                // logic instead, since its values aren't a fixed enum.
                 const equalsIndex = currentToken.indexOf('=');
                 const attributeName = currentToken.slice(0, equalsIndex);
                 const typedValue = currentToken.slice(equalsIndex + 1);
-                items.push(...createAttributeValueSuggestions(commandEntry.name, attributeName, typedValue));
+                if (attributeName === 'extra_data') {
+                  items.push(...createEmotionPathSuggestions(line, typedValue));
+                } else {
+                  items.push(...createAttributeValueSuggestions(commandEntry.name, attributeName, typedValue));
+                }
               }
               return items;
             }
@@ -1573,7 +1919,7 @@ function activate(context) {
           return items;
           }
         }
-    , ' ', '[','=');
+    , ' ', '[', '=', '(', '/');
   context.subscriptions.push(completionProvider);
 }
 // =============================================================================
