@@ -711,12 +711,13 @@ async function refreshCharacterMoods(characterPaths) {
           const tscnBytes = await vscode.workspace.fs.readFile(resolveResourcePath(scenePath));
           moods.set(moodName, parseTscnNodeTree(Buffer.from(tscnBytes).toString('utf8')));
         } catch (error) {
+          console.error(`DTL Reader: mood "${moodName}" for "${name}" declares scene "${scenePath}" but it could not be read - extra_data node-path autocomplete will be unavailable for this mood.`, error);
           moods.set(moodName, null); // scene referenced but unreadable - mood name still valid
         }
       }
       moodsByCharacter.set(name, moods);
     } catch (error) {
-      // No readable .dch file for this character - just no mood data for them.
+      console.error(`DTL Reader: character "${name}" declares .dch path "${dchPath}" but it could not be read or parsed - no mood data for this character.`, error);
     }
   }
   cachedCharacterMoods = moodsByCharacter;

@@ -1,0 +1,41 @@
+# DTL Reader test timeline - covers every language feature.
+# Open this file with a DTL theme active and try the autocomplete/hover
+# scenarios listed in ../README.md.
+
+#id:intro_line
+join TestCharacter (LayeredPortrait) left [extra_data="set Head/LeftEye"]
+TestCharacter (LayeredPortrait): Hello! [b]Welcome[/b] to the [i]test[/i] room. #id:greeting
+
+Bare narration line with no character prefix, still gets [u]styled[/u] and [Shake]custom[/Shake] text.
+
+update TestCharacter (Default) pos=x0.5 size=y1 [animation="Bounce" extra_data="set Head/RightEye"]
+TestCharacter (Default): My mood just changed, {chapter.value} is the current chapter.
+
+set {chapter} = 1
+if {chapter} == 1
+    TestCharacter: This is chapter {chapter.value}.
+elif {chapter} == 2
+    TestCharacter: Somehow chapter two.
+else
+    TestCharacter: Unknown chapter.
+
+- Ask about the weather | #id:choice_weather
+- Say goodbye | [if {chapter} == 1] #id:choice_goodbye
+
+[wait time="1.0" skippable="true"]
+[wait_input]
+[signal arg_type="dict" arg="{\"Effect\":\"Rain\"}"]
+[voice path="res://assets/voice_line.ogg"]
+audio music "res://assets/theme.ogg"
+[clear text="true"]
+[background arg="res://assets/bg.png" transition="Simple Fade"]
+[style name="default"]
+[text_input text="Type something" var="{answer}" placeholder="..."]
+
+label loop_start
+while {chapter} < 3
+    set {chapter} += 1
+    jump loop_start
+
+leave --All--
+[end_timeline]

@@ -1,0 +1,29 @@
+; Minimal fake Godot project, only used so DTL Reader can find the
+; [dialogic] section it reads character names, audio channels, and
+; resource paths from. This project is never meant to run in Godot.
+
+config_version=5
+
+[application]
+
+config/name="DTL Reader Test Room"
+
+[dialogic]
+
+directories/dch_directory={
+"TestCharacter": "res://characters/TestCharacter.dch"
+}
+audio/channel_defaults={
+"music":{
+"audio_bus":"Master",
+"fade_length":0.5,
+"loop":true,
+"volume":0.0
+},
+"sound":{
+"audio_bus":"Master",
+"fade_length":0.0,
+"loop":false,
+"volume":0.0
+}
+}
