@@ -1,17 +1,16 @@
-[gd_resource type="Resource" script_class="DialogicCharacter" load_steps=2 format=3]
-
-[resource]
-display_name = "TestCharacter"
-portraits={
-"Default": {
-"mirror": false,
-"offset": Vector2(0, 0),
-"scale": 1.0
+{
+&"display_name": "TestCharacter",
+&"portraits": {
+&"Default": {
+&"mirror": false,
+&"offset": Vector2(0, 0),
+&"scale": 1.0
 },
-"LayeredPortrait": {
-"mirror": false,
-"offset": Vector2(0, 0),
-"scale": 1.0,
-"scene": "res://characters/TestCharacterPortrait.tscn"
+&"LayeredPortrait": {
+&"mirror": false,
+&"offset": Vector2(0, 0),
+&"scale": 1.0,
+&"scene": "res://characters/TestCharacterPortrait.tscn"
+}
 }
 }

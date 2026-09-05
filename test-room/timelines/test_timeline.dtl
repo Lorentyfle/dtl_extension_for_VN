@@ -7,7 +7,6 @@ join TestCharacter (LayeredPortrait) left [extra_data="set Head/LeftEye"]
 TestCharacter (LayeredPortrait): Hello! [b]Welcome[/b] to the [i]test[/i] room. #id:greeting
 
 Bare narration line with no character prefix, still gets [u]styled[/u] and [Shake]custom[/Shake] text.
-
 update TestCharacter (Default) pos=x0.5 size=y1 [animation="Bounce" extra_data="set Head/RightEye"]
 TestCharacter (Default): My mood just changed, {chapter.value} is the current chapter.
 

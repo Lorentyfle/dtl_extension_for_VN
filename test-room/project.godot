@@ -1,6 +1,6 @@
 ; Minimal fake Godot project, only used so DTL Reader can find the
-; [dialogic] section it reads character names, audio channels, and
-; resource paths from. This project is never meant to run in Godot.
+; Dialogic settings section it reads character names, audio channels,
+; and resource paths from. This project is never meant to run in Godot.
 
 config_version=5
 

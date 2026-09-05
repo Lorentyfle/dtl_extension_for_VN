@@ -1,7 +1,9 @@
 # Changelog
 
 ## [Unreleased]
-- Bug: The extra_data set does not work, there is no suggestion.
+## [0.1.11] - 2026-09-05
+- Bug: The extra_data set does not work, there is no suggestion after writing `[extra_data="set ]`.
+- Test room updated to be more global.
 ## [0.1.10] - 2026-09-05
 - Bug: `leave --All--` had lost its color - `keyword.control.command.dtl` (matched first) always won the tie for where `leave` starts, consuming just the word `leave` and leaving the old `^\s*leave\s+(--All--)` rule's line-start anchor unable to ever fire again. Rewritten as a lookbehind so it no longer needs that anchor.
 - Bug: pressing Enter after `if`/`elif`/`else`/`while`/`- choice` didn't increase indentation - `while` was missing from `indentationRules.increaseIndentPattern` (only listed in the separate `onEnterRules`), and there was no `decreaseIndentPattern` at all, so `elif`/`else` never snapped back to their matching `if`'s indent. Both are now unified into one pattern (also tolerant of a trailing `# comment` after the colon), matching how Python blocks behave.
