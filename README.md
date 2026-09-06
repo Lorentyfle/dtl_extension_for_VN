@@ -78,13 +78,6 @@ label ending
 - **Godot** 4.7.2+
 - **Dialogic 2** 2.0-Alpha-20+
 
-## Design Philosophy
-
-A few intentional choices differ from writing directly in the Godot/Dialogic editor:
-
-- Apostrophes (`'`) are **not** treated as string delimiters, since they're used for plain English contractions (`don't`, `it's`). Highlighting them as strings would make dialogue nearly unreadable.
-- Labels and character names must **not** contain spaces or brackets.
-
 ## Contributing
 
 Issues and pull requests are welcome at the [GitHub repository](https://github.com/Lorentyfle/dtl_extension_for_VN).

@@ -14,6 +14,97 @@
 // -----------------------------------------------------------------------------
 
 const vscode = require('vscode');
+
+// =============================================================================
+// CHARACTER NAME HELPERS
+// =============================================================================
+// A DTL character name is either a bare identifier, or a double/single-quoted
+// string - the quoted form lets a name contain spaces or symbols that
+// wouldn't otherwise be valid (e.g. join "John Smith" left). Mirrors the
+// equivalent alternation in dtl.tmLanguage.json's #commands/#dialogue rules,
+// so the editor and the syntax highlighting agree on what counts as a name.
+
+/**
+ * Regex source fragment (for building a `RegExp` dynamically) matching a
+ * character name in either its bare or quoted form. Quotes are included in
+ * the match; use `stripCharacterNameQuotes()` to get the plain name.
+ *
+ * @type {string}
+ */
+const CHARACTER_NAME_SOURCE = '(?:"[^"\\r\\n]+"|\'[^\'\\r\\n]+\'|[\\p{L}_][\\p{L}0-9_]*)';
+
+/**
+ * Strip a leading/trailing matching quote pair from a matched character
+ * name token, if present, so it can be looked up against
+ * cachedCharacterNames/cachedCharacterMoods (which store plain names).
+ *
+ * @param {string} token
+ * @returns {string}
+ */
+function stripCharacterNameQuotes(token) {
+  const quote = token[0];
+  if ((quote === '"' || quote === "'") && token.length >= 2 && token[token.length - 1] === quote) {
+    return token.slice(1, -1);
+  }
+  return token;
+}
+
+/**
+ * Split a join/leave/update argument string into tokens the same way
+ * `.split(/\s+/)` would - including a trailing empty-string token when the
+ * text ends in whitespace, meaning "nothing typed yet for the next slot" -
+ * except a double- or single-quoted run (even mid-typing, still missing its
+ * closing quote) is always kept together as one token, so a character name
+ * like "John Smith" isn't split into two.
+ *
+ * @param {string} argumentsText
+ * @returns {string[]}
+ */
+function splitCommandArguments(argumentsText) {
+  const tokens = [];
+  let index = 0;
+  while (index < argumentsText.length) {
+    if (/\s/.test(argumentsText[index])) {
+      index++;
+      continue;
+    }
+    const quoteChar = (argumentsText[index] === '"' || argumentsText[index] === "'") ? argumentsText[index] : null;
+    if (quoteChar) {
+      let end = index + 1;
+      while (end < argumentsText.length && argumentsText[end] !== quoteChar) { end++; }
+      if (end < argumentsText.length) { end++; } // include the closing quote, if one was typed
+      tokens.push(argumentsText.slice(index, end));
+      index = end;
+    } else {
+      let end = index;
+      while (end < argumentsText.length && !/\s/.test(argumentsText[end])) { end++; }
+      tokens.push(argumentsText.slice(index, end));
+      index = end;
+    }
+  }
+  if (/\s$/.test(argumentsText)) { tokens.push(''); }
+  return tokens;
+}
+
+/**
+ * Plain-text prefix to filter character names against, extracted from the
+ * token currently being typed in a character-name slot - stripping a
+ * leading (and matching trailing, if already typed) quote so `"Joh` and
+ * `Joh` both filter the same way.
+ *
+ * @param {string} token
+ * @returns {string}
+ */
+function extractCharacterNamePrefix(token) {
+  const quote = token[0];
+  if (quote === '"' || quote === "'") {
+    let inner = token.slice(1);
+    if (inner.endsWith(quote)) { inner = inner.slice(0, -1); }
+    return inner;
+  }
+  return token;
+}
+
 // =============================================================================
 // DTL DOCUMENTATION
 // =============================================================================
@@ -489,7 +580,7 @@ let cachedResourcePaths = [];
 let cachedCharacterMoods = new Map();
 
 function extractCharacterNames(text) {
-  const sectionMatch = text.match(/\[dialogic\]([\s\S]*?)(\n\[|$)/);
+  const sectionMatch = text.match(/(?:^|\n)\[dialogic\]([\s\S]*?)(\n\[|$)/);
   if (!sectionMatch) { return []; }
   const dictionaryMatch = sectionMatch[1].match(/directories\/dch_directory\s*=\s*\{([\s\S]*?)\}/);
   if (!dictionaryMatch) { return []; }
@@ -754,55 +845,6 @@ async function refreshResourcePaths() {
  */
 let diagnosticCollection;
 
-/**
- * Extract character names from project.godot.
- *
- * @param {string} text
- * @returns {string[]}
- */
-function extractCharacterNames(text) {
-  const sectionMatch = text.match(/\[dialogic\]([\s\S]*?)(\n\[|$)/);
-  if (!sectionMatch) {return [];}
-  const dialogicSection = sectionMatch[1];
-  const dictionaryMatch = dialogicSection.match(/directories\/dch_directory\s*=\s*\{([\s\S]*?)\}/);
-  if (!dictionaryMatch) {return [];}
-  const dictionaryBody = dictionaryMatch[1];
-  const keyPattern = /"([^"]+)"\s*:\s*"[^"]*"/g;
-  const names = [];
-  let match;
-  while ((match = keyPattern.exec(dictionaryBody)) !== null) {names.push(match[1]);}
-  return names;
-}
-/**
- * Refresh the character cache.
- */
-async function refreshCharacterNames() {
-  const matches = await vscode.workspace.findFiles(
-    '**/project.godot',
-    '**/.godot/**',
-    1
-  );
-  if (matches.length === 0) {
-    cachedCharacterNames = [];
-    return;
-  }
-  try {
-    const bytes = await vscode.workspace.fs.readFile(matches[0]);
-    cachedCharacterNames =
-      extractCharacterNames(
-        Buffer.from(bytes).toString('utf8')
-      );
-
-  } catch (error) {
-
-    console.error(
-      'DTL Reader: could not read project.godot',
-      error
-    );
-
-    cachedCharacterNames = [];
-  }
-}
 // =============================================================================
 // MARKDOWN DOCUMENTATION HELPER
 // =============================================================================
@@ -840,9 +882,28 @@ function createPositionCompletion(position) {
     new vscode.MarkdownString(position.description);
   return item;
 }
-function createCharacterCompletion(name) {
-  const item = new vscode.CompletionItem(name,vscode.CompletionItemKind.EnumMember);
+/**
+ * Completion item for a character name. Names that aren't valid bare
+ * identifiers (contain a space or other symbol) are inserted pre-quoted -
+ * double quotes by default, or single quotes if the name itself contains a
+ * `"` - since a bare insertion would otherwise produce invalid DTL.
+ *
+ * @param {string} name
+ * @param {vscode.Range} [range] - explicit range to replace, needed when the
+ *   text already typed includes a quote or spaces that VS Code's default
+ *   word-boundary detection wouldn't select as part of the same edit.
+ * @returns {vscode.CompletionItem}
+ */
+function createCharacterCompletion(name, range) {
+  const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.EnumMember);
   item.detail = 'Dialogic character (from project.godot)';
+  const needsQuoting = /[^\p{L}0-9_]/u.test(name);
+  if (needsQuoting) {
+    const quote = name.includes('"') ? "'" : '"';
+    item.insertText = `${quote}${name}${quote}`;
+    item.detail += ' - name contains spaces/symbols, quoted automatically';
+  }
+  if (range) { item.range = range; }
   return item;
 }
 
@@ -909,7 +970,7 @@ function createAttributeCompletion(name, doc) {
  * @returns {boolean}
  */
 function isInsideDialogueText(beforeCursor) {
-  const colonMatch = beforeCursor.match(/^\s*[\p{L}_][\p{L}0-9_]*\s*:/u);
+  const colonMatch = beforeCursor.match(new RegExp(`^\\s*${CHARACTER_NAME_SOURCE}\\s*:`, 'u'));
 
   let textStart;
   if (colonMatch) {
@@ -972,8 +1033,8 @@ function isBareNarrationLine(beforeCursor) {
  * @returns {boolean}
  */
 function isPlayerFacingTextLine(lineText) {
-  if (/^\s*[\p{L}_][\p{L}0-9_]*\s*:/u.test(lineText)) {
-    return true; // Character: ...
+  if (new RegExp(`^\\s*${CHARACTER_NAME_SOURCE}\\s*:`, 'u').test(lineText)) {
+    return true; // Character: ... (bare or quoted name)
   }
   if (/^\s*-\s/.test(lineText)) {
     return true; // choice
@@ -1170,13 +1231,16 @@ const RESERVED_LINE_KEYWORDS = new Set([
  * @returns {{character: string, typedMood: string} | null}
  */
 function detectMoodContext(beforeCursor) {
-  const dialogueMatch = beforeCursor.match(/^\s*([\p{L}_][\p{L}0-9_]*)\s*\(([\p{L}_][\p{L}0-9_]*)?$/u);
-  if (dialogueMatch && !RESERVED_LINE_KEYWORDS.has(dialogueMatch[1])) {
-    return { character: dialogueMatch[1], typedMood: dialogueMatch[2] || '' };
+  const dialogueMatch = beforeCursor.match(new RegExp(`^\\s*(${CHARACTER_NAME_SOURCE})\\s*\\(([\\p{L}_][\\p{L}0-9_]*)?$`, 'u'));
+  if (dialogueMatch) {
+    const character = stripCharacterNameQuotes(dialogueMatch[1]);
+    if (!RESERVED_LINE_KEYWORDS.has(character)) {
+      return { character, typedMood: dialogueMatch[2] || '' };
+    }
   }
-  const commandMatch = beforeCursor.match(/^\s*(?:join|update)\s+([\p{L}_][\p{L}0-9_]*)\s*\(([\p{L}_][\p{L}0-9_]*)?$/u);
+  const commandMatch = beforeCursor.match(new RegExp(`^\\s*(?:join|update)\\s+(${CHARACTER_NAME_SOURCE})\\s*\\(([\\p{L}_][\\p{L}0-9_]*)?$`, 'u'));
   if (commandMatch) {
-    return { character: commandMatch[1], typedMood: commandMatch[2] || '' };
+    return { character: stripCharacterNameQuotes(commandMatch[1]), typedMood: commandMatch[2] || '' };
   }
   return null;
 }
@@ -1226,12 +1290,12 @@ function createMoodSuggestions(character, typedMood) {
  * @returns {Map<string, string[]> | null}
  */
 function findMoodTreeForLine(lineText) {
-  const commandMatch = lineText.match(/^\s*(?:join|update)\s+([\p{L}_][\p{L}0-9_]*)/u);
+  const commandMatch = lineText.match(new RegExp(`^\\s*(?:join|update)\\s+(${CHARACTER_NAME_SOURCE})`, 'u'));
   if (!commandMatch) { return null; }
-  const moods = cachedCharacterMoods.get(commandMatch[1]);
+  const moods = cachedCharacterMoods.get(stripCharacterNameQuotes(commandMatch[1]));
   if (!moods) { return null; }
 
-  const moodTagMatch = lineText.match(/^\s*(?:join|update)\s+[\p{L}_][\p{L}0-9_]*\s*\(([\p{L}_][\p{L}0-9_]*)\)/u);
+  const moodTagMatch = lineText.match(new RegExp(`^\\s*(?:join|update)\\s+${CHARACTER_NAME_SOURCE}\\s*\\(([\\p{L}_][\\p{L}0-9_]*)\\)`, 'u'));
   if (moodTagMatch && moods.get(moodTagMatch[1])) {
     return moods.get(moodTagMatch[1]);
   }
@@ -1674,7 +1738,10 @@ function activate(context) {
             // slot entirely and inside the trailing options bracket instead -
             // that case is handled below by the dedicated bracket handler, so
             // this block does nothing (and, importantly, does NOT return).
-            const hasOpenBracket = argumentsText.includes('[');
+            // A '[' inside an already-closed quoted character name (rare,
+            // but names can contain almost anything) doesn't count, so
+            // completed quoted spans are stripped before checking.
+            const hasOpenBracket = argumentsText.replace(/"[^"\r\n]*"|'[^'\r\n]*'/g, '').includes('[');
             if (!hasOpenBracket) {
               // ---------------------------------------------------------------
               // No argument yet
@@ -1690,23 +1757,32 @@ function activate(context) {
                 return items;
               }
               // ---------------------------------------------------------------
-              // Split arguments
+              // Split arguments - quote-aware, so a name like "John Smith"
+              // stays one token instead of being split on its inner space.
               // ---------------------------------------------------------------
-              const argumentsParts = argumentsText.split(/\s+/);
+              const argumentsParts = splitCommandArguments(argumentsText);
               // ---------------------------------------------------------------
               // Character is currently being typed
               //
               // join Lar|
               // leave Lar|
               // update Lar|
+              // join "John |                     <- quoted name in progress
               // ---------------------------------------------------------------
               if (argumentsParts.length === 1) {
-                const prefix = argumentsParts[0].toLowerCase();
+                const currentToken = argumentsParts[0];
+                const prefix = extractCharacterNamePrefix(currentToken).toLowerCase();
+                // Replace the whole typed token (quote included) rather than
+                // just appending, since a quote or an internal space isn't
+                // part of VS Code's default "word" and wouldn't otherwise be
+                // covered by the edit.
+                const tokenStartChar = beforeCursor.length - currentToken.length;
+                const range = new vscode.Range(position.line, tokenStartChar, position.line, position.character);
                 for (const name of cachedCharacterNames) {
                   if (!name.toLowerCase().startsWith(prefix)) {
                     continue;
                   }
-                  items.push(createCharacterCompletion(name));
+                  items.push(createCharacterCompletion(name, range));
                 }
                 return items;
               }
@@ -1915,6 +1991,26 @@ function activate(context) {
             return items;
           }
           // =========================================================================
+          // QUOTED SPEAKER NAME IN PROGRESS - "Joh or 'Joh at the start of a
+          // line. Handled separately from the bare-identifier case below
+          // since a quote isn't a "word" character and, left unhandled here,
+          // isBareNarrationLine() would otherwise treat this as dialogue
+          // text being typed rather than a still-open speaker name.
+          // =========================================================================
+          const quotedSpeakerMatch = beforeCursor.match(/^\s*("[^"\r\n]*|'[^'\r\n]*)$/);
+          if (quotedSpeakerMatch) {
+            const token = quotedSpeakerMatch[1];
+            const prefix = extractCharacterNamePrefix(token).toLowerCase();
+            const tokenStartChar = beforeCursor.length - token.length;
+            const range = new vscode.Range(position.line, tokenStartChar, position.line, position.character);
+            for (const name of cachedCharacterNames) {
+              if (name.toLowerCase().startsWith(prefix)) {
+                items.push(createCharacterCompletion(name, range));
+              }
+            }
+            return items;
+          }
+          // =========================================================================
           // NORMAL COMMANDS + Dialogue characters.
           // =========================================================================
           if (/^\s*[\p{L}_][\p{L}0-9_]*$/u.test(beforeCursor)) {
@@ -1948,7 +2044,7 @@ function activate(context) {
           return items;
           }
         }
-    , ' ', '[', '=', '(', '/');
+    , ' ', '[', '=', '(', '/', '"', "'");
   context.subscriptions.push(completionProvider);
 }
 // =============================================================================

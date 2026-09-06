@@ -4,6 +4,8 @@
 
 join TestCharacter (LayeredPortrait) left [extra_data="set Head/LeftEye"]
 TestCharacter (LayeredPortrait): Hello! [b]Welcome[/b] to the [i]test[/i] room. #id:greeting
+"Test Character3": I work even with strange symbols! And automatically!
+'Test Character3': I also am available and ' doe not show issues!
 join TestCharacter2 center [animation="Fade In Down"]
 update TestCharacter2 center [extra_data="set Head/MiddleEye"]
 TestCharacter2: Hello, nice to meet you!
@@ -12,7 +14,7 @@ update TestCharacter (Default) pos=x0.5 size=y1 [animation="Bounce" extra_data="
 TestCharacter (Default): My mood just changed, {chapter.value} is the current chapter.
 [background arg="res://assets/bg.png"]
 audio music "res://assets/theme.ogg"
-[clear background="true"]
+[clear background='true']
 
 [background arg="res://assets/bg.png"]
 audio music "res://assets/theme.ogg"

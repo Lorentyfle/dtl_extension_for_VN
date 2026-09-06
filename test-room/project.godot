@@ -12,7 +12,8 @@ config/name="DTL Reader Test Room"
 
 directories/dch_directory={
 "TestCharacter": "res://characters/TestCharacter.dch",
-"TestCharacter2": "res://characters/TestCharacter2.dch"
+"TestCharacter2": "res://characters/TestCharacter2.dch",
+"Test Character3": "res://characters/Test Character3.dch"
 }
 audio/channel_defaults={
 "music":{

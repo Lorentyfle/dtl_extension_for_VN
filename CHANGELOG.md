@@ -1,6 +1,8 @@
 # Changelog
-## [TODO]
-- Remove the Design Philosophy category and implement back both of them inside the editor. ( ' can also be used for strings and if the character name is in between "" or '' it needs to count it as a character, to let characters with spaces or strange symbols have their names counted. Make the autocomplete smart enough to do it on its own).
+## [1.0.1]
+- Remove the Design Philosophy category and implement back both of them inside the editor for a more user friendly approach.
+    - ' can also be used for strings and if the character name is in between "" or '' it needs to count it as a character.
+    - To let characters with spaces or strange symbols have their names counted. Make the autocomplete smart enough to do it on its own.
 ## [1.0.0] - 2026-09-06
 - Update the README for full release with description of all new features and updates all pictures using test room for it.
 ## [0.1.11] - 2026-09-05

@@ -2,7 +2,7 @@
   "name": "dtl-reader",
   "displayName": "DTL Reader",
   "description": "Syntax highlighting for Dialogic2 TimeLine (.dtl) files",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "lorentyfle",
   "icon": "./icons/favicon.png",
   "engines": {

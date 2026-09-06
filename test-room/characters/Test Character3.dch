@@ -1,0 +1,16 @@
+{
+&"display_name": "TestCharacter",
+&"portraits": {
+&"Default": {
+&"mirror": false,
+&"offset": Vector2(0, 0),
+&"scale": 1.0
+},
+&"LayeredPortrait": {
+&"mirror": false,
+&"offset": Vector2(0, 0),
+&"scale": 1.0,
+&"scene": "res://characters/Test CharacterPortrait3.tscn"
+}
+}
+}
