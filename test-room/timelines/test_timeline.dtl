@@ -2,13 +2,37 @@
 # Open this file with a DTL theme active and try the autocomplete/hover
 # scenarios listed in ../README.md.
 
-#id:intro_line
 join TestCharacter (LayeredPortrait) left [extra_data="set Head/LeftEye"]
 TestCharacter (LayeredPortrait): Hello! [b]Welcome[/b] to the [i]test[/i] room. #id:greeting
-
+join TestCharacter2 center [animation="Fade In Down"]
+update TestCharacter2 center [extra_data="set Head/MiddleEye"]
+TestCharacter2: Hello, nice to meet you!
 Bare narration line with no character prefix, still gets [u]styled[/u] and [Shake]custom[/Shake] text.
 update TestCharacter (Default) pos=x0.5 size=y1 [animation="Bounce" extra_data="set Head/RightEye"]
 TestCharacter (Default): My mood just changed, {chapter.value} is the current chapter.
+[background arg="res://assets/bg.png"]
+audio music "res://assets/theme.ogg"
+[clear background="true"]
+
+[background arg="res://assets/bg.png"]
+audio music "res://assets/theme.ogg"
+[clear background="true"]
+
+if true:
+    [background arg="res://assets/bg.png"]
+    audio music "res://assets/theme.ogg"
+    [clear background="true"]
+
+
+
+
+
+
+
+
+
+
+
 
 set {chapter} = 1
 if {chapter} == 1
@@ -38,3 +62,19 @@ while {chapter} < 3
 
 leave --All--
 [end_timeline]
+
+
+
+
+
+
+
+
+
+
+
+
+
+label there_is_a_lot_of_errors
+TestCharacter: [b] Mouahahah, I did not finish the BBcode!
+jump no_errors

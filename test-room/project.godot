@@ -11,7 +11,8 @@ config/name="DTL Reader Test Room"
 [dialogic]
 
 directories/dch_directory={
-"TestCharacter": "res://characters/TestCharacter.dch"
+"TestCharacter": "res://characters/TestCharacter.dch",
+"TestCharacter2": "res://characters/TestCharacter2.dch"
 }
 audio/channel_defaults={
 "music":{

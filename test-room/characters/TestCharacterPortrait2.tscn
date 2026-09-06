@@ -1,0 +1,13 @@
+[gd_scene load_steps=1 format=3]
+
+[node name="TestCharacterPortrait2" type="Node2D"]
+
+[node name="Body" type="Sprite2D" parent="."]
+
+[node name="Head" type="Sprite2D" parent="."]
+
+[node name="LeftEye" type="Sprite2D" parent="Head"]
+
+[node name="RightEye" type="Sprite2D" parent="Head"]
+
+[node name="MiddleEye" type="Sprite2D" parent="Head"]

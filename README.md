@@ -1,49 +1,60 @@
 # DTL Reader
 
-Syntax highlighting, autocomplete, and IDE tooling for **DTL** (`.dtl`) files - the timeline format used by the [Dialogic 2](https://github.com/dialogic-godot/dialogic) addon for writing visual novel dialogue in Godot.
+**VS Code language support for [Dialogic 2](https://github.com/dialogic-godot/dialogic) `.dtl` timelines.**
+
+Syntax highlighting, autocomplete and useful IDE features for writing Dialogic timelines outside the Godot editor.
 
 ![A short screen recording scrolling through a highlighted `.dtl` file, showing the DTL Dark theme in action.](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/what_dtl_looks_like.gif)
 
 ## Features
 
-- **Syntax highlighting** for characters, dialogue, narration, choices, commands, `{variables}`, and `[balises]`, via a dedicated TextMate grammar and the bundled "DTL Dark" theme.
+### DTL syntax highlighting
 
-![A sample timeline with the DTL Dark theme applied, showing several distinct colors (character names, dialogue, commands).](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/classic_commands_for_dtl.png)
+Full syntax highlighting for Dialogic's timeline text format, including dialogue, choices, events, shortcodes, text effects, variables and more.
 
+![DTL syntax highlighting](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/dtl_highlight.png)
 
-![A sample timeline with the DTL Dark theme applied, showing several distinct colors for choices.](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/test_choice.png)
+### Context-aware autocomplete
 
-- **Autocomplete** for:
-  - Character names, read live from `project.godot`.
-  - Commands (`label`, `jump`, `set`, `join`, `update`, `leave`, `do`, ...) and their bracket-style counterparts (`[wait]`, `[signal]`, `[background]`, ...).
-  - Parameters inside `[...]` brackets, including join/update/leave's own trailing options bracket.
-  - Known parameter **values**, e.g. `animation=` or `transition=` suggest their real option names.
-  - Audio channel names, read live from `project.godot`.
-  - `res://` resource paths for `[voice path=...]`, `[background arg=...]`/`[background scene=...]`, and `audio KIND "..."`, read live from the Godot project's files.
-  - Mood names in a `(mood)` tag - `join John (`, `update John (`, or a dialogue speaker `John (` - read live from that character's `.dch` file.
-  - `extra_data="set ..."` node paths, one path segment at a time, read live from a mood's LayeredPortrait `.tscn` scene.
-  - `jump` targets, based on `label`s already declared in the file.
-  - Word-based suggestions inside dialogue text, similar to plain `.txt` editing.
-  - **Mood/emotion highlighting**: an optional `(mood)` tag right after a character name - `join John (default) left`, `update John (sad) center`, or a dialogue speaker like `John (angry): ...` - is colored as emotion. `extra_data="set Emotion/Happy"` gets the same treatment on its value.
+Suggestions are available where they are useful, including:
 
-![Autocomplete dropdown popping up over a partially-typed `join` command, showing character names.](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/join_character.gif)
+- Dialogic events and their parameters
+- `[]` text effects and shortcodes
+- Character names
+- Portraits and moods
+- Position and transform values such as `pos=`, `size=` and `rot=`
+- Animation names and animation parameters
+- Audio resources and audio settings
+- Godot `res://` and `user://` paths
+- Layered Portrait `extra_data`
+- Labels and jump targets
 
-- **Hover documentation** on commands, brackets, parameters, and position keywords - each shows its syntax, description, parameters, and an example.
+![DTL autocomplete](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/demo_autocomplete.gif)
 
+### Character moods
 
-- **Diagnostics** for unresolved `jump` targets and unclosed `[balise]` tags.
+Autocomplete for character moods works with both Dialogic's normal mood system and Layered Portraits.
 
-- **Go to Definition**: Ctrl+Click (or F12) a `jump NAME` to land on its matching `label NAME`.
-![A short clip of Ctrl+Click jumping from a `jump` line to its `label`.](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/jump_demogif.gif)
+![DTL autocomplete](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/demo_dtl.gif)
 
-## Installation
+### Navigation & diagnostics
 
-1. Install **DTL Reader** from the VS Code Marketplace, or install the `.vsix` manually via *Extensions → ... → Install from VSIX*.
-2. Open the Command Palette (`Ctrl+Shift+P`) → **Preferences: Color Theme** → pick one of the bundled themes for full color support:
-   - **DTL Dark** - the default, also themes the general VS Code UI.
-   - **DTL Light** - an Atom One Light-inspired palette.
-   - **DTL Dracula** - palette based on the Dracula theme, credit to Derek S. for the color choices.
-   - **DTL Godot-like** - inspired by the Godot 4 script editor's default look.
+DTL Reader understands the relationship between `jump` and `label`.
+
+- **Ctrl+Click** (or F12) a `jump` target to go to its label.
+- Get a warning when a `jump` points to a label that does not exist in the current timeline.
+- Get a warning when a BBCode tag is not properly closed.
+
+![Navigation and diagnostics](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/navigation_and_warnings.gif)
+
+## Themes
+
+Includes four themes made for DTL:
+
+- DTL Dark
+- DTL Light
+- DTL Dracula (based on Derek S. extension)
+- DTL Godot-like
 
 ## Getting Started
 
@@ -61,21 +72,28 @@ label ending
 ```
 ![Direct conversion to dtl](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/direct_conversion_from_readme.png)
 
+## Requirements
+
+- **Visual Studio Code** 1.85+
+- **Godot** 4.7.2+
+- **Dialogic 2** 2.0-Alpha-20+
+
 ## Design Philosophy
 
 A few intentional choices differ from writing directly in the Godot/Dialogic editor:
 
 - Apostrophes (`'`) are **not** treated as string delimiters, since they're used for plain English contractions (`don't`, `it's`). Highlighting them as strings would make dialogue nearly unreadable.
 - Labels and character names must **not** contain spaces or brackets.
-- BBCode-style balise nesting (`[i][b]...[/b][/i]`) is combined and colored correctly up to 2 nested tags. Beyond that, only the innermost tag's style is shown - this is a display limitation of the extension, not of Dialogic itself, which supports arbitrary nesting.
-
-## Known Limitations
-
-See [CHANGELOG.md](./CHANGELOG.md) for the current list of open bugs and missing features.
 
 ## Contributing
 
 Issues and pull requests are welcome at the [GitHub repository](https://github.com/Lorentyfle/dtl_extension_for_VN).
+
+## Credits
+
+Built for [Dialogic 2](https://github.com/dialogic-godot/dialogic).
+
+A big thank you to the Dialogic developers and contributors for creating and maintaining such a powerful extension.
 
 ## License
 

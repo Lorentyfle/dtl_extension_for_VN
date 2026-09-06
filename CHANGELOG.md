@@ -1,6 +1,7 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.0] - 2026-09-06
+- Update the README for full release with description of all new features and updates all pictures using test room for it.
 ## [0.1.11] - 2026-09-05
 - Bug: The extra_data set does not work, there is no suggestion after writing `[extra_data="set ]`.
 - Test room updated to be more global.

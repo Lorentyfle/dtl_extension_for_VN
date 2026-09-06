@@ -54,18 +54,18 @@ const DTL_ENTRIES = [
     example: 'join Laripo center [extra_data="set Emotion/Happy"]',
     transform_command: {
       // transform command are given to entries that possess it. It is here for the documentation, but those are entries after the character name and before the [].
-      'pos':'Position can be specified like this: x0.5 y1, x100px y1% By default x and y are interpreted as relative to the viewport size, meaning 0.5 means half the width/height of the window. Position defines the ORIGIN of the portrait (usually the bottom center). When first joining a character, the position, size and rotation will be copied from the first portrait preset found. This means if you just want to vary the position along the x axis, a simple pos=x0.3 is usually enough and all the other values will be correct by default.',
-      'size':'Size can be specified like this: x0.5 y1, x100px y1% By default x and y are interpreted as relative to the viewport size, meaning 0.5 means half the width/height of the window. Position defines the ORIGIN of the portrait (usually the bottom center). When first joining a character, the position, size and rotation will be copied from the first portrait preset found. This means if you just want to vary the size along the x axis, a simple size=x0.3 is usually enough and all the other values will be correct by default.',
-      'rot':"Rotation is given in degrees. The portrait rotates around it's origin (usually the bottom center)!",
+      'pos': 'Position of the character. X and Y can be specified as relative values, percentages, or pixels, for example: x0.5 y1 or x100px y1%. The position is relative to the viewport and defines the portrait origin, usually its bottom center.',
+      'size': 'Size of the character. X and Y can be specified as relative values, percentages, or pixels, for example: x0.5 y1 or x100px y1%.',
+      'rot': 'Rotation of the character in degrees. The portrait rotates around its origin, usually its bottom center.',
     },
     variables: {
       // variable_name : documentation
-      'animation':'What is the animation followed by the character joining in (dtl_animation_join)',
-      'length':'Time in seconds of the animation. CAN ONLY BE SET WITH animation.',
-      'wait':"Await for the animation to finish before doing anything else. CAN ONLY BE SET WITH animation.",
-      'mirrored':"Is the sprite mirrored along the x axis?",
-      'z_index':"Modify the z_index of the sprite, higher z_index means more in front, lower means more in the back. It is not using godot's z-index and instead sorting the characters manually!",
-      'extra_data':"Supplementary data to pass to the joining of the character. IF you have a LayeredSprite2D then you change the elements of the sprite by doing: set Arm/Happy set Emotion/Angry. The node path after 'set ' autocompletes from the character's LayeredPortrait scene, one segment at a time.",
+      'animation': 'Name of the animation to play when the character joins.',
+      'length': 'Length of the animation in seconds. Only used when an animation is set.',
+      'wait': 'Whether to wait for the animation to finish before continuing. Only used when an animation is set.',
+      'mirrored': 'Whether to mirror the character sprite horizontally.',
+      'z_index': "Controls the character draw order. Higher values appear in front of lower values. This uses Dialogic's character sorting rather than Godot's z-index.",
+      'extra_data': "Additional data passed to the character portrait. For LayeredSprite2D portraits, this can be used to change elements, for example: set Arm/Happy. The path after \"set \" is autocompleted from the character's LayeredPortrait scene.",
     }
   },
   {
@@ -76,25 +76,24 @@ const DTL_ENTRIES = [
     example: 'update Laripo center [extra_data="set Emotion/Happy"]',
     transform_command: {
       // transform command are given to entries that possess it. It is here for the documentation, but those are entries after the character name and before the [].
-      'pos':'Position can be specified like this: x0.5 y1, x100px y1% By default x and y are interpreted as relative to the viewport size, meaning 0.5 means half the width/height of the window. Position defines the ORIGIN of the portrait (usually the bottom center). When first joining a character, the position, size and rotation will be copied from the first portrait preset found. This means if you just want to vary the position along the x axis, a simple pos=x0.3 is usually enough and all the other values will be correct by default.',
-      'size':'Size can be specified like this: x0.5 y1, x100px y1% By default x and y are interpreted as relative to the viewport size, meaning 0.5 means half the width/height of the window. Position defines the ORIGIN of the portrait (usually the bottom center). When first joining a character, the position, size and rotation will be copied from the first portrait preset found. This means if you just want to vary the size along the x axis, a simple size=x0.3 is usually enough and all the other values will be correct by default.',
-      'rot':"Rotation is given in degrees. The portrait rotates around it's origin (usually the bottom center)!",
+      'pos': 'Position of the character. X and Y can be specified as relative values, percentages, or pixels, for example: x0.5 y1 or x100px y1%. The position is relative to the viewport and defines the portrait origin, usually its bottom center.',
+      'size': 'Size of the character. X and Y can be specified as relative values, percentages, or pixels, for example: x0.5 y1 or x100px y1%.',
+      'rot': 'Rotation of the character in degrees. The portrait rotates around its origin, usually its bottom center.',
     },
     variables: {
       // variable_name : documentation
-      'animation':'What is the animation of the character while being displayed (dtl_animation_update).',
-      'length':'Time length of the animation. CAN ONLY BE SET WITH animation.',
-      'wait':"Await for the animation to finish before doing anything else. CAN ONLY BE SET WITH animation.",
-      'mirrored':"Is the sprite mirrored along the x axis?",
-      'z_index':"Modify the z_index of the sprite, higher z_index means more in front, lower means more in the back. It is not using godot's z-index and instead sorting the characters manually!",
-      'fade':'The fade setting (Only relevant if the portrait changes) defines the Crossfade animation that is used to fade from the last portrait to the next. If none is given it will fall back to a default that can be set in Setting>Portraits.',
-      'move_time': "On Update events that change the position you can set the time (in seconds), transition and easing used to tween from the old to the new position.",
-      'move_trans': "On Update events that change the position you can set the time (in seconds), transition and easing used to tween from the old to the new position.",
-      'repeat':"The animation repeat setting allows repeating the animation multiple times. CAN ONLY BE SET WITH move_trans or move_time.",
-      'move_ease':"On Update events that change the position you can set the time (in seconds), transition and easing used to tween from the old to the new position.",
-      'fade_length':"Defines the length of the fade in seconds.",
-      'extra_data':"Supplementary data to pass to the joining of the character. IF you have a LayeredSprite2D then you change the elements of the sprite by doing: set Arm/Happy set Emotion/Angry. The node path after 'set ' autocompletes from the character's LayeredPortrait scene, one segment at a time.",
-    }
+      'animation': 'Name of the animation to play while updating the character.',
+      'length': 'Length of the animation in seconds. Only used when an animation is set.',
+      'wait': 'Whether to wait for the animation to finish before continuing. Only used when an animation is set.',
+      'mirrored': 'Whether to mirror the character sprite horizontally.',
+      'z_index': "Controls the character draw order. Higher values appear in front of lower values. This uses Dialogic’s character sorting rather than Godot's z-index.",
+      'fade': 'Name of the crossfade animation used when changing the character portrait. If omitted, the default portrait fade is used.',
+      'move_time': 'Duration of the position transition in seconds.',
+      'move_trans': 'Transition type used when moving the character to a new position.',
+      'repeat': 'Number of times to repeat the animation. Only used with move_time or move_trans.',
+      'move_ease': 'Easing used when moving the character to a new position.',
+      'fade_length': 'Duration of the portrait fade in seconds.',
+      'extra_data': "Additional data passed to the character portrait. For LayeredSprite2D portraits, this can be used to change elements, for example: set Arm/Happy. The path after \"set \" is autocompleted from the character's LayeredPortrait scene.",    }
   },
   {
     name: 'leave',
@@ -104,9 +103,9 @@ const DTL_ENTRIES = [
     example: 'leave Laripo [animation="Slide To Left"]',
     variables: {
       // variable_name : documentation
-      'animation':'What is the animation followed by the character leaving the scene (dtl_animation_leave)',
-      'length':'Time length of the animation. CAN ONLY BE SET WITH animation.',
-      'wait':"Await for the animation to finish before doing anything else. CAN ONLY BE SET WITH animation.",
+      'animation': 'Name of the animation to play when the character leaves.',
+      'length': 'Length of the animation in seconds. Only used when an animation is set.',
+      'wait': 'Whether to wait for the animation to finish before continuing. Only used when an animation is set.',
     }
   },
   {
@@ -124,9 +123,9 @@ const DTL_ENTRIES = [
     example: '[wait 1.5] [wait time="1.0"]',
     variables: {
       // variable_name : documentation
-      'time':'Time waited in second.',
-      'hide_text':'Is the text hidden during that time?',
-      'skippable':'Can this waiting period be skipped?'
+      'time': 'Duration of the wait in seconds.',
+      'hide_text': 'Whether to hide the text while waiting.',
+      'skippable': 'Whether the wait can be skipped by the player.',
     }
   },
   {
@@ -137,7 +136,7 @@ const DTL_ENTRIES = [
     example: '[wait_input]',
     variables: {
       // variable_name : documentation
-      "hide_text":"Is the text hidden while waiting for user input?"
+      "hide_text":"Whether to hide the text while waiting for input."
     }
   },
   {
@@ -155,9 +154,9 @@ const DTL_ENTRIES = [
     example: '[voice path="res://assets/voices/Laripo_dialogueID_666.mp3"]',
     variables: {
       // variable_name : documentation
-      "path":"Path to access the voice audio file.",
-      "volume":"Path to access the manual tweaking of the volume of the given voice file.",
-      "bus":"On which bus the voice audio will be played on."
+      'path': 'Path to the voice audio file.',
+      'volume': 'Volume adjustment for the voice audio.',
+      'bus': 'Audio bus used to play the voice audio.',
     }
   },
   {
@@ -168,14 +167,14 @@ const DTL_ENTRIES = [
     example: '[clear time="1.0"]',
     variables: {
       // variable_name : documentation
-      "time":"How much in the past should the memory be forgotten.",
-      "step":"I have no idea what it does yet. (true by default)", // TODO: ASK WHAT THIS DOES!
-      "text":"Is the text cleared? (true by default)",
-      "portraits":"Are the portraits cleared? (true by default)",
-      "music":"Is the audio cleared? (true by default)",
-      "background":"Is the background cleared? (true by default)",
-      "position":"Are the character positions cleared? (true by default)",
-      "style":"Is the style cleared? (true by default)",
+      "time":"Duration of the fade in seconds. Set to 0 for an instant clear.",
+      "step":"Wether to clear each element one after another. The order is Textbox, Portraits, Backgrounds, Audio, then Styles. (true by default)",
+      "text":"Wether to clear the text (true by default)",
+      "portraits":"Wether to clear the portraits (true by default)",
+      "music":"Wether to clear the audio (true by default)",
+      "background":"Wether to clear the background (true by default)",
+      "position":"Wether to clear character position (true by default)",
+      "style":"Wether to clear the style (true by default)",
     }
   },
   {
@@ -186,11 +185,11 @@ const DTL_ENTRIES = [
     example: '[background arg="res://assets/sprite/new_background.png" fade="0.0"]',
     variables: {
       // variable_name : documentation
-      "arg":"Path to the background used. Here an image, a color or an argument (a string).",
-      "scene":"Path to the background used. Here a scene.",
-      "transition":"What kind of transition is used.",
-      "fade":"How long will the image fade.",
-      "wait":"Wait for the fade to finish?"
+      'arg': 'Background to display. This can be an image path, a color, or another string argument.',
+      'scene': 'Path to the background scene.',
+      'transition': 'Transition used when changing the background.',
+      'fade': 'Duration of the background fade in seconds.',
+      'wait': 'Whether to wait for the transition to finish before continuing.',
     }
   },
   {
@@ -201,7 +200,7 @@ const DTL_ENTRIES = [
     example: '[style name="default"]',
     variables: {
       // variable_name : documentation
-      "name":"Name of the style used."
+      "name":"Name of the style to use."
     }
   },
   {
@@ -212,8 +211,8 @@ const DTL_ENTRIES = [
     example: '[signal arg_type="dict" arg="{\"Amount\":100,\"Effect\":\"Rain\",\"Nature\":\"meteo\",\"Windx\":20.0,\"Windy\":1.0}"]',
     variables: {
       // variable_name : documentation
-      "arg_type":"What is the expected format of the argument sent with the Dialogic signal?",
-      "arg":"Argument sent with the Dialogic signal."
+      'arg_type': 'Type of the argument sent with the Dialogic signal.',
+      'arg': 'Argument sent with the Dialogic signal.',
     }
   },
   {
@@ -222,13 +221,13 @@ const DTL_ENTRIES = [
     syntax: '[text_input ...]',
     description: 'Make a text input prompt appear that would save the data in a variable.',
     example: '[text_input text="Solve: 4x - 67 = 0" var="_butterfly_effect.part1.introduction.answer_equation1" placeholder="No idea" allow_empty="true"]',
-    variables: { 
+    variables: {
       // variable_name : documentation
-      "text":"Text shown for entering the text input.",
-      "var" :"Variable that will store the result of the input.",
-      "placeholder":"Text shown inside the textbox if nothing is filled.",
-      "default":"Text outputed if nothing is filled.",
-      "allow_empty":"Can this text be submitted empty?"
+      'text': 'Text displayed above the text input.',
+      'var': 'Variable where the entered text will be stored.',
+      'placeholder': 'Text displayed in the input field when it is empty.',
+      'default': 'Default value used when no text is entered.',
+      'allow_empty': 'Whether the input can be submitted without any text.',
     }
   },
   {
