@@ -1,4 +1,9 @@
 # Changelog
+TODO:
+- If no nicknames are given, make the nickname lines absent.
+## [1.0.2]
+- Addition of suggestions for dialogic variables inside {}.
+- Addition of documentation for characters using .dch file of the dialogic character (to push people to document their characters while working on a project).
 ## [1.0.1]
 - Remove the Design Philosophy category and implement back both of them inside the editor for a more user friendly approach.
     - ' can also be used for strings and if the character name is in between "" or '' it needs to count it as a character.

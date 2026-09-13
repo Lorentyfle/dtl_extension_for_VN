@@ -105,6 +105,36 @@ function extractCharacterNamePrefix(token) {
   return token;
 }
 
+/**
+ * Find the character name (bare or quoted) under the cursor on a line,
+ * if any - either a join/update/leave argument, or a dialogue speaker.
+ * Scans every name-shaped match on the line rather than relying on VS
+ * Code's default word-range detection, since a quoted name's range
+ * (quotes and internal spaces included) isn't a "word" by that definition.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Position} position
+ * @returns {{name: string, range: vscode.Range} | null}
+ */
+function findCharacterNameAtPosition(document, position) {
+  const line = document.lineAt(position.line).text;
+  const nameRe = new RegExp(CHARACTER_NAME_SOURCE, 'gu');
+  let match;
+  while ((match = nameRe.exec(line)) !== null) {
+    const start = match.index;
+    const end = start + match[0].length;
+    if (position.character < start || position.character > end) { continue; }
+    const before = line.slice(0, start);
+    const after = line.slice(end);
+    const isSpeaker = /^\s*$/.test(before) && /^\s*(?:\([\p{L}_][\p{L}0-9_]*\)\s*)?:/u.test(after);
+    const isCommandArgument = /^\s*(?:join|update|leave)\s+$/.test(before);
+    if (isSpeaker || isCommandArgument) {
+      return { name: stripCharacterNameQuotes(match[0]), range: new vscode.Range(position.line, start, position.line, end) };
+    }
+  }
+  return null;
+}
+
 // =============================================================================
 // DTL DOCUMENTATION
 // =============================================================================
@@ -579,6 +609,27 @@ let cachedResourcePaths = [];
  */
 let cachedCharacterMoods = new Map();
 
+/**
+ * project.godot's `[dialogic]` `variables={...}` dictionary, parsed into a
+ * path tree: each segment maps to either a leaf (its default value, as raw
+ * GDScript text - a number, boolean, string, Color(...), etc.) or a Map of
+ * further child segments, mirroring the dictionary's own nesting. Powers
+ * `{variable.path}` autocomplete.
+ *
+ * @type {Map<string, {value: string|null, children: Map|null}>}
+ */
+let cachedVariablesTree = new Map();
+
+/**
+ * Per character, the documentation-relevant fields declared in their
+ * `.dch` file - display_name, nicknames, description, and color - used to
+ * build the hover shown when hovering a character name. A character with
+ * none of these fields declared simply has no hover.
+ *
+ * @type {Map<string, {displayName: string|null, nicknames: string[], description: string|null, color: string|null}>}
+ */
+let cachedCharacterInfo = new Map();
+
 function extractCharacterNames(text) {
   const sectionMatch = text.match(/(?:^|\n)\[dialogic\]([\s\S]*?)(\n\[|$)/);
   if (!sectionMatch) { return []; }
@@ -636,6 +687,93 @@ function extractBalancedBraces(text, openBraceIndex) {
     }
   }
   return null;
+}
+
+/**
+ * Scan a dictionary body (text already inside its outer '{'...'}') into an
+ * ordered list of `{key, rawValue, childBody}` entries, one per top-level
+ * `"key": value` pair - where `value` can be either a nested dict (in
+ * which case `childBody` is that dict's own already-brace-stripped body
+ * and `rawValue` is `null`) or any other GDScript literal (a number,
+ * boolean, string, `Color(...)`, array, ...), kept verbatim as `rawValue`
+ * with `childBody` `null`. Unlike extractTopLevelDictEntries (which only
+ * recognizes entries whose value is itself a dict), this also captures
+ * leaf entries - needed for `variables={...}`, where a key's value is
+ * either a nested group or a plain default value.
+ *
+ * @param {string} dictBody
+ * @returns {{key: string, rawValue: string|null, childBody: string|null}[]}
+ */
+function scanDictEntries(dictBody) {
+  const entries = [];
+  const keyPattern = /&?"([^"]+)"\s*:\s*/g;
+  let match;
+  while ((match = keyPattern.exec(dictBody)) !== null) {
+    const valueStart = keyPattern.lastIndex;
+    if (dictBody[valueStart] === '{') {
+      const childBody = extractBalancedBraces(dictBody, valueStart);
+      if (childBody === null) { break; } // unterminated - stop rather than misparse the rest
+      entries.push({ key: match[1], rawValue: null, childBody });
+      keyPattern.lastIndex = valueStart + childBody.length + 2; // past the matching '}'
+      continue;
+    }
+    // Leaf value: scan forward to the next top-level ',' (or the end of
+    // this dict body), respecting nested (), [], {} depth so a value like
+    // Color(0.5, 0.5, 1, 1) or [1, 2] doesn't get cut short at its own commas.
+    let depth = 0;
+    let end = valueStart;
+    while (end < dictBody.length) {
+      const ch = dictBody[end];
+      if (ch === '(' || ch === '[' || ch === '{') { depth++; }
+      else if (ch === ')' || ch === ']' || ch === '}') {
+        if (depth === 0) { break; } // belongs to the enclosing dict, not this value
+        depth--;
+      } else if (ch === ',' && depth === 0) { break; }
+      end++;
+    }
+    entries.push({ key: match[1], rawValue: dictBody.slice(valueStart, end).trim(), childBody: null });
+    keyPattern.lastIndex = end;
+  }
+  return entries;
+}
+
+/**
+ * Recursively parse a dictionary body into a path tree: each key maps to
+ * either a leaf (`value` holds its raw default, `children` is `null`) or a
+ * further nested Map (`value` is `null`, `children` holds the subtree) -
+ * mirroring the dictionary's own nesting. Powers `{variable.path}`
+ * autocomplete, one path segment at a time, the same way
+ * createEmotionPathSuggestions walks a LayeredPortrait's node tree.
+ *
+ * @param {string} dictBody
+ * @returns {Map<string, {value: string|null, children: Map|null}>}
+ */
+function parseNestedDictTree(dictBody) {
+  const tree = new Map();
+  for (const { key, rawValue, childBody } of scanDictEntries(dictBody)) {
+    tree.set(key, childBody !== null
+      ? { value: null, children: parseNestedDictTree(childBody) }
+      : { value: rawValue, children: null });
+  }
+  return tree;
+}
+
+/**
+ * Extract project.godot's `[dialogic]` `variables={...}` dictionary into a
+ * path tree (see parseNestedDictTree). Empty if no variables are declared.
+ *
+ * @param {string} text - raw project.godot content
+ * @returns {Map<string, {value: string|null, children: Map|null}>}
+ */
+function extractVariablesTree(text) {
+  const sectionMatch = text.match(/(?:^|\n)\[dialogic\]([\s\S]*?)(\n\[|$)/);
+  if (!sectionMatch) { return new Map(); }
+  const headerMatch = sectionMatch[1].match(/variables\s*=\s*\{/);
+  if (!headerMatch) { return new Map(); }
+  const openBraceIndex = headerMatch.index + headerMatch[0].length - 1;
+  const body = extractBalancedBraces(sectionMatch[1], openBraceIndex);
+  if (body === null) { return new Map(); }
+  return parseNestedDictTree(body);
 }
 
 /**
@@ -718,6 +856,111 @@ function parseDchPortraits(text) {
 }
 
 /**
+ * Parse a Godot `Color(r, g, b[, a])` literal (components 0-1) into a CSS
+ * `rgba(...)` string. Returns `null` if the text doesn't look like one.
+ *
+ * @param {string} rawValue - e.g. "Color(0.58, 0.39, 0.78, 1)"
+ * @returns {string | null}
+ */
+function parseGodotColor(rawValue) {
+  const match = rawValue.match(/Color\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)/);
+  if (!match) { return null; }
+  const [, r, g, b, a] = match;
+  const to255 = component => Math.round(parseFloat(component) * 255);
+  const alpha = a !== undefined ? parseFloat(a) : 1;
+  return `rgba(${to255(r)}, ${to255(g)}, ${to255(b)}, ${alpha})`;
+}
+
+/**
+ * Escape text for safe embedding inside SVG/XML markup (used when
+ * rendering a character's display name as an inline SVG image).
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function escapeXmlText(text) {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * Parse a `.dch` character file's documentation-relevant fields - used to
+ * build the hover shown when hovering that character's name. Any field
+ * that isn't declared is simply left `null`/empty; a character with none
+ * of these declared just has no hover.
+ *
+ * @param {string} text - raw .dch file content
+ * @returns {{displayName: string|null, nicknames: string[], description: string|null, color: string|null}}
+ */
+function parseDchCharacterInfo(text) {
+  const displayNameMatch = text.match(/&?"display_name"\s*:\s*"([^"]*)"/);
+  const descriptionMatch = text.match(/&?"description"\s*:\s*"([^"]*)"/);
+  const colorMatch = text.match(/&?"color"\s*:\s*(Color\([^)]*\))/);
+
+  const nicknames = [];
+  const nicknamesMatch = text.match(/&?"nicknames"\s*:\s*\[([^\]]*)\]/);
+  if (nicknamesMatch) {
+    const itemPattern = /"([^"]*)"/g;
+    let match;
+    while ((match = itemPattern.exec(nicknamesMatch[1])) !== null) { nicknames.push(match[1]); }
+  }
+
+  return {
+    displayName: displayNameMatch ? displayNameMatch[1] : null,
+    nicknames,
+    description: descriptionMatch ? descriptionMatch[1] : null,
+    color: colorMatch ? parseGodotColor(colorMatch[1]) : null,
+  };
+}
+
+/**
+ * Render `text` as a small inline SVG image, colored with `cssColor`, as
+ * Markdown image syntax. VS Code's hover Markdown has no syntax of its own
+ * for colored text, but does render inline images - an SVG data URI is the
+ * standard workaround, used here to show a character's display name in
+ * their declared `color` like a colored title.
+ *
+ * @param {string} text
+ * @param {string} cssColor - e.g. "rgba(148, 99, 199, 1)"
+ * @returns {string} Markdown image syntax
+ */
+function createColoredTitleMarkdown(text, cssColor) {
+  const escaped = escapeXmlText(text);
+  const width = Math.max(40, text.length * 9 + 10);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="22">`
+    + `<text x="0" y="16" font-family="sans-serif" font-size="15" font-weight="bold" fill="${cssColor}">${escaped}</text>`
+    + `</svg>`;
+  const base64 = Buffer.from(svg).toString('base64');
+  return `![${escaped}](data:image/svg+xml;base64,${base64})`;
+}
+
+/**
+ * Build the hover shown for a character name, from their `.dch`-declared
+ * display_name/nicknames/description/color. The title uses display_name
+ * if declared (falling back to however the name was written in the .dtl
+ * file), colored via createColoredTitleMarkdown if a color was declared.
+ *
+ * @param {string} rawName - the name as written at the hovered position
+ * @param {{displayName: string|null, nicknames: string[], description: string|null, color: string|null}} info
+ * @returns {vscode.MarkdownString}
+ */
+function createCharacterDocumentation(rawName, info) {
+  const markdown = new vscode.MarkdownString();
+  const title = info.displayName || rawName;
+  if (info.color) {
+    markdown.appendMarkdown(createColoredTitleMarkdown(title, info.color) + '\n\n');
+  } else {
+    markdown.appendMarkdown(`**${title}**\n\n`);
+  }
+  if (info.nicknames.length > 0) {
+    markdown.appendMarkdown(`_Also known as: ${info.nicknames.join(', ')}_\n\n`);
+  }
+  if (info.description) {
+    markdown.appendMarkdown(info.description);
+  }
+  return markdown;
+}
+
+/**
  * Parse a LayeredPortrait `.tscn` scene into a parent-path -> child-names
  * map, e.g. `tree.get(".")` is the scene root's direct children,
  * `tree.get("Head/Left_Eye")` is that node's children. Godot writes each
@@ -754,6 +997,8 @@ async function refreshProjectGodotData() {
     cachedCharacterNames = [];
     cachedAudioChannels = [];
     cachedCharacterMoods = new Map();
+    cachedVariablesTree = new Map();
+    cachedCharacterInfo = new Map();
     projectRootUri = null;
     cachedResourcePaths = [];
     return;
@@ -764,12 +1009,15 @@ async function refreshProjectGodotData() {
     const text = Buffer.from(bytes).toString('utf8');
     cachedCharacterNames = extractCharacterNames(text);
     cachedAudioChannels = extractAudioChannels(text);
+    cachedVariablesTree = extractVariablesTree(text);
     await refreshCharacterMoods(extractCharacterPaths(text));
   } catch (error) {
     console.error('DTL Reader: could not read project.godot', error);
     cachedCharacterNames = [];
     cachedAudioChannels = [];
     cachedCharacterMoods = new Map();
+    cachedVariablesTree = new Map();
+    cachedCharacterInfo = new Map();
   }
   await refreshResourcePaths();
 }
@@ -778,18 +1026,23 @@ async function refreshProjectGodotData() {
  * For every known character, read their `.dch` file and (for moods backed
  * by a LayeredPortrait scene) that scene's `.tscn` file, so `(mood)` tags
  * and `extra_data="set ..."` node paths can be autocompleted without
- * touching disk on every keystroke. Populates cachedCharacterMoods. A
- * character with an unreadable or malformed `.dch` file is simply left
- * out rather than failing the whole refresh.
+ * touching disk on every keystroke. Populates cachedCharacterMoods and
+ * cachedCharacterInfo (display_name/nicknames/description/color, for the
+ * character hover) from the same file read. A character with an
+ * unreadable or malformed `.dch` file is simply left out rather than
+ * failing the whole refresh.
  *
  * @param {Map<string, string>} characterPaths - name -> res:// .dch path
  */
 async function refreshCharacterMoods(characterPaths) {
   const moodsByCharacter = new Map();
+  const infoByCharacter = new Map();
   for (const [name, dchPath] of characterPaths) {
     try {
       const dchBytes = await vscode.workspace.fs.readFile(resolveResourcePath(dchPath));
-      const portraits = parseDchPortraits(Buffer.from(dchBytes).toString('utf8'));
+      const dchText = Buffer.from(dchBytes).toString('utf8');
+      const portraits = parseDchPortraits(dchText);
+      infoByCharacter.set(name, parseDchCharacterInfo(dchText));
 
       const moods = new Map();
       for (const [moodName, scenePath] of portraits) {
@@ -807,10 +1060,11 @@ async function refreshCharacterMoods(characterPaths) {
       }
       moodsByCharacter.set(name, moods);
     } catch (error) {
-      console.error(`DTL Reader: character "${name}" declares .dch path "${dchPath}" but it could not be read or parsed - no mood data for this character.`, error);
+      console.error(`DTL Reader: character "${name}" declares .dch path "${dchPath}" but it could not be read or parsed - no mood data or hover documentation for this character.`, error);
     }
   }
   cachedCharacterMoods = moodsByCharacter;
+  cachedCharacterInfo = infoByCharacter;
 }
 
 /**
@@ -1371,6 +1625,59 @@ function createEmotionPathSuggestions(lineText, typedValue) {
     .map(name => createEmotionNodeCompletion(name, tree.has(childNodePath(parentPath, name))));
 }
 
+// =============================================================================
+// VARIABLE HELPERS
+// =============================================================================
+
+/**
+ * Completion item for one segment of a `{variable.path}` reference, from
+ * project.godot's `variables={...}`. A group (has children) re-triggers
+ * suggestions once '.' is typed, via the Folder kind plus a re-trigger
+ * command, the same way a LayeredPortrait node with children does.
+ *
+ * @param {string} name
+ * @param {{value: string|null, children: Map|null}} entry
+ * @returns {vscode.CompletionItem}
+ */
+function createVariableCompletion(name, entry) {
+  const hasChildren = !!entry.children;
+  const item = new vscode.CompletionItem(name, hasChildren ? vscode.CompletionItemKind.Folder : vscode.CompletionItemKind.Variable);
+  item.detail = hasChildren ? 'Dialogic variable group' : `Dialogic variable - default: ${entry.value}`;
+  if (hasChildren) {
+    item.command = { command: 'editor.action.triggerSuggest', title: 'Show DTL child variables' };
+  }
+  return item;
+}
+
+/**
+ * Build `{variable.path}` completions from cachedVariablesTree, walking
+ * one path segment at a time - typing `variable.` lists `variable`'s
+ * children, mirroring how extra_data's LayeredPortrait node paths work.
+ *
+ * @param {string} typedPath - text typed so far inside the currently open '{'
+ * @returns {vscode.CompletionItem[]}
+ */
+function createVariableSuggestions(typedPath) {
+  const lastDot = typedPath.lastIndexOf('.');
+  const parentSegments = lastDot === -1 ? [] : typedPath.slice(0, lastDot).split('.');
+  const prefix = (lastDot === -1 ? typedPath : typedPath.slice(lastDot + 1)).toLowerCase();
+
+  let level = cachedVariablesTree;
+  for (const segment of parentSegments) {
+    const entry = level.get(segment);
+    if (!entry || !entry.children) { return []; } // unknown group, or a leaf - nothing further to suggest
+    level = entry.children;
+  }
+
+  const items = [];
+  for (const [name, entry] of level) {
+    if (name.toLowerCase().startsWith(prefix)) {
+      items.push(createVariableCompletion(name, entry));
+    }
+  }
+  return items;
+}
+
 
 
 // =============================================================================
@@ -1621,6 +1928,19 @@ function activate(context) {
             }
           }
           // -------------------------------------------------------------------
+          // Character names
+          //
+          // join John left       "John Smith": Hello
+          //      ^^^^                ^^^^^^^^^^^^ hovering either
+          // -------------------------------------------------------------------
+          const characterHit = findCharacterNameAtPosition(document, position);
+          if (characterHit) {
+            const info = cachedCharacterInfo.get(characterHit.name);
+            if (info && (info.displayName || info.nicknames.length > 0 || info.description || info.color)) {
+              return new vscode.Hover(createCharacterDocumentation(characterHit.name, info), characterHit.range);
+            }
+          }
+          // -------------------------------------------------------------------
           // Normal commands
           //
           // label
@@ -1717,6 +2037,17 @@ function activate(context) {
           const line = document.lineAt(position.line).text;
           const beforeCursor = line.substring(0,position.character);
           const items = [];
+          // ===================================================================
+          // VARIABLE PATH: "{variable.te" anywhere - dialogue text, a
+          // bracket option's value, or a bare "set {...}" line. Checked
+          // first since it can appear inside any of those other contexts,
+          // and its own "{" would otherwise just be stray text to them.
+          // ===================================================================
+          const openBraceIndex = beforeCursor.lastIndexOf('{');
+          const closeBraceIndex = beforeCursor.lastIndexOf('}');
+          if (openBraceIndex > closeBraceIndex) {
+            return createVariableSuggestions(beforeCursor.slice(openBraceIndex + 1));
+          }
           // ===================================================================
           // MOOD TAG: "John (happy" or "join John (happy" - checked first
           // since the JOIN/LEAVE/UPDATE block below would otherwise treat
@@ -2044,7 +2375,7 @@ function activate(context) {
           return items;
           }
         }
-    , ' ', '[', '=', '(', '/', '"', "'");
+    , ' ', '[', '=', '(', '/', '"', "'", '{', '.');
   context.subscriptions.push(completionProvider);
 }
 // =============================================================================
