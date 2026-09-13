@@ -1,0 +1,10 @@
+{
+&"display_name": "John Smith",
+&"portraits": {
+&"Default": {
+&"mirror": false,
+&"offset": Vector2(0, 0),
+&"scale": 1.0
+}
+}
+}

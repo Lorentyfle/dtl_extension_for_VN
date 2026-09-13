@@ -13,7 +13,8 @@ config/name="DTL Reader Test Room"
 directories/dch_directory={
 "TestCharacter": "res://characters/TestCharacter.dch",
 "TestCharacter2": "res://characters/TestCharacter2.dch",
-"Test Character3": "res://characters/Test Character3.dch"
+"Test Character3": "res://characters/Test Character3.dch",
+"John Smith": "res://characters/JohnSmith.dch"
 }
 audio/channel_defaults={
 "music":{
@@ -29,3 +30,15 @@ audio/channel_defaults={
 "volume":0.0
 }
 }
+variables={
+"variable" : {
+"test": 1,
+"Ttttt": true,
+"Floating": 1.0,
+},
+"Mamamya": ":OO",
+}
+
+[autoload]
+
+Global="*res://scripts/Global.gd"

@@ -135,6 +135,34 @@ function findCharacterNameAtPosition(document, position) {
   return null;
 }
 
+/**
+ * Find the `Global.function_name` call under the cursor on a `do`/`if`/
+ * `elif` line, if any, resolved against cachedAutoloadFunctions. Used by
+ * the hover provider - isGlobalScriptExpressionLine is defined further
+ * down alongside the completion logic that shares this same line shape.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Position} position
+ * @returns {{globalName: string, functionName: string, info: {params: string, returnType: string|null, doc: string}, range: vscode.Range} | null}
+ */
+function findGlobalFunctionCallAtPosition(document, position) {
+  const line = document.lineAt(position.line).text;
+  if (!isGlobalScriptExpressionLine(line)) { return null; }
+  const callPattern = /([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)/g;
+  let match;
+  while ((match = callPattern.exec(line)) !== null) {
+    const [, globalName, functionName] = match;
+    const funcStart = match.index + globalName.length + 1;
+    const funcEnd = funcStart + functionName.length;
+    if (position.character < funcStart || position.character > funcEnd) { continue; }
+    const functions = cachedAutoloadFunctions.get(globalName);
+    const info = functions && functions.get(functionName);
+    if (!info) { return null; }
+    return { globalName, functionName, info, range: new vscode.Range(position.line, funcStart, position.line, funcEnd) };
+  }
+  return null;
+}
+
 // =============================================================================
 // DTL DOCUMENTATION
 // =============================================================================
@@ -630,6 +658,19 @@ let cachedVariablesTree = new Map();
  */
 let cachedCharacterInfo = new Map();
 
+/**
+ * Per autoload/global-script name (from project.godot's `[autoload]`
+ * section), the top-level functions declared in that `.gd` script - name
+ * -> {params, returnType, doc}, where `doc` is the GDScript `##`
+ * documentation comment directly above the function, if any. Powers
+ * `Global.function_name(...)` autocomplete and hover after `do`, `if`, and
+ * `elif`. An autoload whose script isn't a `.gd` file (e.g. a singleton
+ * scene) simply has no entry here.
+ *
+ * @type {Map<string, Map<string, {params: string, returnType: string|null, doc: string}>>}
+ */
+let cachedAutoloadFunctions = new Map();
+
 function extractCharacterNames(text) {
   const sectionMatch = text.match(/(?:^|\n)\[dialogic\]([\s\S]*?)(\n\[|$)/);
   if (!sectionMatch) { return []; }
@@ -796,7 +837,7 @@ function resolveResourcePath(resPath) {
  * @returns {Map<string, string>}
  */
 function extractCharacterPaths(text) {
-  const sectionMatch = text.match(/\[dialogic\]([\s\S]*?)(\n\[|$)/);
+  const sectionMatch = text.match(/(?:^|\n)\[dialogic\]([\s\S]*?)(\n\[|$)/);
   if (!sectionMatch) { return new Map(); }
   const dictionaryMatch = sectionMatch[1].match(/directories\/dch_directory\s*=\s*\{([\s\S]*?)\}/);
   if (!dictionaryMatch) { return new Map(); }
@@ -805,6 +846,104 @@ function extractCharacterPaths(text) {
   let match;
   while ((match = entryPattern.exec(dictionaryMatch[1])) !== null) { paths.set(match[1], match[2]); }
   return paths;
+}
+
+/**
+ * Extract autoload/global-script name -> `res://` script path from
+ * project.godot's `[autoload]` section, e.g. `Global="*res://global.gd"`.
+ * The optional leading `*` (marks it enabled in-editor) is ignored either
+ * way. Entries pointing at a `.tscn` (a singleton scene rather than a
+ * plain script) are kept too - refreshAutoloadFunctions filters those out
+ * before trying to parse them as GDScript.
+ *
+ * @param {string} text - raw project.godot content
+ * @returns {Map<string, string>}
+ */
+function extractAutoloadPaths(text) {
+  const sectionMatch = text.match(/(?:^|\n)\[autoload\]([\s\S]*?)(\n\[|$)/);
+  if (!sectionMatch) { return new Map(); }
+  const entryPattern = /(?:^|\n)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"\*?(res:\/\/[^"]+)"/g;
+  const paths = new Map();
+  let match;
+  while ((match = entryPattern.exec(sectionMatch[1])) !== null) { paths.set(match[1], match[2]); }
+  return paths;
+}
+
+/**
+ * Scan a single line starting at `openParenIndex` (must point at a '(')
+ * for its matching ')', tracking nested `()`/`[]`/`{}` depth so a
+ * parameter's default value - e.g. `Color(1, 1, 1, 1)` or `[1, 2]` -
+ * doesn't prematurely end the scan at its own closing character.
+ * Multi-line function signatures aren't supported: the closing ')' must
+ * be on the same line, or this returns -1.
+ *
+ * @param {string} line
+ * @param {number} openParenIndex
+ * @returns {number} index of the matching ')', or -1 if not found on this line
+ */
+function findMatchingParenOnLine(line, openParenIndex) {
+  let depth = 0;
+  for (let i = openParenIndex; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '(' || ch === '[' || ch === '{') { depth++; }
+    else if (ch === ')' || ch === ']' || ch === '}') {
+      depth--;
+      if (depth === 0 && ch === ')') { return i; }
+    }
+  }
+  return -1;
+}
+
+/**
+ * Parse a GDScript file's top-level `func` declarations into a name ->
+ * {params, returnType, doc} map, where `doc` is the GDScript
+ * documentation-comment convention: consecutive `##`-prefixed lines
+ * directly above the function (see
+ * https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_documentation_comments.html).
+ * Indented (nested/inner) functions are skipped, since only top-level
+ * methods are callable as `Global.function_name(...)`; functions whose
+ * name starts with `_` are skipped too, since that's GDScript's own
+ * convention for "not meant to be called from outside" (this also
+ * excludes engine lifecycle callbacks like `_ready`/`_process`, which
+ * wouldn't make sense to call from dialogue anyway). Multi-line function
+ * signatures aren't supported (see findMatchingParenOnLine); such a
+ * function is simply skipped rather than misparsed.
+ *
+ * @param {string} text - raw .gd file content
+ * @returns {Map<string, {params: string, returnType: string|null, doc: string}>}
+ */
+function parseGdScriptFunctions(text) {
+  const functions = new Map();
+  let pendingDocLines = [];
+  for (const line of text.split(/\r?\n/)) {
+    const docMatch = line.match(/^##\s?(.*)$/);
+    if (docMatch) {
+      pendingDocLines.push(docMatch[1]);
+      continue;
+    }
+    const headerMatch = line.match(/^(?:static\s+)?func\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
+    if (headerMatch) {
+      const name = headerMatch[1];
+      const openParenIndex = headerMatch.index + headerMatch[0].length - 1;
+      const closeParenIndex = findMatchingParenOnLine(line, openParenIndex);
+      if (closeParenIndex !== -1 && !name.startsWith('_')) {
+        const returnMatch = line.slice(closeParenIndex + 1).match(/^\s*->\s*([A-Za-z_][A-Za-z0-9_.]*)/);
+        functions.set(name, {
+          params: line.slice(openParenIndex + 1, closeParenIndex).trim(),
+          returnType: returnMatch ? returnMatch[1] : null,
+          doc: pendingDocLines.join('\n').trim(),
+        });
+      }
+      pendingDocLines = [];
+      continue;
+    }
+    // Any other non-blank, non-comment line breaks the doc-comment chain -
+    // a `##` block only documents the symbol directly below it.
+    if (line.trim() !== '' && !line.trim().startsWith('#')) {
+      pendingDocLines = [];
+    }
+  }
+  return functions;
 }
 
 /**
@@ -961,6 +1100,28 @@ function createCharacterDocumentation(rawName, info) {
 }
 
 /**
+ * Build the hover shown for a `Global.function_name` call - its signature
+ * (parameters and return type, from the .gd file itself) as the title,
+ * followed by its GDScript `##` documentation comment, if any.
+ *
+ * @param {string} globalName
+ * @param {string} functionName
+ * @param {{params: string, returnType: string|null, doc: string}} info
+ * @returns {vscode.MarkdownString}
+ */
+function createGlobalFunctionDocumentation(globalName, functionName, info) {
+  const markdown = new vscode.MarkdownString();
+  const returnPart = info.returnType ? ` -> ${info.returnType}` : '';
+  markdown.appendCodeblock(`${globalName}.${functionName}(${info.params})${returnPart}`, 'gdscript');
+  if (info.doc) {
+    markdown.appendMarkdown(info.doc);
+  } else {
+    markdown.appendMarkdown('_No `##` documentation comment found above this function in its script._');
+  }
+  return markdown;
+}
+
+/**
  * Parse a LayeredPortrait `.tscn` scene into a parent-path -> child-names
  * map, e.g. `tree.get(".")` is the scene root's direct children,
  * `tree.get("Head/Left_Eye")` is that node's children. Godot writes each
@@ -999,6 +1160,7 @@ async function refreshProjectGodotData() {
     cachedCharacterMoods = new Map();
     cachedVariablesTree = new Map();
     cachedCharacterInfo = new Map();
+    cachedAutoloadFunctions = new Map();
     projectRootUri = null;
     cachedResourcePaths = [];
     return;
@@ -1011,6 +1173,7 @@ async function refreshProjectGodotData() {
     cachedAudioChannels = extractAudioChannels(text);
     cachedVariablesTree = extractVariablesTree(text);
     await refreshCharacterMoods(extractCharacterPaths(text));
+    await refreshAutoloadFunctions(extractAutoloadPaths(text));
   } catch (error) {
     console.error('DTL Reader: could not read project.godot', error);
     cachedCharacterNames = [];
@@ -1018,8 +1181,34 @@ async function refreshProjectGodotData() {
     cachedCharacterMoods = new Map();
     cachedVariablesTree = new Map();
     cachedCharacterInfo = new Map();
+    cachedAutoloadFunctions = new Map();
   }
   await refreshResourcePaths();
+}
+
+/**
+ * For every declared autoload (project.godot's `[autoload]` section)
+ * whose script is a `.gd` file, read it and parse its top-level functions
+ * (see parseGdScriptFunctions), so `do`/`if`/`elif` can autocomplete
+ * `Global.function_name(...)` calls with hover-ready documentation,
+ * without touching disk on every keystroke. An autoload whose script
+ * isn't a `.gd` file (a singleton scene), or is unreadable, is simply
+ * left out rather than failing the whole refresh.
+ *
+ * @param {Map<string, string>} autoloadPaths - name -> res:// script path
+ */
+async function refreshAutoloadFunctions(autoloadPaths) {
+  const functionsByGlobal = new Map();
+  for (const [name, path] of autoloadPaths) {
+    if (!path.toLowerCase().endsWith('.gd')) { continue; } // e.g. a singleton scene, not a script
+    try {
+      const bytes = await vscode.workspace.fs.readFile(resolveResourcePath(path));
+      functionsByGlobal.set(name, parseGdScriptFunctions(Buffer.from(bytes).toString('utf8')));
+    } catch (error) {
+      console.error(`DTL Reader: autoload "${name}" declares script "${path}" but it could not be read - its functions will be unavailable for do/if/elif autocomplete.`, error);
+    }
+  }
+  cachedAutoloadFunctions = functionsByGlobal;
 }
 
 /**
@@ -1678,6 +1867,101 @@ function createVariableSuggestions(typedPath) {
   return items;
 }
 
+// =============================================================================
+// GLOBAL SCRIPT (AUTOLOAD) FUNCTION HELPERS
+// =============================================================================
+
+/**
+ * True when `text` - either what's been typed so far on a line, or a full
+ * line - starts a `do`/`if`/`elif` expression, i.e. is where a
+ * `Global.function_name(...)` call could meaningfully appear. Requires the
+ * keyword to already be followed by whitespace, not just present, so
+ * still-typing the keyword itself (e.g. text ending in exactly "do") isn't
+ * mistaken for an already-complete keyword with an empty expression.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+function isGlobalScriptExpressionLine(text) {
+  return /^\s*(?:do|if|elif)\s/.test(text);
+}
+
+/**
+ * Completion item for an autoload/global-script name itself (before its
+ * `.`), e.g. `Global` in `do Global.`. Inserts a trailing `.` and
+ * re-triggers suggestions, so its functions show up immediately.
+ *
+ * @param {string} name
+ * @returns {vscode.CompletionItem}
+ */
+function createGlobalNameCompletion(name) {
+  const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Class);
+  item.detail = 'Dialogic global script (autoload)';
+  item.insertText = new vscode.SnippetString(`${name}.$0`);
+  item.command = { command: 'editor.action.triggerSuggest', title: 'Show DTL global functions' };
+  return item;
+}
+
+/**
+ * Completion item for a function on an autoload/global script, e.g.
+ * `apply_tint` in `do Global.apply_tint()`. Its GDScript `##` doc comment
+ * (if any) becomes the completion's own documentation, matching what the
+ * hover shows for the same function.
+ *
+ * @param {string} name
+ * @param {{params: string, returnType: string|null, doc: string}} info
+ * @returns {vscode.CompletionItem}
+ */
+function createGlobalFunctionCompletion(name, info) {
+  const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Method);
+  item.detail = `(${info.params})${info.returnType ? ' -> ' + info.returnType : ''}`;
+  item.documentation = new vscode.MarkdownString(info.doc || '_No `##` documentation comment found above this function._');
+  item.insertText = new vscode.SnippetString(`${name}($0)`);
+  return item;
+}
+
+/**
+ * Build completions for a `do`/`if`/`elif` expression's `Global.` member
+ * access: either the autoload names themselves (nothing typed yet, or a
+ * partial name with no `.`), or a specific autoload's function names
+ * (once `Name.` has been typed) - usable anywhere in the expression, not
+ * just right after the keyword, since a condition can combine a Global
+ * call with variables/operators (`if {chapter} == 1 and Global.foo()`).
+ *
+ * @param {string} beforeCursor
+ * @returns {vscode.CompletionItem[] | null} null if this position isn't a
+ *   Global-reference spot at all, so the caller can fall through to other
+ *   completion paths instead of suppressing everything.
+ */
+function createGlobalScriptSuggestions(beforeCursor) {
+  const memberMatch = beforeCursor.match(/([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)?$/);
+  if (memberMatch) {
+    const [, globalName, typedFunction] = memberMatch;
+    const functions = cachedAutoloadFunctions.get(globalName);
+    if (!functions) { return null; }
+    const prefix = (typedFunction || '').toLowerCase();
+    const items = [];
+    for (const [name, info] of functions) {
+      if (name.toLowerCase().startsWith(prefix)) {
+        items.push(createGlobalFunctionCompletion(name, info));
+      }
+    }
+    return items;
+  }
+  const nameMatch = beforeCursor.match(/(?:^|[\s(=!<>+\-*/%,])([A-Za-z_][A-Za-z0-9_]*)?$/);
+  if (nameMatch) {
+    const prefix = (nameMatch[1] || '').toLowerCase();
+    const items = [];
+    for (const name of cachedAutoloadFunctions.keys()) {
+      if (name.toLowerCase().startsWith(prefix)) {
+        items.push(createGlobalNameCompletion(name));
+      }
+    }
+    return items;
+  }
+  return null;
+}
+
 
 
 // =============================================================================
@@ -1786,6 +2070,14 @@ function activate(context) {
   moodWatcher.onDidCreate(refreshProjectGodotData);
   moodWatcher.onDidDelete(refreshProjectGodotData);
   context.subscriptions.push(moodWatcher);
+  // Autoload scripts (declared in project.godot's [autoload] section) feed
+  // the do/if/elif Global.function() autocomplete and hover - same
+  // full-refresh-on-any-change approach as the .dch/.tscn watcher above.
+  const scriptWatcher = vscode.workspace.createFileSystemWatcher('**/*.gd');
+  scriptWatcher.onDidChange(refreshProjectGodotData);
+  scriptWatcher.onDidCreate(refreshProjectGodotData);
+  scriptWatcher.onDidDelete(refreshProjectGodotData);
+  context.subscriptions.push(scriptWatcher);
   // ===========================================================================
   // HOVER PROVIDER
   // ===========================================================================
@@ -1941,6 +2233,19 @@ function activate(context) {
             }
           }
           // -------------------------------------------------------------------
+          // Global script functions
+          //
+          // do Global.apply_tint()      if Global.has_achievement("x")
+          //           ^^^^^^^^^^                 ^^^^^^^^^^^^^^^^ hovering either
+          // -------------------------------------------------------------------
+          const globalFunctionHit = findGlobalFunctionCallAtPosition(document, position);
+          if (globalFunctionHit) {
+            return new vscode.Hover(
+              createGlobalFunctionDocumentation(globalFunctionHit.globalName, globalFunctionHit.functionName, globalFunctionHit.info),
+              globalFunctionHit.range
+            );
+          }
+          // -------------------------------------------------------------------
           // Normal commands
           //
           // label
@@ -2047,6 +2352,19 @@ function activate(context) {
           const closeBraceIndex = beforeCursor.lastIndexOf('}');
           if (openBraceIndex > closeBraceIndex) {
             return createVariableSuggestions(beforeCursor.slice(openBraceIndex + 1));
+          }
+          // ===================================================================
+          // GLOBAL SCRIPT FUNCTIONS: "do Global." / "if Global." /
+          // "elif Global." - either the autoload name itself, or a function
+          // name once "Name." has been typed. Usable anywhere in the
+          // expression (not just right after the keyword), since if/elif
+          // conditions can combine a Global call with variables/operators.
+          // ===================================================================
+          if (isGlobalScriptExpressionLine(beforeCursor)) {
+            const globalItems = createGlobalScriptSuggestions(beforeCursor);
+            if (globalItems !== null) {
+              return globalItems;
+            }
           }
           // ===================================================================
           // MOOD TAG: "John (happy" or "join John (happy" - checked first

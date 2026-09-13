@@ -1,5 +1,8 @@
 {
-&"display_name": "TestCharacter",
+&"display_name": "Super John",
+&"nicknames": ["X", "John 2"],
+&"description": "This is John, the hero",
+&"color": Color(0.58, 0.39, 0.78, 1),
 &"portraits": {
 &"Default": {
 &"mirror": false,
