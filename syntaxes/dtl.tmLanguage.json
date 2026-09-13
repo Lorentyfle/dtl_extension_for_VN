@@ -19,6 +19,7 @@
     { "include": "#dialogue" },
     { "include": "#narration" },
     { "include": "#choices" },
+    { "include": "#global_references" },
     { "include": "#strings" },
     { "include": "#constants" },
     { "include": "#numbers" },
@@ -102,6 +103,13 @@
             { "name": "variable.other.property.dtl", "match": "[A-Za-z_][A-Za-z0-9_]*" }
           ]
         }
+      ]
+    },
+
+    "global_references": {
+      "comment": "A bare identifier immediately followed by '.' and another identifier - the shape of a global reference, e.g. 'Global.apply_tint()' inside do/if/elif/while (Global can be an autoload singleton or a class_name-declared script; DTL/Dialogic doesn't distinguish syntactically, so neither does this). Purely structural, matching regardless of whether the name is a real declared global - the same spirit as support.function.dtl below already coloring ANY identifier-before-'(' the same way. Placed after #dialogue/#narration in the top-level patterns list so ordinary prose containing a stray 'word.word' (e.g. 'Mr.Smith') is still claimed by them first - narration's begin pattern matches at column 0 for any qualifying line, which always wins over a match starting later, and ties are broken by list order in narration's favor.",
+      "patterns": [
+        { "name": "support.class.global.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\.[A-Za-z_])" }
       ]
     },
 

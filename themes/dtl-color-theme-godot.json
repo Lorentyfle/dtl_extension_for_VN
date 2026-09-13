@@ -138,7 +138,7 @@
     {
       "scope": "entity.name.character.dtl",
       "settings": {
-        "foreground": "#a5cfff",
+        "foreground": "#00af38",
         "fontStyle": "bold"
       }
     },
@@ -283,6 +283,14 @@
       "scope": "support.type.audio-kind.dtl",
       "settings": {
         "foreground": "#83d3c9"
+      }
+    },
+    {
+      "comment": "The 'Name' part of a Name.function() global reference after do/if/elif, e.g. 'Global' in 'do Global.apply_tint()' - can be an autoload singleton or a class_name-declared script. The function part itself already picks up support.function.dtl's color from the generic identifier-before-'(' rule.",
+      "scope": "support.class.global.dtl",
+      "settings": {
+        "foreground": "#83d3c9",
+        "fontStyle": "bold"
       }
     },
     {

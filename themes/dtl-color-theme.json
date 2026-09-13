@@ -98,7 +98,6 @@
   },
   "tokenColors": [
     {
-      "comment": "-- Baseline (Dark+-like) rules for ordinary code scopes --",
       "settings": { "foreground": "#d4d4d4" }
     },
     { "scope": "comment", "settings": { "foreground": "#6a9955", "fontStyle": "italic" } },
@@ -111,7 +110,6 @@
     { "scope": "punctuation", "settings": { "foreground": "#808080" } },
 
     {
-      "comment": "-- DTL-specific scopes: each concept gets its own color, independent of the generic rules above --",
       "scope": "entity.name.translationid.dtl",
       "settings": { "foreground": "#7a7a7a", "fontStyle": "italic" }
     },
@@ -120,17 +118,14 @@
       "settings": { "foreground": "#e5c07b", "fontStyle": "bold" }
     },
     {
-      "comment": "Spoken dialogue text is left uncolored on purpose: it inherits editor.foreground (#d4d4d4) like plain prose, instead of a distinct string color. Add a 'foreground' here if you'd rather it stood out.",
       "scope": "string.unquoted.dialogue.dtl",
       "settings": {  "foreground": "#fff3de" }
     },
     {
-      "comment": "Choice wording ('- text') gets its own color so it reads as content rather than plain code text.",
       "scope": "markup.list.choice.dtl",
       "settings": { "foreground": "#4fcc96" }
     },
     {
-      "comment": "Target name after 'label' / 'jump'.",
       "scope": "entity.name.label.dtl",
       "settings": { "foreground": "#e0af68", "fontStyle": "bold" }
     },
@@ -207,7 +202,10 @@
       "settings": { "foreground": "#56b6c2" }
     },
     {
-      "comment": "-- Mood/emotion: one shared scope for join/update's '(mood)' tag, the dialogue speaker's '(mood)' tag, and extra_data=\"set Path/To/Mood\" - all three refer to the same LayeredSprite emotion concept, so they read as one color. --",
+      "scope": "support.class.global.dtl",
+      "settings": { "foreground": "#c44fff", "fontStyle": "bold" }
+    },
+    {
       "scope": "variable.other.emotion.dtl",
       "settings": { "foreground": "#f5a623", "fontStyle": "bold" }
     },
@@ -216,12 +214,10 @@
       "settings": { "foreground": "#f5a623" }
     },
     {
-      "comment": "The literal 'set ' inside extra_data=\"set ...\" stays a dim, string-like color so only the emotion value itself (variable.other.emotion.dtl) pops out.",
       "scope": "keyword.control.emotion-set.dtl",
       "settings": { "foreground": "#ce9178", "fontStyle": "italic" }
     },
     {
-      "comment": "-- BBCode-style balise formatting inside dialogue/narration/choice text. fontStyle is what makes the enclosed text actually render bold/italic/underline/strikethrough - the grammar only ever applies these scopes to text strictly between a matched opening and closing tag, never beyond. --",
       "scope": "markup.bold.dtl",
       "settings": { "fontStyle": "bold" }
     },
@@ -238,12 +234,10 @@
       "settings": { "fontStyle": "strikethrough" }
     },
     {
-      "comment": "Any custom/personalized balise whose effect isn't one of the four known ones above - given its own color since the actual visual effect is unknown to the editor.",
       "scope": "markup.custom-balise.dtl",
       "settings": { "foreground": "#c792ea" }
     },
     {
-      "comment": "-- Combined balise styles. Plain nested scopes don't auto-merge fontStyle in VS Code (the innermost tag would otherwise silently win and the outer style would be lost), so each 2-tag pairing gets its own explicit rule, in both nesting orders (e.g. [b][i] and [i][b] both need to match). 3+ levels of nesting aren't covered and fall back to the innermost tag's single style. --",
       "scope": [
         "markup.bold.dtl markup.italic.dtl",
         "markup.italic.dtl markup.bold.dtl"

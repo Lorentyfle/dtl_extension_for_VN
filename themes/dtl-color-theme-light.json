@@ -286,6 +286,14 @@
       }
     },
     {
+      "comment": "The 'Name' part of a Name.function() global reference after do/if/elif, e.g. 'Global' in 'do Global.apply_tint()' - can be an autoload singleton or a class_name-declared script. The function part itself already picks up support.function.dtl's color from the generic identifier-before-'(' rule.",
+      "scope": "support.class.global.dtl",
+      "settings": {
+        "foreground": "#1a73e8",
+        "fontStyle": "bold"
+      }
+    },
+    {
       "comment": "-- Mood/emotion: one shared scope for join/update's '(mood)' tag, the dialogue speaker's '(mood)' tag, and extra_data=\"set Path/To/Mood\" - all three refer to the same LayeredSprite emotion concept, so they read as one color. --",
       "scope": "variable.other.emotion.dtl",
       "settings": {

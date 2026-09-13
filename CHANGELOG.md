@@ -1,10 +1,12 @@
 # Changelog
 ## TODO:
-- If no nicknames are given, make the nickname lines absent.
 - Add suggestion and documentation for autoload nodes.
 - Add godot variables, enum and const to suggestion and documentation for both nodes and Godot scripts.
-- For path suggestions, remove .import from suggestions.
+- For path suggestions, remove .import and .uid from suggestions.
 - Add documentation for all the available BBcodes from Godot (use Godot doc for it directly).
+## [1.0.4]
+- If no nicknames are given, make the nickname lines absent.
+- Minor correction for theme colors.
 ## [1.0.3]
 - Addition of suggestion and documentation for autoload script (functions only) used from Godot scripts.
 ## [1.0.2]

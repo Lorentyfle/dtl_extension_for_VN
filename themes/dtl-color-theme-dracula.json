@@ -153,7 +153,7 @@
       "comment": "Choice wording ('- text') gets its own color so it reads as content rather than plain code text.",
       "scope": "markup.list.choice.dtl",
       "settings": {
-        "foreground": "#8be9fd"
+        "foreground": "#8bfdb9"
       }
     },
     {
@@ -283,6 +283,14 @@
       "scope": "support.type.audio-kind.dtl",
       "settings": {
         "foreground": "#8be9fd"
+      }
+    },
+    {
+      "comment": "The 'Name' part of a Name.function() global reference after do/if/elif, e.g. 'Global' in 'do Global.apply_tint()' - can be an autoload singleton or a class_name-declared script. The function part itself already picks up support.function.dtl's color from the generic identifier-before-'(' rule.",
+      "scope": "support.class.global.dtl",
+      "settings": {
+        "foreground": "#8be9fd",
+        "fontStyle": "bold"
       }
     },
     {

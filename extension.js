@@ -671,6 +671,27 @@ let cachedCharacterInfo = new Map();
  */
 let cachedAutoloadFunctions = new Map();
 
+/**
+ * Per globally-reachable name, the functions callable on it as
+ * `Name.function_name(...)` - name -> {params, returnType, doc, isStatic}.
+ * Sourced from two places, matching what Dialogic's `do`/`if`/`elif` can
+ * actually reach at runtime:
+ *
+ * - Autoloads (project.godot's `[autoload]` section): a live singleton
+ *   node, so every top-level function is included, static or not.
+ * - `class_name`-declared scripts anywhere in the project: NOT an
+ *   instance, so only `static func` declarations are included - a
+ *   non-static method can't be called as `ClassName.method()` without
+ *   first creating an instance.
+ *
+ * `doc` is the GDScript `##` documentation comment directly above the
+ * function, if any. An autoload whose script isn't a `.gd` file (e.g. a
+ * singleton scene) simply has no entry here.
+ *
+ * @type {Map<string, Map<string, {params: string, returnType: string|null, doc: string, isStatic: boolean}>>}
+ */
+let cachedGlobalFunctions = new Map();
+
 function extractCharacterNames(text) {
   const sectionMatch = text.match(/(?:^|\n)\[dialogic\]([\s\S]*?)(\n\[|$)/);
   if (!sectionMatch) { return []; }
@@ -1040,7 +1061,10 @@ function parseDchCharacterInfo(text) {
   if (nicknamesMatch) {
     const itemPattern = /"([^"]*)"/g;
     let match;
-    while ((match = itemPattern.exec(nicknamesMatch[1])) !== null) { nicknames.push(match[1]); }
+    while ((match = itemPattern.exec(nicknamesMatch[1])) !== null) {
+      const nickname = match[1].trim();
+      if (nickname !== '') { nicknames.push(nickname); } // skip blanks, e.g. a stray [""]
+    }
   }
 
   return {
@@ -1161,6 +1185,7 @@ async function refreshProjectGodotData() {
     cachedVariablesTree = new Map();
     cachedCharacterInfo = new Map();
     cachedAutoloadFunctions = new Map();
+    cachedGlobalFunctions = new Map();
     projectRootUri = null;
     cachedResourcePaths = [];
     return;
@@ -1182,6 +1207,7 @@ async function refreshProjectGodotData() {
     cachedVariablesTree = new Map();
     cachedCharacterInfo = new Map();
     cachedAutoloadFunctions = new Map();
+    cachedGlobalFunctions = new Map();
   }
   await refreshResourcePaths();
 }
@@ -1210,6 +1236,53 @@ async function refreshAutoloadFunctions(autoloadPaths) {
   }
   cachedAutoloadFunctions = functionsByGlobal;
 }
+
+
+/**
+ * Populate cachedGlobalFunctions from every autoload and every
+ * `class_name`-declared script in the project, so `do`/`if`/`elif` can
+ * autocomplete/hover `Name.function_name(...)` calls for anything
+ * Dialogic can actually reach globally - not just autoloads. See
+ * cachedGlobalFunctions' own doc comment for the autoload-vs-class_name
+ * distinction (all functions vs. static-only). A script that can't be
+ * read or parsed is simply left out rather than failing the whole
+ * refresh.
+ *
+ * @param {Map<string, string>} autoloadPaths - name -> res:// script path
+ */
+async function refreshGlobalFunctions(autoloadPaths) {
+  const functionsByGlobal = new Map();
+
+  for (const [name, path] of autoloadPaths) {
+    if (!path.toLowerCase().endsWith('.gd')) { continue; } // e.g. a singleton scene, not a script
+    try {
+      const bytes = await vscode.workspace.fs.readFile(resolveResourcePath(path));
+      functionsByGlobal.set(name, parseGdScriptFunctions(Buffer.from(bytes).toString('utf8')));
+    } catch (error) {
+      console.error(`DTL Reader: autoload "${name}" declares script "${path}" but it could not be read - its functions will be unavailable for do/if/elif autocomplete.`, error);
+    }
+  }
+
+  const scriptFiles = await vscode.workspace.findFiles('**/*.gd', '**/{.git,.godot,node_modules}/**');
+  for (const fileUri of scriptFiles) {
+    try {
+      const bytes = await vscode.workspace.fs.readFile(fileUri);
+      const text = Buffer.from(bytes).toString('utf8');
+      const classNameMatch = text.match(/^class_name\s+([A-Za-z_][A-Za-z0-9_]*)/m);
+      if (!classNameMatch) { continue; } // most scripts aren't a global class - nothing to add
+      const staticFunctions = new Map();
+      for (const [functionName, info] of parseGdScriptFunctions(text)) {
+        if (info.isStatic) { staticFunctions.set(functionName, info); }
+      }
+      functionsByGlobal.set(classNameMatch[1], staticFunctions);
+    } catch (error) {
+      console.error(`DTL Reader: could not read/parse "${fileUri.fsPath}" while scanning for a class_name declaration.`, error);
+    }
+  }
+
+  cachedGlobalFunctions = functionsByGlobal;
+}
+
 
 /**
  * For every known character, read their `.dch` file and (for moods backed
