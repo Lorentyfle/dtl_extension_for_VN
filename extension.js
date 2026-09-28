@@ -3590,7 +3590,8 @@ function createClosingTagSuggestions(textBeforeTag, prefix, line, position) {
  */
 function findUnclosedBaliseDiagnostics(document) {
   const diagnostics = [];
-  const openTagPattern = /\[([A-Za-z_][A-Za-z0-9_]*)\]/g;
+  // `[name]`, or `[name=value]` / `[name key=value ...]` (group 2 set).
+  const openTagPattern = /\[([A-Za-z_][A-Za-z0-9_]*)([=\s][^\]]*)?\]/g;
 
   for (let line = 0; line < document.lineCount; line++) {
     const text = document.lineAt(line).text;
@@ -3604,6 +3605,11 @@ function findUnclosedBaliseDiagnostics(document) {
       const tagName = match[1];
       if (RESERVED_BRACKET_NAMES.has(tagName) || SELF_CLOSING_BBCODE_NAMES.has(tagName)) {
         continue; // a DTL command, or a BBCode tag like [br] that never has a closer
+      }
+      // With parameters, only real Godot BBCode tags need a closer - Dialogic's
+      // own text effects ([pause=1.5], [speed=2], [portrait=happy]...) don't.
+      if (match[2] !== undefined && !DTL_BBCODES.some(entry => entry.name === tagName)) {
+        continue;
       }
 
       const closingTag = `[/${tagName}]`;

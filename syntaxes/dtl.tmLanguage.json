@@ -155,8 +155,19 @@
         },
         {
           "name": "markup.custom-balise.dtl",
-          "comment": "Any other personalized balise, e.g. [Shake]text[/Shake]. Reserved bracket commands (wait, audio, signal...) are excluded via the lookahead so they keep using #options as before.",
-          "begin": "\\[(?!(?:wait|wait_input|audio|voice|clear|background|style|signal|text_input|end_timeline)\\])([A-Za-z_][A-Za-z0-9_]*)\\](?=[^\\n]*\\[/\\1\\])",
+          "comment": "Any other BBCode tag or personalized balise, e.g. [Shake]text[/Shake], with optional parameters after the name - [color=red], [shake level=5], [wave amp=50 freq=5] - colored like attributes inside the tag. Reserved bracket commands (wait, audio, signal...) are excluded via the lookahead so they keep using #options as before, and like the other rules it only matches when the closer exists on the same line, so Dialogic's own closer-less text effects ([pause=1.5], [speed=2]...) are left alone.",
+          "begin": "\\[(?!(?:wait|wait_input|audio|voice|clear|background|style|signal|text_input|end_timeline)(?![A-Za-z0-9_]))([A-Za-z_][A-Za-z0-9_]*)(?:(?=[=\\s])([^\\]\\r\\n]*))?\\](?=[^\\n]*\\[/\\1\\])",
+          "beginCaptures": {
+            "2": {
+              "patterns": [
+                { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=(?!=))" },
+                { "include": "#operator" },
+                { "include": "#strings" },
+                { "include": "#numbers" },
+                { "name": "constant.language.boolean.dtl", "match": "\\b(?:true|false)\\b" }
+              ]
+            }
+          },
           "end": "\\[/\\1\\]",
           "patterns": [ { "include": "#balises" }, { "include": "#variables" } ]
         }

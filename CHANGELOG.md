@@ -1,4 +1,7 @@
 # Changelog
+## [1.2.2]
+- Bug: a BBCode tag with parameters lost its color: `[shake level=1]...[/shake]`, `[color=red]...[/color]`, `[wave amp=50 freq=5]...[/wave]` and every other tag taking a value were colored like a plain `[option]` instead of like `[shake]...[/shake]`. They now get the effect color, with their parameters colored inside the tag (names, `=`, strings, numbers and `true`/`false`). Dialogic's own text effects without a closer (`[pause=1.5]`, `[speed=2]`...) are unchanged.
+- Bug: a BBCode tag with parameters that is never closed (`[shake level=1]` without `[/shake]`) is now reported by the unclosed BBCode check too.
 ## [1.2.1]
 - The Translation View can show several languages at once: every translatable line gets its original text and one editable line per language, so you can translate into several languages, or check the other translations, side by side.
 - The languages are picked when opening the view (a multi-select list of every language in the CSV, plus "Other language..." for a new one), not in the settings. The last choice is remembered per workspace.
