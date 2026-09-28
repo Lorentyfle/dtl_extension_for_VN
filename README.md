@@ -10,7 +10,9 @@ Write your Dialogic timelines outside the Godot editor with syntax highlighting,
 - [Writing timelines](#writing-timelines)
 - [Characters, moods and portraits](#characters-moods-and-portraits)
 - [Variables and autoloads](#variables-and-autoloads)
+- [Text effects](#text-effects)
 - [BBCode](#bbcode)
+- [Glossary](#glossary)
 - [Navigation and outline](#navigation-and-outline)
 - [Error checking](#error-checking)
 - [Translation](#translation)
@@ -25,9 +27,9 @@ Write your Dialogic timelines outside the Godot editor with syntax highlighting,
 | | |
 |---|---|
 | **Highlighting** | Dialogue, narration, choices, every Dialogic event, `{variables}`, BBCode, translation ids, signal dictionaries, autoload references |
-| **Autocomplete** | Events, characters, moods, positions, animations, `res://` paths, labels and other timelines, `{variables}`, autoloads, BBCode tags |
-| **Hover documentation** | Events and their parameters, BBCode tags, characters, moods, LayeredPortrait layers, variables, autoload members, labels |
-| **Navigation** | Ctrl+Click on a `jump` (also into another timeline), Outline view in three styles, breadcrumbs |
+| **Autocomplete** | Events, characters, moods, positions, animations, `res://` paths, labels and other timelines, `{variables}`, autoloads, text effects, BBCode tags, glossary words |
+| **Hover documentation** | Events and their parameters, text effects, BBCode tags, glossary words, characters (with their translated names), moods, LayeredPortrait layers, variables, autoload members, labels |
+| **Navigation** | Ctrl+Click on a `jump` (also into another timeline), Find All References and Rename for labels, jump counts above labels, Outline view in three styles |
 | **Error checking** | Missing labels and timelines, unknown characters, moods and variables, unclosed BBCode tags - each one configurable |
 | **BBCode preview** | `[color]`, `[rainbow]`, `[fade]`, `[b][i]`... show their effect right in the editor, in any combination |
 | **Translation** | Translations next to the original text, a side-by-side Translation View for one or several languages, written into Dialogic's CSV |
@@ -69,6 +71,22 @@ Hover any event, parameter or position to read its documentation. Indentation fo
 - Autoloads, enums, constants and properties each get their own color, inside `{}` too.
 - Autoloads from addons (like Dialogic's own `Dialogic`) are hidden by default, as they expose hundreds of members - see `dtlReader.includeAddonAutoloads`.
 
+## Text effects
+
+Dialogic's own commands inside text - what happens when the reveal reaches them - are suggested after `[` and documented on hover:
+
+| | |
+|---|---|
+| `[pause=x]` `[speed=x]` `[lspeed=x]` | pause, change the reveal speed or the letter speed |
+| `[portrait=name]` `[mood=name]` `[extra_data=value]` | change the speaker's portrait, typing sound mood or portrait data mid-sentence - the values are suggested from the speaker |
+| `[signal=arg]` | emit `Dialogic.text_signal` at that exact moment |
+| `[aa]` `[ns]` `[nrs]` `[input]` | auto-advance, no skipping, no reveal skipping, wait for input |
+| `[n]` `[n+]` | start a new text box (or continue in it) |
+| `[if {condition} yes/no]` | conditional text |
+| `<Hey!/Hello!/Hi!>` | random selection |
+
+An unknown `[portrait=...]` is reported like an unknown mood.
+
 ## BBCode
 
 - **Autocomplete**: `[` inside dialogue, narration and choices suggests Dialogic's commands first, then the most used Godot BBCode tags (the others appear as you type). `[/` suggests closing the tags still open on the line.
@@ -88,9 +106,15 @@ Hover any event, parameter or position to read its documentation. Indentation fo
 
 Tags can be nested and combined in any way (`[b][i][rainbow][wave]...`). Hex colors get a **color picker**.
 
+## Glossary
+
+The words of your Dialogic glossaries (listed in Dialogic's Glossary settings) are recognized in dialogue, narration and choices, the way Dialogic finds them in the game: whole words, the entry's name and alternatives, with its case sensitivity. They get their glossary color with a dotted underline, and hovering one shows its title, text and extra info - translated in translation mode. Glossary words are also suggested first while writing dialogue.
+
 ## Navigation and outline
 
 - **Ctrl+Click** (or F12) a `jump` target to go to its label - `jump OtherTimeline/label` opens the other timeline.
+- **Find All References** (Shift+F12) on a label or a jump lists every jump to it, in every timeline. **Rename** (F2) renames a label and every jump to it at once.
+- Above each label, **"N jumps here"** (click to list them) - or "no jump here" for the labels nothing leads to.
 - **Document a label** with `##` comment lines right above it: the documentation shows when hovering the label or a `jump` to it, and in the `jump` suggestions.
 - **Outline** view, breadcrumbs and Go to Symbol (Ctrl+Shift+O), in three styles (`dtlReader.outline.style`):
   - `flow` - the flow of time: each label with its conditions, choices and jumps, each jump saying where it leads (back, ahead, another timeline);
@@ -121,7 +145,7 @@ Nothing is reported about characters, variables or timelines when your project d
 
 DTL Reader works with the translation CSV files Dialogic generates (**Update CSV files** in Dialogic's Translation settings). After adding a new language, open Godot and click **Collect translation** so the game can use it.
 
-- **Hover a line's `#id:`** to see it in every language.
+- **Hover a line's `#id:`** to see it in every language. Hover a character to see their translated names, and a glossary word in translation mode to see its translated entry.
 - **Translation View** - **DTL: Open Translation View**, or the globe button at the top right of a timeline: the whole timeline as a translation sheet beside it, with each line's original text and an editable line for each language you pick (one or several, to translate or to compare). Type freely, then save with **Ctrl+S** to write every change into the CSV. Both editors scroll together; the view's own globe button changes its languages.
 - **Translation mode** - set `dtlReader.translation.language` (or run **DTL: Select Translation Language**): each translatable line shows its translation at its end, untranslated lines are marked, **DTL: Translate Line** (lightbulb or right-click) translates the current line, and **DTL: Go to Next Untranslated Line** finds the next one.
 
@@ -154,6 +178,8 @@ Four themes made for DTL (they also color the rest of VS Code):
 |---|---|---|
 | `dtlReader.outline.style` | `flow` | Outline style: `flow`, `indentation` or `dialogic` |
 | `dtlReader.preview.bbcodeEffects` | on | Show BBCode effects in the editor |
+| `dtlReader.preview.glossary` | on | Color glossary words in the text |
+| `dtlReader.codeLens.labelReferences` | on | Show "N jumps here" above labels |
 | `dtlReader.includeAddonAutoloads` | off | Also suggest autoloads declared by addons |
 | `dtlReader.completion.dialogueWords` | on | Suggest words already used while writing dialogue |
 | `dtlReader.completion.bbcode` | `common` | BBCode tags to suggest after `[`: `common`, `all` or `off` |

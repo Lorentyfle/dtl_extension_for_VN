@@ -1,6 +1,7 @@
 {
 &"display_name": "Super John",
 &"nicknames": ["X", "John 2"],
+&"_translation_id": "c1",
 &"description": "This is John, the hero",
 &"color": Color(0.58, 0.39, 0.78, 1),
 &"default_portrait": "Default",

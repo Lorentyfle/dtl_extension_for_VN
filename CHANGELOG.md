@@ -1,4 +1,16 @@
 # Changelog
+## [1.4.0]
+- Dialogic's own text effects and modifiers, inside dialogue, narration and choices:
+    - Autocomplete after `[` (with Dialogic's commands, before the BBCode tags) and documentation on hover: `[pause=x]`, `[speed=x]`, `[lspeed=x]`, `[signal=arg]`, `[portrait=name]`, `[mood=name]`, `[extra_data=value]`, `[aa]`, `[ns]`, `[nrs]`, `[input]`, `[n]`, `[n+]` and conditional text `[if {condition} yes/no]`.
+    - Values from the speaker: their portraits for `[portrait=`, their typing sound moods for `[mood=`, their LayeredPortrait layers for `[extra_data=set `.
+    - Their own color, and the random selection modifier `<Hey!/Hello!/Hi!>` too.
+    - An unknown `[portrait=...]` is reported like an unknown mood. Text effects are never reported as unclosed BBCode.
+- Labels: Find All References (Shift+F12) on a label or a jump lists every jump to it, including `jump ThisTimeline/label` from other timelines. Rename (F2) renames the label and every jump to it, in every timeline, refusing names Dialogic would misread or that already exist. "N jumps here" above each label (setting `dtlReader.codeLens.labelReferences`) - "no jump here" also shows the labels nothing leads to.
+- Glossary: the entries of the glossaries listed in project.godot are recognized in dialogue, narration and choices like Dialogic does (whole words, name and alternatives, case sensitivity):
+    - The words get their glossary color with a dotted underline (setting `dtlReader.preview.glossary`).
+    - Hovering one shows its title, text and extra info (translated in translation mode) and where it comes from.
+    - Glossary words are suggested first while writing dialogue.
+- Character names: the character hover shows the translations of their name and nicknames from Dialogic's character translation CSV.
 ## [1.3.1]
 - Better autocomplete for `.dch` character files:
     - `custom_info` keys Dialogic uses (`style`, `sound_mood_default`, `sound_moods`) and every key of a typing sound mood (`sound_path`, `mode`, `pitch_base`, `pitch_variance`, `volume_base`, `volume_variance`, `skip_characters`), with documentation. The portrait key `sound_mood` too.

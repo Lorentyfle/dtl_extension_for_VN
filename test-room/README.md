@@ -42,6 +42,11 @@ every DTL Reader feature without risking real project data.
   placeholder files so `res://` path autocomplete has real files to offer.
 - `translations/dialogic_timeline_translations.csv` - a Dialogic
   translation CSV (en + partial fr) for translation mode.
+- `glossaries/world_glossary.tres` - a Dialogic glossary (Mana/MP, Test
+  Room) listed in project.godot, for the glossary colors and hovers.
+- `translations/dialogic_character_translations.csv`,
+  `dialogic_glossary_translations.csv` - translated character names and
+  glossary entries.
 - `timelines/chapter2.dtl` - a second timeline (registered in
   `directories/dtl_directory`) for cross-timeline `jump chapter2/label`.
 - `timelines/test_timeline.dtl` - one file touching every language
@@ -139,6 +144,17 @@ every DTL Reader feature without risking real project data.
   `Default` is suggested as a whole portrait, since the timeline uses it.
   In an empty new `.dch` file, a complete character is suggested. The
   `color` value gets a color swatch - click it for the color picker.
+- **Text effects**: in the "Welcome to the Test Room" line, hover
+  `[pause`, `[portrait` and `[aa]`. Type `[portrait=` in a TestCharacter line
+  - its portraits are suggested; `[portrait=Nope]` is an error.
+  `<Oh well./Too bad./Never mind.>` is colored as a random selection.
+- **Label references**: put the cursor on `loop_start` and press Shift+F12 -
+  both jumps are listed (one is in chapter2.dtl); F2 renames all of them.
+  "2 jumps here" is shown above `label loop_start`.
+- **Glossary**: "Test Room", "mana" and "MP" in the same line are colored
+  and underlined (from `glossaries/world_glossary.tres`); hover them. With
+  the translation language set to `fr`, "mana" shows its French text.
+  Hover `TestCharacter` to see "Super Jean", its French name.
 - **No stray suggestions in dialogue**: typing `.` or a space at the end
   of a dialogue sentence should NOT open a suggestion list.
 - **BBCode**: in dialogue type `[co` - `code` and `color` should appear;

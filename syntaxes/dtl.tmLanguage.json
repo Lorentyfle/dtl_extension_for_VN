@@ -196,6 +196,8 @@
           "begin": "(?<=:)\\s",
           "end": "(?=#id:|$)",
           "patterns": [
+            { "include": "#text_effects" },
+            { "include": "#random_selection" },
             { "include": "#balises" },
             { "include": "#signals" },
             { "include": "#wait" },
@@ -219,6 +221,8 @@
           "begin": "^(?!\\s*$)(?!\\s*#)(?!\\s*-\\s)(?!\\s*\\[)(?!\\s*(if|else|elif|set|label|jump|while|join|leave|update|audio|do|return)\\b)(?!\\s*(?:\"[^\"\\r\\n]+\"|'[^'\\r\\n]+'|[\\p{L}_][\\p{L}0-9_]*)\\s*:)",
           "end": "(?=#id:|$)",
           "patterns": [
+            { "include": "#text_effects" },
+            { "include": "#random_selection" },
             { "include": "#balises" },
             { "include": "#signals" },
             { "include": "#wait" },
@@ -247,6 +251,8 @@
             { "name": "markup.list.choice.dtl", "match": "\\S(?:[^|#\\[\\]\\r\\n]|\\[(?![^\\]\\r\\n]*\\])[^|#\\r\\n])*?(?=\\||#|\\[|\\r?$)"},
             { "name": "punctuation.separator.choice.dtl", "match": "\\|"},
             { "include": "#translationid" },
+            { "include": "#text_effects" },
+            { "include": "#random_selection" },
             { "include": "#balises" },
             { "include": "#signals" },
             { "include": "#wait" },
@@ -297,6 +303,40 @@
             { "include": "#numbers" },
             { "name": "punctuation.definition.dictionary.signal.dtl", "match": "[{}\\[\\]]" },
             { "name": "punctuation.separator.dictionary.signal.dtl", "match": "[:,]" }
+          ]
+        }
+      ]
+    },
+
+    "text_effects": {
+      "comment": "Dialogic's own text effects inside text (not Godot BBCode): [pause=0.5], [speed=2], [lspeed=0.05], [signal=arg], [portrait=happy], [mood=angry], [extra_data=set Head/Happy], [aa], [ns], [nrs], [input], [n], [n+]. They have no closer. Conditional text [if {x} a/b] is left to #options, which already colors its 'if'.",
+      "patterns": [
+        {
+          "match": "(\\[)(pause|speed|lspeed|signal|portrait|mood|extra_data|aa|ns|nrs|input|n\\+?)(?:(=)([^\\]\\r\\n]*))?(\\])",
+          "captures": {
+            "1": { "name": "punctuation.definition.tag.begin.dtl" },
+            "2": { "name": "keyword.other.text-effect.dtl" },
+            "3": { "name": "keyword.operator.dtl" },
+            "4": { "patterns": [ { "include": "#numbers" }, { "name": "variable.other.emotion.dtl", "match": ".+" } ] },
+            "5": { "name": "punctuation.definition.tag.end.dtl" }
+          }
+        }
+      ]
+    },
+
+    "random_selection": {
+      "comment": "Dialogic's random selection text modifier: <Hey!/Hello!/Hi!> shows one of the options at random. Only matches when there's at least one '/' between the angle brackets.",
+      "patterns": [
+        {
+          "name": "meta.random-selection.dtl",
+          "begin": "<(?=[^<>\\r\\n]*/[^<>\\r\\n]*>)",
+          "beginCaptures": { "0": { "name": "keyword.control.random-selection.dtl" } },
+          "end": ">",
+          "endCaptures": { "0": { "name": "keyword.control.random-selection.dtl" } },
+          "patterns": [
+            { "name": "keyword.control.random-selection.dtl", "match": "/" },
+            { "include": "#balises" },
+            { "include": "#variables" }
           ]
         }
       ]

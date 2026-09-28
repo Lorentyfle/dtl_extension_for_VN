@@ -2,7 +2,7 @@
   "name": "dtl-reader",
   "displayName": "DTL Reader",
   "description": "Dialogic 2 timeline (.dtl) and character (.dch) support: highlighting, autocomplete, documentation, error checking, outline, BBCode preview and translation tools.",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "publisher": "lorentyfle",
   "icon": "./icons/favicon.png",
   "engines": {
@@ -243,6 +243,18 @@
             "default": true,
             "order": 3,
             "markdownDescription": "Show what Godot BBCode tags do, right in the editor: `[color]`, `[bgcolor]`, `[rainbow]`, `[fade]`, `[b]`/`[i]`/`[u]`/`[s]`, outlines, `[url]`, and a static stand-in for animated effects (`[wave]` wavy underline, `[shake]` dotted, `[tornado]` dashed, `[pulse]` dimmed). Tags can be combined and nested. `[hint]` and `[img]` show their text / image on hover, `[char]` its character."
+          },
+          "dtlReader.codeLens.labelReferences": {
+            "type": "boolean",
+            "default": true,
+            "order": 4,
+            "markdownDescription": "Show how many `jump`s lead to each label, above it (click to list them). Find All References (`Shift+F12`) and Rename (`F2`) work on labels either way."
+          },
+          "dtlReader.preview.glossary": {
+            "type": "boolean",
+            "default": true,
+            "order": 3,
+            "markdownDescription": "Color the words of your Dialogic glossaries in dialogue, narration and choices, like Dialogic does in the game, with a dotted underline. Hovering one shows its glossary entry either way."
           }
         }
       },

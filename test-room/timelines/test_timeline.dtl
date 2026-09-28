@@ -12,6 +12,7 @@ TestCharacter (LayeredPortrait): Hello! [b]Welcome[/b] to the [i]test[/i] room. 
 
 set {variable.test} = 2
 TestCharacter: The test variable is {variable.test}, and Mamamya says {Mamamya}.
+TestCharacter: Welcome to the Test Room! I'm out of mana, 0 MP left.[pause=0.5] [portrait=LayeredPortrait]<Oh well./Too bad./Never mind.>[aa]
 
 Bare narration line with no character prefix, still gets [u]styled[/u] and [Shake]custom[/Shake] text.
 

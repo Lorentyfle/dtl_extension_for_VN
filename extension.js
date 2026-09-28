@@ -894,6 +894,110 @@ const COMMON_BBCODE_NAMES = new Set([
   'wave', 'shake', 'rainbow', 'pulse', 'tornado', 'fade', 'br',
 ]);
 
+// =============================================================================
+// DIALOGIC TEXT EFFECTS AND MODIFIERS
+// =============================================================================
+// Dialogic's own commands inside text (not Godot BBCode): effects happen
+// when the reveal reaches them ([pause=0.5], [portrait=happy], [aa]...),
+// modifiers change the text before it's shown ([if ...], <a/b>). From
+// Dialogic's Text/Character/Core modules (_get_text_effects,
+// _get_text_modifiers) and docs.dialogic.pro/text-effects.html.
+
+/** @type {string} */
+const DIALOGIC_TEXT_EFFECTS_DOCS_URL = 'https://docs.dialogic.pro/text-effects.html';
+
+/**
+ * Same shape as DTL_BBCODES entries (rendered by createDocumentation), plus
+ * `snippet`: the completion insert text after the typed `[`, and
+ * `valueFrom`: where `[name=` values are suggested from.
+ */
+const DTL_TEXT_EFFECTS = [
+  { name: 'pause', syntax: '[pause=x] / [pause=x!] / [pause]', snippet: 'pause=${1:0.5}]', description: 'Pauses the reveal for x seconds (0.5 by default). The pause is multiplied by the current speed multiplier and the text speed setting, unless it ends with "!".', example: 'Laripo: Well...[pause=0.8] I guess so.' },
+  { name: 'speed', syntax: '[speed=x] / [speed]', snippet: 'speed=${1:2}]', description: 'Sets the temporary speed multiplier to x (1 if no x is given). It multiplies pauses and letter speed: a bigger number is a slower reveal, 0 is instant.', example: 'Laripo: [speed=3]S-l-o-w-l-y[speed] and normal again.' },
+  { name: 'lspeed', syntax: '[lspeed=x] / [lspeed=x!] / [lspeed]', snippet: 'lspeed=${1:0.05}]', description: 'Sets the letter speed to x seconds per letter, or back to the default if no x is given. Multiplied by the speed multiplier and the text speed setting, unless it ends with "!".', example: 'Laripo: [lspeed=0.2]Dramatic.' },
+  { name: 'signal', syntax: '[signal=argument]', snippet: 'signal=${1:argument}]', description: 'Emits `Dialogic.text_signal` with the given argument when the reveal reaches it - to make something happen at an exact moment of the text.', example: 'Laripo: And then... [signal=thunder]BOOM!' },
+  { name: 'portrait', syntax: '[portrait=name]', snippet: 'portrait=${1}]', valueFrom: 'portraits', description: 'Changes the speaker\'s portrait to the one with the given name, mid-sentence.', example: 'Laripo: I\'m fine. [portrait=sad]Really.' },
+  { name: 'mood', syntax: '[mood=name]', snippet: 'mood=${1}]', valueFrom: 'soundMoods', description: 'Changes the speaker\'s typing sound mood to the one with the given name (from the character\'s typing sounds settings).', example: 'Laripo: [mood=angry]WHAT?!' },
+  { name: 'extra_data', syntax: '[extra_data=value]', snippet: 'extra_data=${1}]', valueFrom: 'layers', description: 'Changes the extra data of the speaker\'s portrait, e.g. `set Head/Happy` to switch a LayeredPortrait layer.', example: 'Laripo: [extra_data=set Mouth/Smile]Hehe.' },
+  { name: 'aa', syntax: '[aa] / [aa=x] / [aa=x?]', snippet: 'aa]', description: 'Enables Auto-Advance for this text event. With x, overrides the delay before advancing (x seconds; "?" makes it absolute).', example: 'Laripo: This line goes on by itself.[aa]' },
+  { name: 'ns', syntax: '[ns] / [ns=x]', snippet: 'ns]', description: 'For this text event, disables text skipping and manual advance, and enables Auto-Advance (x overrides its delay).', example: 'Laripo: You can\'t skip this.[ns]' },
+  { name: 'nrs', syntax: '[nrs]', snippet: 'nrs]', description: 'For this text event, prevents the player from skipping the reveal of the text (it can still be advanced once revealed).', example: 'Laripo: Read every letter.[nrs]' },
+  { name: 'input', syntax: '[input]', snippet: 'input]', description: 'Waits for any input when reached. Unlike [n+], it doesn\'t split the text into sections, so it can be skipped.', example: 'Laripo: Wait for it...[input] there.' },
+  { name: 'n', syntax: '[n]', snippet: 'n]', description: 'Visually starts a new text box, like a new text event: the player has to advance (or Auto-Advance does). The text before it is cleared.', example: 'Laripo: First box.[n]Second box.' },
+  { name: 'n+', syntax: '[n+]', snippet: 'n+]', description: 'Like [n], but the next part is added after the current text instead of replacing it.', example: 'Laripo: First part...[n+] and the rest.' },
+  { name: 'if', syntax: '[if {condition} text if true/text if false]', snippet: 'if {${1:variable}} ${2:text if true}/${3:text if false}]', description: 'Conditional text (a text modifier): shows the first text if the condition is true, else the text after "/" (optional). Saves a whole condition event for a word or a sentence.', example: 'Laripo: [if {KeyCollected} You have a key./You don\'t have any key.]' },
+].map(entry => ({ ...entry, type: 'text_effect', docsUrl: DIALOGIC_TEXT_EFFECTS_DOCS_URL, docsLabel: 'Dialogic documentation' }));
+
+/** Names of the text effects that take no closer and aren't BBCode. @type {Set<string>} */
+const TEXT_EFFECT_NAMES = new Set(DTL_TEXT_EFFECTS.map(entry => entry.name));
+
+/**
+ * Completion item for a Dialogic text effect after `[` - the same event
+ * icon as Dialogic's commands, since both are Dialogic's own.
+ *
+ * @param {object} entry - one of DTL_TEXT_EFFECTS
+ * @param {vscode.Range} range - the typed name plus an auto-closed "]"
+ * @returns {vscode.CompletionItem}
+ */
+function createTextEffectCompletion(entry, range) {
+  const item = new vscode.CompletionItem({ label: entry.name, description: summarizeDescription(entry.description) }, vscode.CompletionItemKind.Event);
+  item.detail = `Dialogic text effect - ${entry.syntax}`;
+  item.documentation = createDocumentation(entry);
+  item.sortText = `0b_${entry.name}`;
+  item.insertText = new vscode.SnippetString(entry.snippet);
+  item.range = range;
+  if (entry.valueFrom) { item.command = { command: 'editor.action.triggerSuggest', title: 'Suggest values' }; }
+  return item;
+}
+
+/**
+ * The speaker of a dialogue line and their mood tag, if any.
+ *
+ * @param {string} text
+ * @returns {{name: string, mood: string|null} | null}
+ */
+function findLineSpeaker(text) {
+  const match = text.match(new RegExp(`^\\s*(${CHARACTER_NAME_SOURCE})\\s*(?:\\(([\\p{L}_][\\p{L}0-9_]*)\\))?\\s*:`, 'u'));
+  if (!match) { return null; }
+  const name = stripCharacterNameQuotes(match[1]);
+  return RESERVED_LINE_KEYWORDS.has(name) ? null : { name, mood: match[2] || null };
+}
+
+/**
+ * Values for `[portrait=`, `[mood=` and `[extra_data=` in a dialogue line:
+ * the speaker's portraits, typing sound moods, or LayeredPortrait layers
+ * (of the line's mood, else of whichever portrait has layers).
+ *
+ * @param {string} line
+ * @param {string} effectName
+ * @param {string} typedValue
+ * @returns {vscode.CompletionItem[]}
+ */
+function createTextEffectValueSuggestions(line, effectName, typedValue) {
+  const speaker = findLineSpeaker(line);
+  if (!speaker) { return []; }
+  const entry = DTL_TEXT_EFFECTS.find(candidate => candidate.name === effectName);
+  const item = (label, detail, kind) => {
+    const completion = new vscode.CompletionItem(label, kind);
+    completion.detail = detail;
+    return completion;
+  };
+  if (entry.valueFrom === 'portraits') {
+    const moods = cachedCharacterMoods.get(speaker.name);
+    return moods ? [...moods.keys()].filter(mood => mood.toLowerCase().startsWith(typedValue.toLowerCase())).map(mood => item(mood, `Portrait of ${speaker.name}`, vscode.CompletionItemKind.EnumMember)) : [];
+  }
+  if (entry.valueFrom === 'soundMoods') {
+    return (cachedCharacterSoundMoods.get(speaker.name) || []).filter(mood => mood.toLowerCase().startsWith(typedValue.toLowerCase())).map(mood => item(mood, `Typing sound mood of ${speaker.name}`, vscode.CompletionItemKind.EnumMember));
+  }
+  if (entry.valueFrom === 'layers') {
+    if (!/^set\s/.test(typedValue)) {
+      return 'set '.startsWith(typedValue) ? [Object.assign(item('set', 'Switch a LayeredPortrait layer: set Layer/Child', vscode.CompletionItemKind.Keyword), { insertText: 'set ', command: { command: 'editor.action.triggerSuggest', title: 'Suggest layers' } })] : [];
+    }
+    return createEmotionPathSuggestions(`join ${/\s/.test(speaker.name) ? `"${speaker.name}"` : speaker.name}${speaker.mood ? ` (${speaker.mood})` : ''} center`, typedValue);
+  }
+  return [];
+}
+
 /**
  * BBCode tags that have no `[/name]` closer, so they're never flagged as
  * unclosed balises by findUnclosedBaliseDiagnostics.
@@ -1228,6 +1332,9 @@ let cachedAutoloadNames = new Set();
  * @type {Map<string, Map<string, DchPortraitInfo & {nodes: Map<string, {type: string|null, description: string|null}>|null}>>}
  */
 let cachedPortraitDetails = new Map();
+
+/** Per character, the names of their typing sound moods (custom_info > sound_moods), for [mood=...]. @type {Map<string, string[]>} */
+let cachedCharacterSoundMoods = new Map();
 
 /**
  * What project.godot actually declares, so diagnostics only report an
@@ -1892,6 +1999,7 @@ function escapeXmlText(text) {
 function parseDchCharacterInfo(text) {
   const displayNameMatch = text.match(/&?"display_name"\s*:\s*"([^"]*)"/);
   const defaultPortraitMatch = text.match(/&?"default_portrait"\s*:\s*"([^"]*)"/);
+  const translationIdMatch = text.match(/&?"_translation_id"\s*:\s*"([^"]*)"/);
   const descriptionMatch = text.match(/&?"description"\s*:\s*"([^"]*)"/);
   const colorMatch = text.match(/&?"color"\s*:\s*(Color\([^)]*\))/);
 
@@ -1912,6 +2020,7 @@ function parseDchCharacterInfo(text) {
     description: descriptionMatch ? descriptionMatch[1] : null,
     color: colorMatch ? parseGodotColor(colorMatch[1]) : null,
     defaultPortrait: defaultPortraitMatch && defaultPortraitMatch[1] ? defaultPortraitMatch[1] : null,
+    translationId: translationIdMatch && translationIdMatch[1] ? translationIdMatch[1] : null,
   };
 }
 
@@ -1959,6 +2068,19 @@ function createCharacterDocumentation(rawName, info) {
   }
   if (info.description) {
     markdown.appendMarkdown(info.description);
+  }
+  // Dialogic translates the name and nicknames with the keys
+  // Character/<translation id>/name and .../nicknames (", "-separated).
+  if (info.translationId) {
+    const locales = cachedTranslationLocales.filter(locale => locale !== getOriginalLocale());
+    const rows = locales.map(locale => {
+      const name = getTranslation(`Character/${info.translationId}/name`, locale);
+      const nicknames = getTranslation(`Character/${info.translationId}/nicknames`, locale);
+      return name || nicknames ? `| ${locale} | ${name || '_not translated_'} | ${nicknames || ''} |` : null;
+    }).filter(Boolean);
+    if (rows.length > 0) {
+      markdown.appendMarkdown(`\n\n**Translations**\n\n| Locale | Name | Nicknames |\n|---|---|---|\n${rows.join('\n')}\n`);
+    }
   }
   return markdown;
 }
@@ -2156,6 +2278,8 @@ async function refreshProjectGodotData() {
     cachedPortraitDetails = new Map();
     cachedTimelinePaths = new Map();
     cachedTimelineLabels = new Map();
+    cachedGlossaryEntries = [];
+    glossaryPatterns = [];
     declaredProjectData = { characters: false, variables: false, timelines: false };
     projectRootUri = null;
     cachedResourcePaths = [];
@@ -2176,6 +2300,7 @@ async function refreshProjectGodotData() {
       timelines: /directories\/dtl_directory\s*=/.test(dialogicSection),
     };
     cachedTimelinePaths = extractDialogicDirectory(text, 'dtl');
+    await refreshGlossaries(dialogicSection);
     const originalLocaleMatch = dialogicSection.match(/(?:^|\n)translation\/original_locale\s*=\s*"([^"]*)"/);
     translationOriginalLocale = originalLocaleMatch ? originalLocaleMatch[1] : null;
     await refreshTimelineLabels();
@@ -2201,6 +2326,7 @@ async function refreshProjectGodotData() {
   await refreshResourcePaths();
   await refreshTranslations();
   refreshAllDiagnostics();
+  if (bbcodeCharDecorationType) { scheduleBbcodePreview(); } // glossary colors may have changed
 }
 
 /**
@@ -2257,12 +2383,14 @@ async function refreshCharacterMoods(characterPaths) {
   const moodsByCharacter = new Map();
   const infoByCharacter = new Map();
   const detailsByCharacter = new Map();
+  const soundMoodsByCharacter = new Map();
   for (const [name, dchPath] of characterPaths) {
     try {
       const dchBytes = await vscode.workspace.fs.readFile(resolveResourcePath(dchPath));
       const dchText = Buffer.from(dchBytes).toString('utf8');
       const portraits = parseDchPortraits(dchText);
       infoByCharacter.set(name, parseDchCharacterInfo(dchText));
+      soundMoodsByCharacter.set(name, parseDchSoundMoods(dchText));
 
       const moods = new Map();
       const details = new Map();
@@ -2291,6 +2419,7 @@ async function refreshCharacterMoods(characterPaths) {
   cachedCharacterMoods = moodsByCharacter;
   cachedCharacterInfo = infoByCharacter;
   cachedPortraitDetails = detailsByCharacter;
+  cachedCharacterSoundMoods = soundMoodsByCharacter;
 }
 
 /**
@@ -2356,7 +2485,7 @@ function createDocumentation(entry) {
     markdown.appendCodeblock(entry.example,'dtl');
   }
   if (entry.docsUrl) {
-    markdown.appendMarkdown(`[Godot documentation](${entry.docsUrl})`);
+    markdown.appendMarkdown(`[${entry.docsLabel || 'Godot documentation'}](${entry.docsUrl})`);
   }
   return markdown;
 }
@@ -2597,11 +2726,13 @@ function createWordSuggestions(document, beforeCursor) {
   const prefixMatch = beforeCursor.match(/[\p{L}'\u2019-]*$/u);
   const prefix = (prefixMatch ? prefixMatch[0] : '').toLowerCase();
 
-  const items = [];
+  const items = createGlossaryWordSuggestions(prefix);
+  const glossaryWords = new Set(items.map(item => item.label.label));
   for (const word of collectDocumentWords(document)) {
     if (prefix && !word.toLowerCase().startsWith(prefix)) {
       continue;
     }
+    if (glossaryWords.has(word)) { continue; }
     items.push(new vscode.CompletionItem(word, vscode.CompletionItemKind.Text));
   }
   return items;
@@ -3547,7 +3678,7 @@ function createClosingTagSuggestions(textBeforeTag, prefix, line, position) {
   let match;
   while ((match = tagPattern.exec(textBeforeTag)) !== null) {
     const [, isClosing, name] = match;
-    if (RESERVED_BRACKET_NAMES.has(name) || SELF_CLOSING_BBCODE_NAMES.has(name)) { continue; }
+    if (RESERVED_BRACKET_NAMES.has(name) || SELF_CLOSING_BBCODE_NAMES.has(name) || TEXT_EFFECT_NAMES.has(name)) { continue; }
     if (!isClosing) {
       openTags.push(name);
     } else {
@@ -3603,8 +3734,8 @@ function findUnclosedBaliseDiagnostics(document) {
     let match;
     while ((match = openTagPattern.exec(text)) !== null) {
       const tagName = match[1];
-      if (RESERVED_BRACKET_NAMES.has(tagName) || SELF_CLOSING_BBCODE_NAMES.has(tagName)) {
-        continue; // a DTL command, or a BBCode tag like [br] that never has a closer
+      if (RESERVED_BRACKET_NAMES.has(tagName) || SELF_CLOSING_BBCODE_NAMES.has(tagName) || TEXT_EFFECT_NAMES.has(tagName)) {
+        continue; // a DTL command, a Dialogic text effect ([aa], [n]...) or a BBCode tag like [br] - none has a closer
       }
       // With parameters, only real Godot BBCode tags need a closer - Dialogic's
       // own text effects ([pause=1.5], [speed=2], [portrait=happy]...) don't.
@@ -3714,8 +3845,18 @@ function findUnknownCharacterDiagnostics(document) {
           : `"${name}" is not a Dialogic character of this project - Dialogic will show this whole line, "${name}:" included, as narration.`);
       continue;
     }
-    const mood = match[4];
     const moods = cachedCharacterMoods.get(name);
+    if (speakerMatch && moods && moods.size > 0) {
+      const portraitPattern = /\[portrait=([^\]\s]+)\]/g;
+      let portraitMatch;
+      while ((portraitMatch = portraitPattern.exec(text)) !== null) {
+        if (moods.has(portraitMatch[1])) { continue; }
+        const start = portraitMatch.index + '[portrait='.length;
+        pushDiagnostic(diagnostics, 'unknownMood', new vscode.Range(line, start, line, start + portraitMatch[1].length),
+          `"${portraitMatch[1]}" is not a portrait of ${name}. Available: ${[...moods.keys()].join(', ')}.`);
+      }
+    }
+    const mood = match[4];
     if (mood && moods && moods.size > 0 && !moods.has(mood)) {
       const moodStart = nameStart + match[2].length + match[3].indexOf(mood);
       pushDiagnostic(diagnostics, 'unknownMood',
@@ -5885,8 +6026,414 @@ function scheduleBbcodePreview(document) {
     bbcodePreviewTimers.delete(key);
     vscode.window.visibleTextEditors
       .filter(editor => !document || editor.document === document)
-      .forEach(updateBbcodePreview);
+      .forEach(editor => { updateBbcodePreview(editor); updateGlossaryDecorations(editor); });
   }, document ? 150 : 0));
+}
+
+// =============================================================================
+// LABEL REFERENCES, RENAME AND CODE LENS
+// =============================================================================
+// Every place that jumps to a label: `jump name` in its own timeline, and
+// `jump Timeline/name` in any timeline. Powers Find All References
+// (Shift+F12), Rename (F2) and the "N jumps here" link above each label.
+
+/**
+ * The label under the cursor, on its `label` line or as a `jump` target -
+ * as the timeline file it's declared in, that timeline's identifier, its
+ * name, and the range of the name under the cursor.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Position} position
+ * @returns {{uri: vscode.Uri, identifier: string|null, name: string, range: vscode.Range} | null}
+ */
+function resolveLabelAt(document, position) {
+  const text = document.lineAt(position.line).text;
+  const covers = (start, length) => position.character >= start && position.character <= start + length;
+  const label = parseLabelLine(text);
+  if (label && covers(label.nameStart, label.name.length)) {
+    return { uri: document.uri, identifier: findTimelineIdentifier(document), name: label.name, range: new vscode.Range(position.line, label.nameStart, position.line, label.nameStart + label.name.length) };
+  }
+  const jump = parseJumpLine(text);
+  if (!jump || !jump.label || jump.target.includes('{') || !covers(jump.labelStart, jump.label.length)) { return null; }
+  const range = new vscode.Range(position.line, jump.labelStart, position.line, jump.labelStart + jump.label.length);
+  if (jump.timeline === null) {
+    return { uri: document.uri, identifier: findTimelineIdentifier(document), name: jump.label, range };
+  }
+  const resPath = cachedTimelinePaths.get(jump.timeline);
+  return resPath ? { uri: resolveResourcePath(resPath), identifier: jump.timeline, name: jump.label, range } : null;
+}
+
+/**
+ * Every timeline of the workspace with its current text (open editors'
+ * live text, else the file on disk) and its Dialogic identifier.
+ *
+ * @param {vscode.TextDocument} [current] - always included, even if not found by the search
+ * @returns {Promise<{uri: vscode.Uri, identifier: string|null, lines: string[]}[]>}
+ */
+async function readAllTimelines(current) {
+  let uris = [];
+  try { uris = (await vscode.workspace.findFiles('**/*.dtl', '**/{.git,.godot,node_modules}/**')).filter(uri => /\.dtl$/i.test(uri.fsPath)); } catch (error) { uris = []; }
+  if (current && !uris.some(uri => normalizeFsPath(uri.fsPath) === normalizeFsPath(current.uri.fsPath || ''))) { uris.push(current.uri); }
+  const timelines = [];
+  for (const uri of uris) {
+    try {
+      const open = vscode.workspace.textDocuments.find(document => document.uri.fsPath && normalizeFsPath(document.uri.fsPath) === normalizeFsPath(uri.fsPath));
+      const text = open ? open.getText() : Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
+      const identifier = findTimelineIdentifier({ uri });
+      timelines.push({ uri: open ? open.uri : uri, identifier, lines: text.split(/\r?\n/) });
+    } catch (error) {
+      // unreadable timeline - skip it
+    }
+  }
+  return timelines;
+}
+
+/**
+ * Where a label is declared and every jump to it, in every timeline.
+ *
+ * @param {{uri: vscode.Uri, identifier: string|null, name: string}} target
+ * @param {{uri: vscode.Uri, identifier: string|null, lines: string[]}[]} timelines - from readAllTimelines
+ * @returns {{declaration: vscode.Location|null, jumps: vscode.Location[]}}
+ */
+function findLabelLocations(target, timelines) {
+  let declaration = null;
+  const jumps = [];
+  const targetPath = normalizeFsPath(target.uri.fsPath || '');
+  for (const timeline of timelines) {
+    const isTarget = normalizeFsPath(timeline.uri.fsPath || '') === targetPath;
+    timeline.lines.forEach((text, line) => {
+      if (isTarget && !declaration) {
+        const label = parseLabelLine(text);
+        if (label && label.name === target.name) {
+          declaration = new vscode.Location(timeline.uri, new vscode.Range(line, label.nameStart, line, label.nameStart + label.name.length));
+          return;
+        }
+      }
+      const jump = parseJumpLine(text);
+      if (!jump || jump.target.includes('{') || jump.label !== target.name) { return; }
+      const pointsHere = jump.timeline === null ? isTarget : (target.identifier !== null && jump.timeline === target.identifier);
+      if (pointsHere) {
+        jumps.push(new vscode.Location(timeline.uri, new vscode.Range(line, jump.labelStart, line, jump.labelStart + jump.label.length)));
+      }
+    });
+  }
+  return { declaration, jumps };
+}
+
+/**
+ * Find All References (Shift+F12) on a label or a jump target.
+ */
+async function provideLabelReferences(document, position, context) {
+  const target = resolveLabelAt(document, position);
+  if (!target) { return undefined; }
+  const { declaration, jumps } = findLabelLocations(target, await readAllTimelines(document));
+  return context && context.includeDeclaration && declaration ? [declaration, ...jumps] : jumps;
+}
+
+/**
+ * What a label may be renamed to, the way Dialogic parses labels and jumps:
+ * not empty, and none of the characters that would end or split it -
+ * "(" (display name), "/" (timeline separator), "#" (translation id or
+ * comment), "{" "}" (variables).
+ *
+ * @param {string} name
+ * @returns {string | null} why it's not valid, or null
+ */
+function validateLabelName(name) {
+  if (!name.trim()) { return 'A label name can\'t be empty.'; }
+  if (name !== name.trim()) { return 'A label name can\'t start or end with a space.'; }
+  const bad = name.match(/[()/#{}\r\n]/);
+  return bad ? `A label name can't contain "${bad[0]}" - Dialogic would read it as part of the syntax.` : null;
+}
+
+const labelRenameProvider = {
+  prepareRename(document, position) {
+    const target = resolveLabelAt(document, position);
+    if (!target) { throw new Error('Only a label (on its "label" line or in a "jump") can be renamed here.'); }
+    return { range: target.range, placeholder: target.name };
+  },
+  async provideRenameEdits(document, position, newName) {
+    const target = resolveLabelAt(document, position);
+    if (!target) { return undefined; }
+    const problem = validateLabelName(newName);
+    if (problem) { throw new Error(problem); }
+    const timelines = await readAllTimelines(document);
+    const { declaration, jumps } = findLabelLocations(target, timelines);
+    if (newName !== target.name && findLabelLocations({ ...target, name: newName }, timelines).declaration) {
+      throw new Error(`This timeline already has a label named "${newName}".`);
+    }
+    const edit = new vscode.WorkspaceEdit();
+    for (const location of [declaration, ...jumps].filter(Boolean)) { edit.replace(location.uri, location.range, newName); }
+    return edit;
+  },
+};
+
+/**
+ * "N jumps here" above each label (`dtlReader.codeLens.labelReferences`);
+ * clicking it lists them (like Find All References).
+ */
+async function provideLabelCodeLenses(document) {
+  if (!vscode.workspace.getConfiguration('dtlReader').get('codeLens.labelReferences', true)) { return []; }
+  const labels = [];
+  for (let line = 0; line < document.lineCount; line++) {
+    const label = parseLabelLine(document.lineAt(line).text);
+    if (label) { labels.push({ line, label }); }
+  }
+  if (labels.length === 0) { return []; }
+  const timelines = await readAllTimelines(document);
+  const identifier = findTimelineIdentifier(document);
+  return labels.map(({ line, label }) => {
+    const { jumps } = findLabelLocations({ uri: document.uri, identifier, name: label.name }, timelines);
+    const position = new vscode.Position(line, label.nameStart);
+    const title = jumps.length === 0 ? 'no jump here' : `${jumps.length} jump${jumps.length > 1 ? 's' : ''} here`;
+    return new vscode.CodeLens(new vscode.Range(position, position), jumps.length === 0
+      ? { title, command: '' }
+      : { title, command: 'editor.action.showReferences', arguments: [document.uri, position, jumps] });
+  });
+}
+
+// =============================================================================
+// GLOSSARY
+// =============================================================================
+// Dialogic's glossaries (.tres DialogicGlossary resources listed in
+// project.godot's `dialogic/glossary/glossary_files`): words that get a
+// colored link in the game's text, with a title, a text and extra info.
+// Here, those words get their color with a dotted underline in dialogue,
+// narration and choices, and hovering one shows the entry.
+
+/**
+ * @typedef {{
+ *   name: string, alternatives: string[], title: string, text: string, extra: string,
+ *   color: string|null, caseSensitive: boolean|null, file: string,
+ *   glossaryId: string|null, entryId: string|null
+ * }} GlossaryEntry
+ */
+
+/** Every enabled glossary entry of the project. @type {GlossaryEntry[]} */
+let cachedGlossaryEntries = [];
+
+/** project.godot's `dialogic/glossary/default_color` (Godot's POWDER_BLUE by default), as CSS. @type {string} */
+let glossaryDefaultColor = 'rgba(176, 224, 230, 1)';
+
+/** project.godot's `dialogic/glossary/default_case_sensitive` (true by default). @type {boolean} */
+let glossaryDefaultCaseSensitive = true;
+
+/** One regular expression per entry (its name and alternatives), rebuilt with the entries. @type {{entry: GlossaryEntry, pattern: RegExp}[]} */
+let glossaryPatterns = [];
+
+/**
+ * Read a GDScript literal value as text: a quoted string (unescaped), or
+ * the raw value otherwise.
+ *
+ * @param {string|null} raw
+ * @returns {string}
+ */
+function gdLiteralToText(raw) {
+  if (raw === null || raw === undefined) { return ''; }
+  const match = raw.match(/^&?"((?:[^"\\]|\\.)*)"$/);
+  return match ? match[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\(.)/g, '$1') : raw;
+}
+
+/**
+ * The strings of a GDScript array literal - `["a", "b"]` or
+ * `PackedStringArray("a", "b")`.
+ *
+ * @param {string|null} raw
+ * @returns {string[]}
+ */
+function gdArrayToStrings(raw) {
+  if (!raw) { return []; }
+  const strings = [];
+  const pattern = /"((?:[^"\\]|\\.)*)"/g;
+  let match;
+  while ((match = pattern.exec(raw)) !== null) { strings.push(match[1].replace(/\\(.)/g, '$1')); }
+  return strings;
+}
+
+/**
+ * Parse a DialogicGlossary `.tres` file into its entries. Its `entries`
+ * dictionary maps each entry name to the entry (a dictionary), and each
+ * alternative word to the entry's name (a plain string) - only the
+ * dictionaries are entries.
+ *
+ * @param {string} text - raw .tres content
+ * @param {string} file - its res:// path
+ * @returns {GlossaryEntry[]}
+ */
+function parseGlossaryResource(text, file) {
+  const resourceSection = text.slice(Math.max(0, text.indexOf('[resource]')));
+  if (/(?:^|\n)enabled\s*=\s*false/.test(resourceSection)) { return []; }
+  const glossaryIdMatch = resourceSection.match(/(?:^|\n)_translation_id\s*=\s*"([^"]*)"/);
+  const headerMatch = resourceSection.match(/(?:^|\n)entries\s*=\s*\{/);
+  if (!headerMatch) { return []; }
+  const body = extractBalancedBraces(resourceSection, headerMatch.index + headerMatch[0].length - 1);
+  if (body === null) { return []; }
+  const entries = [];
+  for (const { key, childBody } of scanDictEntries(body)) {
+    if (childBody === null) { continue; } // an alternative -> entry name alias
+    const fields = new Map(scanDictEntries(childBody).map(field => [field.key, field.rawValue]));
+    if (fields.get('enabled') === 'false') { continue; }
+    const caseSensitive = fields.get('case_sensitive');
+    entries.push({
+      name: gdLiteralToText(fields.get('name')) || key,
+      alternatives: gdArrayToStrings(fields.get('alternatives')),
+      title: gdLiteralToText(fields.get('title')),
+      text: gdLiteralToText(fields.get('text')),
+      extra: gdLiteralToText(fields.get('extra')),
+      color: fields.get('color') ? parseGodotColor(fields.get('color')) : null,
+      caseSensitive: caseSensitive === 'true' ? true : caseSensitive === 'false' ? false : null,
+      file,
+      glossaryId: glossaryIdMatch ? glossaryIdMatch[1] : null,
+      entryId: fields.has('_translation_id') ? gdLiteralToText(fields.get('_translation_id')) : null,
+    });
+  }
+  return entries;
+}
+
+/**
+ * Re-read the glossary settings and files listed in project.godot.
+ *
+ * @param {string} dialogicSection - project.godot's [dialogic] section text
+ */
+async function refreshGlossaries(dialogicSection) {
+  const filesMatch = dialogicSection.match(/(?:^|\n)glossary\/glossary_files\s*=\s*([^\n]*)/);
+  const colorMatch = dialogicSection.match(/(?:^|\n)glossary\/default_color\s*=\s*(Color\([^)]*\))/);
+  const caseMatch = dialogicSection.match(/(?:^|\n)glossary\/default_case_sensitive\s*=\s*(true|false)/);
+  glossaryDefaultColor = (colorMatch && parseGodotColor(colorMatch[1])) || 'rgba(176, 224, 230, 1)';
+  glossaryDefaultCaseSensitive = caseMatch ? caseMatch[1] === 'true' : true;
+  const entries = [];
+  for (const file of gdArrayToStrings(filesMatch ? filesMatch[1] : '')) {
+    try {
+      entries.push(...parseGlossaryResource(Buffer.from(await vscode.workspace.fs.readFile(resolveResourcePath(file))).toString('utf8'), file));
+    } catch (error) {
+      console.error(`DTL Reader: glossary "${file}" (from project.godot) could not be read.`, error);
+    }
+  }
+  cachedGlossaryEntries = entries;
+  const escapeRegex = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  glossaryPatterns = entries.map(entry => {
+    const words = [entry.name, ...entry.alternatives].filter(Boolean).sort((a, b) => b.length - a.length).map(escapeRegex);
+    const caseSensitive = entry.caseSensitive === null ? glossaryDefaultCaseSensitive : entry.caseSensitive;
+    // Whole words, like Dialogic's (?<=\W|^)(?<!\\)(word)(?!])(?=\W|$)
+    return { entry, pattern: new RegExp(`(?<![\\p{L}\\p{N}_\\\\])(?:${words.join('|')})(?![\\p{L}\\p{N}_\\]])`, caseSensitive ? 'gu' : 'giu') };
+  }).filter(item => item.entry.name);
+}
+
+/**
+ * Glossary words of one line: which entry, and where - only in its
+ * player-facing text, never inside a `[tag]` or a `{variable}`.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {string} text
+ * @returns {{entry: GlossaryEntry, start: number, end: number}[]}
+ */
+function findGlossaryWords(document, text) {
+  if (glossaryPatterns.length === 0) { return []; }
+  const from = bbcodePreviewStart(document, text);
+  if (from === -1) { return []; }
+  const blocked = new Array(text.length).fill(false);
+  const blockPattern = /\[[^\]]*\]|\{[^}]*\}|#id:\S+/g;
+  let block;
+  while ((block = blockPattern.exec(text)) !== null) { for (let i = block.index; i < block.index + block[0].length; i++) { blocked[i] = true; } }
+  const found = [];
+  const taken = new Array(text.length).fill(false);
+  for (const { entry, pattern } of glossaryPatterns) {
+    pattern.lastIndex = from;
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const start = match.index;
+      const end = start + match[0].length;
+      let free = true;
+      for (let i = start; i < end; i++) { if (blocked[i] || taken[i]) { free = false; break; } }
+      if (!free) { continue; }
+      for (let i = start; i < end; i++) { taken[i] = true; }
+      found.push({ entry, start, end });
+    }
+  }
+  return found;
+}
+
+/**
+ * Hover on a glossary word: its title, text and extra info (translated in
+ * translation mode), and the glossary it comes from.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Position} position
+ * @returns {vscode.Hover | undefined}
+ */
+function provideGlossaryHover(document, position) {
+  const text = document.lineAt(position.line).text;
+  const hit = findGlossaryWords(document, text).find(word => position.character >= word.start && position.character <= word.end);
+  if (!hit) { return undefined; }
+  const { entry } = hit;
+  const language = getTranslationLanguage();
+  const translated = property => {
+    if (!language || !entry.glossaryId || !entry.entryId) { return ''; }
+    return getTranslation(`Glossary/${entry.glossaryId}/${entry.entryId}/${property}`, language);
+  };
+  const markdown = new vscode.MarkdownString();
+  const title = translated('title') || entry.title || entry.name;
+  markdown.appendMarkdown(entry.color || glossaryDefaultColor ? `${createColoredTitleMarkdown(title, entry.color || glossaryDefaultColor)}\n\n` : `**${title}**\n\n`);
+  const body = translated('text') || entry.text;
+  if (body) { markdown.appendMarkdown(`${body}\n\n`); }
+  const extra = translated('extra') || entry.extra;
+  if (extra) { markdown.appendMarkdown(`_${extra}_\n\n`); }
+  const words = [entry.name, ...entry.alternatives].filter(word => word !== title);
+  markdown.appendMarkdown(`Glossary \`${entry.file}\`${words.length > 0 ? ` - also written: ${words.map(word => `\`${word}\``).join(', ')}` : ''}`);
+  return new vscode.Hover(markdown, new vscode.Range(position.line, hit.start, position.line, hit.end));
+}
+
+/** Decoration type per glossary color. @type {Map<string, vscode.TextEditorDecorationType>} */
+const glossaryDecorationTypes = new Map();
+
+/**
+ * Color the glossary words of an editor (`dtlReader.preview.glossary`),
+ * like Dialogic does in the game, with a dotted underline to show they
+ * can be hovered.
+ *
+ * @param {vscode.TextEditor} editor
+ */
+function updateGlossaryDecorations(editor) {
+  if (!editor) { return; }
+  const document = editor.document;
+  const applies = document.languageId === 'dtl' || document.uri.scheme === TRANSLATION_VIEW_SCHEME;
+  const enabled = applies && vscode.workspace.getConfiguration('dtlReader').get('preview.glossary', true);
+  const byColor = new Map();
+  if (enabled) {
+    for (let line = 0; line < document.lineCount; line++) {
+      for (const word of findGlossaryWords(document, document.lineAt(line).text)) {
+        const color = word.entry.color || glossaryDefaultColor;
+        if (!byColor.has(color)) { byColor.set(color, []); }
+        byColor.get(color).push(new vscode.Range(line, word.start, line, word.end));
+      }
+    }
+  }
+  for (const color of byColor.keys()) {
+    if (!glossaryDecorationTypes.has(color)) {
+      glossaryDecorationTypes.set(color, vscode.window.createTextEditorDecorationType({ color, textDecoration: 'underline dotted' }));
+    }
+  }
+  for (const [color, type] of glossaryDecorationTypes) { editor.setDecorations(type, byColor.get(color) || []); }
+}
+
+/**
+ * Glossary words as suggestions while writing dialogue.
+ *
+ * @param {string} prefix - lowercase word fragment typed so far
+ * @returns {vscode.CompletionItem[]}
+ */
+function createGlossaryWordSuggestions(prefix) {
+  const items = [];
+  for (const entry of cachedGlossaryEntries) {
+    for (const word of [entry.name, ...entry.alternatives]) {
+      if (!word || (prefix && !word.toLowerCase().startsWith(prefix))) { continue; }
+      const item = new vscode.CompletionItem({ label: word, description: 'glossary' }, vscode.CompletionItemKind.Reference);
+      item.documentation = new vscode.MarkdownString(`**${entry.title || entry.name}**\n\n${entry.text}`);
+      item.sortText = `0_${word}`;
+      items.push(item);
+    }
+  }
+  return items;
 }
 
 // =============================================================================
@@ -5898,9 +6445,24 @@ function activate(context) {
   context.subscriptions.push(
     vscode.window.onDidChangeVisibleTextEditors(() => scheduleBbcodePreview()),
     vscode.workspace.onDidChangeTextDocument(event => scheduleBbcodePreview(event.document)),
-    vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration('dtlReader.preview.bbcodeEffects')) { scheduleBbcodePreview(); } })
+    vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration('dtlReader.preview')) { scheduleBbcodePreview(); } })
   );
   scheduleBbcodePreview();
+  context.subscriptions.push(
+    vscode.languages.registerHoverProvider('dtl', { provideHover: provideGlossaryHover }),
+    vscode.languages.registerHoverProvider('dtl-translation', { provideHover: provideGlossaryHover }),
+    { dispose: () => glossaryDecorationTypes.forEach(type => type.dispose()) }
+  );
+  // Glossary files are .tres resources - a change to one listed in
+  // project.godot re-reads the project (which re-reads the glossaries).
+  const glossaryWatcher = vscode.workspace.createFileSystemWatcher('**/*.tres');
+  const onGlossaryFile = uri => {
+    const resPath = projectRootUri ? 'res://' + normalizeFsPath(uri.fsPath).slice(normalizeFsPath(projectRootUri.fsPath).length).replace(/^\/+/, '') : '';
+    if (cachedGlossaryEntries.some(entry => entry.file.toLowerCase() === resPath)) { refreshProjectGodotData(); }
+  };
+  glossaryWatcher.onDidChange(onGlossaryFile);
+  glossaryWatcher.onDidCreate(onGlossaryFile);
+  context.subscriptions.push(glossaryWatcher);
   translationViewMemento = context.workspaceState || null;
   // Created before the first project refresh, which already paints it.
   translationDecorationType = vscode.window.createTextEditorDecorationType({});
@@ -6005,7 +6567,7 @@ function activate(context) {
           // -------------------------------------------------------------------
           const isCharacterCommandLine = /^\s*(?:join|update|leave)\b/.test(line);
           const bracketRegex =
-            /\[\/?([A-Za-z_][A-Za-z0-9_]*)/g;
+            /\[\/?([A-Za-z_][A-Za-z0-9_]*\+?)/g;
           let match;
           while (
             (match = bracketRegex.exec(line)) !== null
@@ -6018,14 +6580,19 @@ function activate(context) {
               position.character <= end
             ) {
               const commandName = match[1];
+              // In text, "[signal=..." is the text effect, not the [signal ...] event.
+              const inText = !isCharacterCommandLine && (isPlayerFacingTextLine(line) || /^\s*-\s/.test(line) || bbcodePreviewStart(document, line) !== -1);
+              const effectEntry = inText && /^[=\]]/.test(line.slice(end)) ? DTL_TEXT_EFFECTS.find(candidate => candidate.name === commandName) : undefined;
               // join/update/leave's own [options] bracket holds attribute
               // names (e.g. "[fade=..."), never BBCode, so a same-named
               // BBCode tag (like [fade]) mustn't shadow them there.
-              const entry =
+              const entry = effectEntry ||
                 DTL_ENTRIES.find(
                   entry =>
                     entry.name === commandName
-                ) || (isCharacterCommandLine ? undefined : DTL_BBCODES.find(entry => entry.name === commandName));
+                ) || (isCharacterCommandLine ? undefined
+                  : (isPlayerFacingTextLine(line) || /^\s*-\s/.test(line) ? DTL_TEXT_EFFECTS.find(entry => entry.name === commandName) : undefined)
+                    || DTL_BBCODES.find(entry => entry.name === commandName));
               if (!entry) {
                 // Not a real bracket command - this is just an attribute
                 // name that happens to sit directly against '[' (e.g.
@@ -6139,7 +6706,7 @@ function activate(context) {
           const characterHit = findCharacterNameAtPosition(document, position);
           if (characterHit) {
             const info = cachedCharacterInfo.get(characterHit.name);
-            if (info && (info.displayName || info.nicknames.length > 0 || info.description || info.color)) {
+            if (info && (info.displayName || info.nicknames.length > 0 || info.description || info.color || info.translationId)) {
               return new vscode.Hover(createCharacterDocumentation(characterHit.name, info), characterHit.range);
             }
           }
@@ -6288,6 +6855,11 @@ function activate(context) {
       }
     );
   context.subscriptions.push(definitionProvider);
+  context.subscriptions.push(
+    vscode.languages.registerReferenceProvider('dtl', { provideReferences: provideLabelReferences }),
+    vscode.languages.registerRenameProvider('dtl', labelRenameProvider),
+    vscode.languages.registerCodeLensProvider('dtl', { provideCodeLenses: provideLabelCodeLenses })
+  );
   // ===========================================================================
   // DIAGNOSTICS (unresolved `jump` targets, unclosed BBCode-style balises)
   // ===========================================================================
@@ -6532,6 +7104,11 @@ function activate(context) {
           if (fontPathMatch) {
             return createPathSuggestions(fontPathMatch[1], position, RESOURCE_EXTENSIONS.font, { quote: false });
           }
+          // Values of Dialogic text effects: [portrait=... [mood=... [extra_data=...
+          const effectValueMatch = beforeCursor.match(/\[(portrait|mood|extra_data)=([^\]]*)$/);
+          if (effectValueMatch && isInPlayerFacingText(beforeCursor.slice(0, effectValueMatch.index))) {
+            return createTextEffectValueSuggestions(line, effectValueMatch[1], effectValueMatch[2]);
+          }
           const closingTagMatch = beforeCursor.match(/\[\/([A-Za-z_][A-Za-z0-9_]*)?$/);
           if (closingTagMatch) {
             return createClosingTagSuggestions(beforeCursor.slice(0, closingTagMatch.index), closingTagMatch[1] || '', line, position);
@@ -6555,7 +7132,14 @@ function activate(context) {
             // BBCode only makes sense inside dialogue/narration text and
             // choices - a standalone "[" line is a Dialogic event.
             const bbcodeMode = vscode.workspace.getConfiguration('dtlReader').get('completion.bbcode', 'common');
-            if (bbcodeMode === 'off' || !isInPlayerFacingText(beforeCursor.slice(0, bracketMatch.index))) {
+            if (!isInPlayerFacingText(beforeCursor.slice(0, bracketMatch.index))) {
+              return items;
+            }
+            if (bbcodeMode === 'off') {
+              const effectRange = new vscode.Range(position.line, bracketMatch.index + 1, position.line, line[position.character] === ']' ? position.character + 1 : position.character);
+              for (const entry of DTL_TEXT_EFFECTS) {
+                if (entry.name.startsWith(prefix)) { items.push(createTextEffectCompletion(entry, effectRange)); }
+              }
               return items;
             }
             const showAllBbcodes = prefix !== '' || bbcodeMode === 'all';
@@ -6564,6 +7148,10 @@ function activate(context) {
             const nameStart = bracketMatch.index + 1;
             const replaceEnd = line[position.character] === ']' ? position.character + 1 : position.character;
             const range = new vscode.Range(position.line, nameStart, position.line, replaceEnd);
+            // Dialogic's own text effects come right after its commands.
+            for (const entry of DTL_TEXT_EFFECTS) {
+              if (entry.name.startsWith(prefix)) { items.push(createTextEffectCompletion(entry, range)); }
+            }
             for (const entry of DTL_BBCODES) {
               if (!showAllBbcodes && !COMMON_BBCODE_NAMES.has(entry.name)) { continue; }
               if (entry.name.startsWith(prefix)) {
