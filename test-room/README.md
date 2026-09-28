@@ -134,6 +134,11 @@ every DTL Reader feature without risking real project data.
   `DTL Reader > Preview: Bbcode Effects`.
 - **Settings**: set `DTL Reader > Diagnostics: Unknown Speaker` to `off`
   and `Ghost: hi` no longer gets a warning.
+- **.dch autocomplete (more)**: in `TestCharacter.dch`, rename the
+  `Default` portrait to anything else, then type `&"` inside `portraits` -
+  `Default` is suggested as a whole portrait, since the timeline uses it.
+  In an empty new `.dch` file, a complete character is suggested. The
+  `color` value gets a color swatch - click it for the color picker.
 - **No stray suggestions in dialogue**: typing `.` or a space at the end
   of a dialogue sentence should NOT open a suggestion list.
 - **BBCode**: in dialogue type `[co` - `code` and `color` should appear;

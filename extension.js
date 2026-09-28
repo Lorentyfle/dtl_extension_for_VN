@@ -4070,7 +4070,44 @@ const DCH_PORTRAIT_KEYS = {
   'offset': { type: 'Vector2', value: 'Vector2(0, 0)', doc: 'Offset in pixels of this portrait, added to the character\'s `offset`.' },
   'mirror': { type: 'bool', value: 'false', doc: 'Mirrors this portrait horizontally (combined with the character\'s `mirror`).' },
   'ignore_char_scale': { type: 'bool', value: 'false', doc: 'If true, this portrait ignores the character\'s `scale` and only uses its own.' },
+  'sound_mood': { type: 'String', value: '""', doc: 'Typing sound mood used while this portrait is shown - one of the `custom_info` > `sound_moods` names. Empty uses `sound_mood_default`.' },
 };
+
+/**
+ * Keys of `custom_info` that Dialogic's own modules use (Style and Text
+ * modules' character settings). Other keys can be added freely by your own
+ * code.
+ *
+ * @type {Record<string, {type: string, value: string, doc: string}>}
+ */
+const DCH_CUSTOM_INFO_KEYS = {
+  'style': { type: 'String', value: '""', doc: 'Name of the Dialogic style (Layout) used while this character speaks. Empty keeps the current style.' },
+  'sound_mood_default': { type: 'String', value: '""', doc: 'Typing sound mood used by default - one of the `sound_moods` names. A portrait can use another one with its own `sound_mood`.' },
+  'sound_moods': { type: 'Dictionary', value: '{}', doc: 'Typing sound moods of this character, by name: which sounds play while its text is typed, and how.' },
+};
+
+/**
+ * Keys of one typing sound mood, inside `custom_info` > `sound_moods`.
+ *
+ * @type {Record<string, {type: string, value: string, doc: string}>}
+ */
+const DCH_SOUND_MOOD_KEYS = {
+  'name': { type: 'String', value: '""', doc: 'Name of this sound mood - the same as its key in `sound_moods`.' },
+  'sound_path': { type: 'String', value: '""', doc: 'A sound file, or a folder whose sounds are picked at random, played while the text is typed.' },
+  'mode': { type: 'int', value: '0', doc: 'How a new sound plays over the previous one: `0` INTERRUPT (stops it), `1` OVERLAP (plays on top), `2` AWAIT (waits for it to end).' },
+  'pitch_base': { type: 'float', value: '1.0', doc: 'Base pitch of the sounds.' },
+  'pitch_variance': { type: 'float', value: '0.0', doc: 'Random pitch variation added to `pitch_base` for each sound.' },
+  'volume_base': { type: 'float', value: '0.0', doc: 'Base volume of the sounds, in dB.' },
+  'volume_variance': { type: 'float', value: '0.0', doc: 'Random volume variation added to `volume_base` for each sound, in dB.' },
+  'skip_characters': { type: 'int', value: '0', doc: 'Number of characters skipped between two sounds (0 = a sound on every character).' },
+};
+
+/** The `mode` values of a typing sound mood (Dialogic's DialogicNode_TypeSounds.Modes). */
+const DCH_SOUND_MODES = [
+  ['0', 'INTERRUPT', 'A new sound stops the one playing.'],
+  ['1', 'OVERLAP', 'A new sound plays on top of the one playing.'],
+  ['2', 'AWAIT', 'A new sound waits for the one playing to end.'],
+];
 
 /** Doc of the `image` override of Dialogic's default portrait scene. @type {string} */
 const DCH_IMAGE_OVERRIDE_DOC = 'Image shown by Dialogic\'s default portrait scene (used when the portrait has no `scene`). Written as a quoted path inside the string: `"\\"res://portraits/happy.png\\""`.';
@@ -4178,6 +4215,90 @@ async function readPortraitSceneExports(scenePath) {
 }
 
 /**
+ * An `export_overrides` value for an `@export` variable, as Dialogic stores
+ * it: a GDScript expression inside a string, e.g. `"true"`, `"1.0"`,
+ * `"\"text\""`. Uses the variable's own default when it has one.
+ *
+ * @param {GdVariableInfo} info
+ * @returns {string} the .dch literal
+ */
+function exportOverrideValue(info) {
+  const quote = expression => `"${expression.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  if (info.defaultValue) { return quote(info.defaultValue); }
+  const type = (info.type || '').trim();
+  if (type === 'bool') { return quote('false'); }
+  if (type === 'int') { return quote('0'); }
+  if (type === 'float') { return quote('0.0'); }
+  if (type === 'String' || type === 'StringName') { return quote('""'); }
+  if (type === 'Color') { return quote('Color(1, 1, 1, 1)'); }
+  if (type === 'Vector2') { return quote('Vector2(0, 0)'); }
+  return '""';
+}
+
+/**
+ * The sound mood names declared in a .dch file (`custom_info` >
+ * `sound_moods` keys).
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+function parseDchSoundMoods(text) {
+  return scanDch(text).keyTokens
+    .filter(token => token.path.length === 2 && token.path[0] === 'custom_info' && token.path[1] === 'sound_moods')
+    .map(token => token.name);
+}
+
+/**
+ * Moods (portrait names) a character is given in the project's timelines -
+ * `join Name (mood)`, `update Name (mood)`, `Name (mood): text` - with where
+ * they're used. Open timelines are read live, the others from disk.
+ *
+ * @param {string} characterName
+ * @returns {Promise<Map<string, string[]>>} mood -> "timeline:line" places
+ */
+async function collectTimelineMoodUsage(characterName) {
+  const usage = new Map();
+  if (!projectRootUri) { return usage; }
+  const pattern = new RegExp(`^\\s*(?:(?:join|update)\\s+)?(${CHARACTER_NAME_SOURCE})\\s*\\(([\\p{L}_][\\p{L}0-9_]*)\\)`, 'u');
+  let uris = [];
+  try { uris = await vscode.workspace.findFiles('**/*.dtl', '**/{.git,.godot,node_modules}/**'); } catch (error) { return usage; }
+  for (const uri of uris) {
+    const open = vscode.workspace.textDocuments.find(document => document.uri.fsPath === uri.fsPath);
+    let text;
+    try { text = open ? open.getText() : Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8'); } catch (error) { continue; }
+    const name = uri.fsPath.replace(/\\/g, '/').split('/').pop();
+    text.split(/\r?\n/).forEach((line, index) => {
+      const match = line.match(pattern);
+      if (!match || stripCharacterNameQuotes(match[1]) !== characterName) { return; }
+      if (!usage.has(match[2])) { usage.set(match[2], []); }
+      usage.get(match[2]).push(`${name}:${index + 1}`);
+    });
+  }
+  return usage;
+}
+
+/** Escape literal text for a snippet (VS Code snippets treat $ } \ specially). */
+const escapeSnippetText = text => text.replace(/[$}\\]/g, '\\$&');
+
+/**
+ * Snippet of a whole new portrait, in the file's own key style (`&"key"`
+ * or `"key"`), with the cursor on its image path.
+ *
+ * @param {string|null} name - null for a placeholder name to type
+ * @param {string} keyPrefix - "&" or ""
+ * @returns {vscode.SnippetString}
+ */
+function portraitSnippet(name, keyPrefix) {
+  const k = key => `${keyPrefix}"${key}"`;
+  const nameText = name === null ? '${1:NewPortrait}' : escapeSnippetText(name);
+  const image = name === null ? '2' : '1';
+  return new vscode.SnippetString(
+    `${keyPrefix}"${nameText}": {\n${k('export_overrides')}: {\n${k('image')}: "\\\\"res://\${${image}}\\\\""\n},\n`
+    + `${k('mirror')}: false,\n${k('offset')}: Vector2(0, 0),\n${k('scale')}: 1.0,\n${k('scene')}: ""\n}`
+  );
+}
+
+/**
  * The keys that make sense at a given .dch dictionary path, with their
  * docs: the character's own keys at the top, a portrait's keys inside
  * `portraits` > name, and the portrait scene's `@export` variables inside
@@ -4192,12 +4313,14 @@ async function readPortraitSceneExports(scenePath) {
 async function dchKeysForPath(path, text) {
   if (path.length === 0) { return DCH_CHARACTER_KEYS; }
   if (path.length === 2 && path[0] === 'portraits') { return DCH_PORTRAIT_KEYS; }
+  if (path.length === 1 && path[0] === 'custom_info') { return DCH_CUSTOM_INFO_KEYS; }
+  if (path.length === 3 && path[0] === 'custom_info' && path[1] === 'sound_moods') { return DCH_SOUND_MOOD_KEYS; }
   if (path.length === 3 && path[0] === 'portraits' && path[2] === 'export_overrides') {
     const keys = { 'image': { type: 'String', value: '"\\"res://\\""', doc: DCH_IMAGE_OVERRIDE_DOC } };
     const portrait = parseDchPortraits(text).get(path[1]);
     if (portrait && portrait.scene) {
       for (const [name, info] of await readPortraitSceneExports(portrait.scene)) {
-        keys[name] = { type: info.type || 'Variant', value: '""', doc: info.doc || `\`@export\` variable of \`${portrait.scene}\`'s root script.` };
+        keys[name] = { type: info.type || 'Variant', value: exportOverrideValue(info), doc: info.doc || `\`@export\` variable of \`${portrait.scene}\`'s root script.` };
       }
     }
     return keys;
@@ -4220,20 +4343,45 @@ async function provideDchCompletions(document, position) {
   const offset = document.offsetAt(position);
   const scan = scanDch(text, offset);
   const top = scan.stack[scan.stack.length - 1];
-  if (!top) { return []; }
-  const path = scan.stack.map(container => container.key).slice(1);
   const line = document.lineAt(position.line).text;
   const closingQuote = line[position.character] === '"' ? 1 : 0;
   const items = [];
+  const useStringNames = /&"/.test(text) || /^\s*(?:\{\s*\})?\s*$/.test(text);
+  const keyPrefix = useStringNames ? '&' : '';
+
+  // A new, empty .dch file (or an empty "{}"): offer a whole character.
+  if (/^\s*(?:\{\s*\})?\s*$/.test(text)) {
+    const k = key => `${keyPrefix}"${key}"`;
+    const item = new vscode.CompletionItem({ label: 'Dialogic character', description: 'every key, with defaults' }, vscode.CompletionItemKind.Snippet);
+    item.documentation = new vscode.MarkdownString('A complete character, as Dialogic writes it, with one portrait to fill in.');
+    item.insertText = new vscode.SnippetString(
+      `{\n${k('@path')}: "res://addons/dialogic/Resources/character.gd",\n${k('@subpath')}: NodePath(""),\n`
+      + `${k('color')}: Color(1, 1, 1, 1),\n${k('custom_info')}: {},\n${k('default_portrait')}: "\${2:Default}",\n`
+      + `${k('description')}: "\${3}",\n${k('display_name')}: "\${1:Name}",\n${k('mirror')}: false,\n${k('nicknames')}: [],\n`
+      + `${k('offset')}: Vector2(0, 0),\n${k('portraits')}: {\n${keyPrefix}"\${2:Default}": {\n${k('export_overrides')}: {\n`
+      + `${k('image')}: "\\\\"res://\${4}\\\\""\n},\n${k('mirror')}: false,\n${k('offset')}: Vector2(0, 0),\n${k('scale')}: 1.0,\n${k('scene')}: ""\n}\n},\n`
+      + `${k('scale')}: 1.0\n}\n`
+    );
+    item.range = new vscode.Range(new vscode.Position(0, 0), document.positionAt(text.length));
+    return [item];
+  }
+  if (!top) { return []; }
+  const path = scan.stack.map(container => container.key).slice(1);
 
   if (scan.state === 'key' && top.kind === 'dict') {
     const keys = await dchKeysForPath(path, text);
-    const useStringNames = /&"/.test(text) || text.trim() === '' || text.trim() === '{}';
     const bareTyped = scan.openString ? '' : (line.slice(0, position.character).match(/&?[A-Za-z_@]*$/) || [''])[0];
     const typedStart = scan.openString ? document.positionAt(scan.openString.start) : new vscode.Position(position.line, position.character - bareTyped.length);
     const range = new vscode.Range(typedStart, new vscode.Position(position.line, position.character + (scan.openString ? closingQuote : 0)));
     // VS Code filters on the typed text, so match its shape: `&"disp` or `"disp` vs a bare `disp`.
     const quotedFilter = !!scan.openString || bareTyped.startsWith('&');
+    // Keys already set in this dictionary - before AND after the cursor. The
+    // half-typed key is cut out first, so its open quote doesn't swallow the
+    // rest of the file when scanning.
+    const withoutTyped = text.slice(0, document.offsetAt(typedStart)) + text.slice(offset + (scan.openString ? closingQuote : 0));
+    const samePath = tokenPath => tokenPath.length === path.length && tokenPath.every((segment, i) => segment === path[i]);
+    const existingKeys = new Set([...top.keys, ...scanDch(withoutTyped).keyTokens.filter(token => samePath(token.path)).map(token => token.name)]);
+    top.keys = existingKeys;
     for (const [name, info] of Object.entries(keys)) {
       if (top.keys.has(name)) { continue; } // already set in this dictionary
       const item = new vscode.CompletionItem({ label: name, description: info.type }, vscode.CompletionItemKind.Property);
@@ -4242,6 +4390,41 @@ async function provideDchCompletions(document, position) {
       item.insertText = new vscode.SnippetString(`${useStringNames ? '&' : ''}"${name}": \${1:${info.value.replace(/[$}\\]/g, '\\$&')}}`);
       item.range = range;
       item.sortText = name.startsWith('@') ? `2_${name}` : `1_${name}`;
+      items.push(item);
+    }
+    // Inside `portraits`: the moods the timelines give this character but
+    // this file doesn't define yet, as whole portraits - plus a blank one.
+    if (path.length === 1 && path[0] === 'portraits') {
+      const character = findCharacterForDocument(document);
+      if (character) {
+        for (const [mood, places] of await collectTimelineMoodUsage(character)) {
+          if (top.keys.has(mood)) { continue; }
+          const item = new vscode.CompletionItem({ label: mood, description: `used in ${places.length} timeline line(s)` }, vscode.CompletionItemKind.EnumMember);
+          item.documentation = new vscode.MarkdownString(`\`(${mood})\` is used for **${character}** in timelines but has no portrait yet:\n\n${places.slice(0, 8).map(place => `- ${place}`).join('\n')}${places.length > 8 ? '\n- ...' : ''}`);
+          item.filterText = quotedFilter ? `${keyPrefix}"${mood}"` : mood;
+          item.insertText = portraitSnippet(mood, keyPrefix);
+          item.range = range;
+          item.sortText = `0_${mood}`;
+          items.push(item);
+        }
+      }
+      const item = new vscode.CompletionItem({ label: 'New portrait', description: 'image portrait' }, vscode.CompletionItemKind.Snippet);
+      item.filterText = quotedFilter ? `${keyPrefix}"` : 'portrait';
+      item.insertText = portraitSnippet(null, keyPrefix);
+      item.range = range;
+      item.sortText = '3_new';
+      items.push(item);
+    }
+    // Inside `sound_moods`: a whole new sound mood.
+    if (path.length === 2 && path[0] === 'custom_info' && path[1] === 'sound_moods') {
+      const k = key => `${keyPrefix}"${key}"`;
+      const item = new vscode.CompletionItem({ label: 'New sound mood', description: 'typing sounds' }, vscode.CompletionItemKind.Snippet);
+      item.filterText = quotedFilter ? `${keyPrefix}"` : 'sound';
+      item.insertText = new vscode.SnippetString(
+        `${keyPrefix}"\${1:Mood}": {\n${k('mode')}: 0,\n${k('name')}: "\${1:Mood}",\n${k('pitch_base')}: 1.0,\n${k('pitch_variance')}: 0.0,\n`
+        + `${k('skip_characters')}: 0,\n${k('sound_path')}: "res://\${2}",\n${k('volume_base')}: 0.0,\n${k('volume_variance')}: 0.0\n}`
+      );
+      item.range = range;
       items.push(item);
     }
     return items;
@@ -4265,6 +4448,19 @@ async function provideDchCompletions(document, position) {
 
   if (path.length === 0 && key === 'default_portrait') {
     for (const mood of parseDchPortraits(text).keys()) { addValue(mood, `"${mood}"`, 'Portrait of this character', vscode.CompletionItemKind.EnumMember); }
+  } else if ((key === 'sound_mood' && path.length === 2 && path[0] === 'portraits') || (key === 'sound_mood_default' && path.length === 1 && path[0] === 'custom_info')) {
+    for (const mood of parseDchSoundMoods(text)) { addValue(mood, `"${mood}"`, 'Sound mood of this character', vscode.CompletionItemKind.EnumMember); }
+  } else if (key === 'mode' && path.length === 3 && path[1] === 'sound_moods') {
+    for (const [value, name, doc] of DCH_SOUND_MODES) { addValue(`${value} - ${name}`, value, doc, vscode.CompletionItemKind.EnumMember); }
+  } else if (key === 'sound_path' && path.length === 3 && path[1] === 'sound_moods') {
+    const audioFiles = cachedResourcePaths.filter(resPath => RESOURCE_EXTENSIONS.audio.includes(resPath.slice(resPath.lastIndexOf('.') + 1).toLowerCase()));
+    const folders = [...new Set(audioFiles.map(resPath => resPath.slice(0, resPath.lastIndexOf('/'))))];
+    for (const folder of folders) {
+      if (folder.toLowerCase().startsWith(typed.toLowerCase())) { addValue(`${folder}/`, `"${folder}"`, 'Folder of sounds (picked at random)', vscode.CompletionItemKind.Folder); }
+    }
+    for (const resPath of audioFiles) {
+      if (resPath.toLowerCase().startsWith(typed.toLowerCase())) { addValue(resPath, `"${resPath}"`, 'Sound file', vscode.CompletionItemKind.File); }
+    }
   } else if (key === 'scene' && path.length === 2 && path[0] === 'portraits') {
     for (const resPath of cachedResourcePaths) {
       if (RESOURCE_EXTENSIONS.scene.includes(resPath.slice(resPath.lastIndexOf('.') + 1).toLowerCase()) && resPath.toLowerCase().startsWith(typed.toLowerCase())) {
@@ -4291,6 +4487,74 @@ async function provideDchCompletions(document, position) {
   return items;
 }
 
+/** Round a color component for writing it back (at most 3 decimals, no trailing zeros). */
+const formatColorComponent = value => String(Math.round(value * 1000) / 1000);
+
+/**
+ * Color swatches (and the color picker) for a .dch file's
+ * `Color(r, g, b[, a])` values, e.g. the character's name color.
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {vscode.ColorInformation[]}
+ */
+function provideDchColors(document) {
+  const text = document.getText();
+  const pattern = /Color\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*(?:,\s*(-?[\d.]+)\s*)?\)/g;
+  const colors = [];
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    const [r, g, b, a] = match.slice(1).map(value => (value === undefined ? 1 : Math.min(1, Math.max(0, parseFloat(value)))));
+    colors.push(new vscode.ColorInformation(new vscode.Range(document.positionAt(match.index), document.positionAt(match.index + match[0].length)), new vscode.Color(r, g, b, a)));
+  }
+  return colors;
+}
+
+/**
+ * @param {vscode.Color} color
+ * @returns {vscode.ColorPresentation[]}
+ */
+function provideDchColorPresentations(color) {
+  const parts = [color.red, color.green, color.blue, color.alpha].map(formatColorComponent);
+  return [new vscode.ColorPresentation(`Color(${parts.join(', ')})`)];
+}
+
+/**
+ * Color swatches (and the picker) for the `#hex` colors of BBCode tags in a
+ * timeline: `[color=#ff0000]`, `[bgcolor=...]`, `[outline_color=...]`,
+ * `[pulse color=...]`, etc. Named colors (`red`) are left to the preview.
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {vscode.ColorInformation[]}
+ */
+function provideTimelineColors(document) {
+  const colors = [];
+  const pattern = /\[[A-Za-z_]*(?:=|[^\]]*\bcolor=)(#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4}))\b/g;
+  for (let line = 0; line < document.lineCount; line++) {
+    const text = document.lineAt(line).text;
+    if (!text.includes('#')) { continue; }
+    pattern.lastIndex = 0;
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      let hex = match[1].slice(1);
+      if (hex.length <= 4) { hex = hex.split('').map(ch => ch + ch).join(''); }
+      const [r, g, b, a] = [0, 2, 4, 6].map(i => (i < hex.length ? parseInt(hex.slice(i, i + 2), 16) / 255 : 1));
+      const start = match.index + match[0].length - match[1].length;
+      colors.push(new vscode.ColorInformation(new vscode.Range(line, start, line, start + match[1].length), new vscode.Color(r, g, b, a)));
+    }
+  }
+  return colors;
+}
+
+/**
+ * @param {vscode.Color} color
+ * @returns {vscode.ColorPresentation[]}
+ */
+function provideTimelineColorPresentations(color) {
+  const toHex = value => Math.round(value * 255).toString(16).padStart(2, '0');
+  const hex = `#${toHex(color.red)}${toHex(color.green)}${toHex(color.blue)}${color.alpha < 1 ? toHex(color.alpha) : ''}`;
+  return [new vscode.ColorPresentation(hex)];
+}
+
 /**
  * Hover for a .dch key: what it does (character, portrait and
  * export_overrides keys). Hovering a portrait's name inside `portraits`
@@ -4313,7 +4577,9 @@ async function provideDchHover(document, position) {
   }
   const info = (await dchKeysForPath(token.path, text))[token.name];
   if (!info) { return undefined; }
-  const where = token.path.length === 0 ? 'character' : token.path[2] === 'export_overrides' ? 'portrait scene override' : 'portrait';
+  const where = token.path.length === 0 ? 'character'
+    : token.path[0] === 'custom_info' ? (token.path.length === 3 ? 'typing sound mood' : 'custom info')
+    : token.path[2] === 'export_overrides' ? 'portrait scene override' : 'portrait';
   const markdown = new vscode.MarkdownString();
   markdown.appendMarkdown(`**${token.name}**: \`${info.type}\` _(${where})_\n\n${info.doc}\n\n`);
   markdown.appendMarkdown(`[Dialogic documentation](${DIALOGIC_CHARACTER_DOCS_URL})`);
@@ -5983,7 +6249,9 @@ function activate(context) {
   context.subscriptions.push(hoverProvider);
   context.subscriptions.push(
     vscode.languages.registerCompletionItemProvider('dch', { provideCompletionItems: provideDchCompletions }, '"', ':', ' ', '/', '&'),
-    vscode.languages.registerHoverProvider('dch', { provideHover: provideDchHover })
+    vscode.languages.registerHoverProvider('dch', { provideHover: provideDchHover }),
+    vscode.languages.registerColorProvider('dch', { provideDocumentColors: provideDchColors, provideColorPresentations: provideDchColorPresentations }),
+    vscode.languages.registerColorProvider('dtl', { provideDocumentColors: provideTimelineColors, provideColorPresentations: provideTimelineColorPresentations })
   );
   context.subscriptions.push(
     vscode.languages.registerDocumentSymbolProvider('dtl', { provideDocumentSymbols: provideTimelineOutline }, { label: 'DTL' })

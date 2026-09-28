@@ -1,4 +1,14 @@
 # Changelog
+## [1.3.1]
+- Better autocomplete for `.dch` character files:
+    - `custom_info` keys Dialogic uses (`style`, `sound_mood_default`, `sound_moods`) and every key of a typing sound mood (`sound_path`, `mode`, `pitch_base`, `pitch_variance`, `volume_base`, `volume_variance`, `skip_characters`), with documentation. The portrait key `sound_mood` too.
+    - Values: the file's sound moods for `sound_mood`/`sound_mood_default`, the three modes (`0` INTERRUPT, `1` OVERLAP, `2` AWAIT) for `mode`, sound files and folders for `sound_path`.
+    - Inside `portraits`, the moods your timelines use for this character but that the file doesn't define yet are suggested as complete portraits (with where they're used), plus a "New portrait" and a "New sound mood" snippet.
+    - A complete character is suggested in an empty `.dch` file.
+    - `export_overrides` values follow the `@export` variable's type (`"true"`, `"0.0"`, `"\"\""`...) or its default value.
+    - Bug: keys set after the cursor in the same block were suggested again.
+- Color picker: on `Color(...)` values in `.dch` files, and on `#hex` colors of BBCode tags (`[color=#ff0000]`, `[bgcolor=]`, `[pulse color=]`...) in timelines.
+- README rewritten to describe everything DTL Reader can do, with a table of every setting and command.
 ## [1.3.0]
 - BBCode preview: the text inside Godot BBCode tags shows their effect right in the editor, in timelines and in the Translation View:
     - `[b]`, `[i]`, `[u]`, `[s]`: bold, italic, underline, strikethrough.
