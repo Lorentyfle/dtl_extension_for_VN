@@ -19,27 +19,30 @@ const problems = require('./index');
  * @returns {Map<string, Set<string>>} character -> moods used
  */
 function collectCharacterUsage() {
-  const usage = new Map();
-  const use = (name, mood) => {
-    if (!usage.has(name)) { usage.set(name, new Set()); }
-    if (mood) { usage.get(name).add(mood); }
-  };
-  const linePattern = new RegExp(`^\\s*(?:(?:join|update|leave)\\s+)?(${syntax.CHARACTER_NAME_SOURCE})\\s*(?:\\(([\\p{L}_][\\p{L}0-9_]*)\\))?`, 'u');
-  for (const lines of project.currentTimelineLines().values()) {
-    for (const text of lines) {
-      const isCommand = /^\s*(?:join|update|leave)\s/.test(text);
-      const speaker = syntax.findLineSpeaker(text);
-      if (!isCommand && !speaker) { continue; }
-      const match = text.match(linePattern);
-      if (!match) { continue; }
-      const name = syntax.stripCharacterNameQuotes(match[1]);
-      use(name, match[2]);
-      if (speaker) {
-        for (const portrait of text.matchAll(/\[portrait=([^\]\s]+)\]/g)) { use(name, portrait[1]); }
+  // The same for every .dch checked in a round - computed once.
+  return problems.oncePerRound('characterUsage', () => {
+    const usage = new Map();
+    const use = (name, mood) => {
+      if (!usage.has(name)) { usage.set(name, new Set()); }
+      if (mood) { usage.get(name).add(mood); }
+    };
+    const linePattern = new RegExp(`^\\s*(?:(?:join|update|leave)\\s+)?(${syntax.CHARACTER_NAME_SOURCE})\\s*(?:\\(([\\p{L}_][\\p{L}0-9_]*)\\))?`, 'u');
+    for (const lines of project.currentTimelineLines().values()) {
+      for (const text of lines) {
+        const isCommand = /^\s*(?:join|update|leave)\s/.test(text);
+        const speaker = syntax.findLineSpeaker(text);
+        if (!isCommand && !speaker) { continue; }
+        const match = text.match(linePattern);
+        if (!match) { continue; }
+        const name = syntax.stripCharacterNameQuotes(match[1]);
+        use(name, match[2]);
+        if (speaker) {
+          for (const portrait of text.matchAll(/\[portrait=([^\]\s]+)\]/g)) { use(name, portrait[1]); }
+        }
       }
     }
-  }
-  return usage;
+    return usage;
+  });
 }
 
 /**

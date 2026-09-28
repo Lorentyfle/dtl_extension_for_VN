@@ -33,12 +33,30 @@ function matchesSymbolQuery(query, name) {
 }
 
 /**
+ * The timelines to search. With a project: the ones already read (open
+ * editors live, the others as last read from disk) - Go to Symbol asks
+ * again on every key typed, so nothing is re-read from disk. Without one:
+ * every .dtl file of the folder.
+ *
+ * @returns {Promise<{uri: vscode.Uri, identifier: string|null, lines: string[]}[]>}
+ */
+async function listTimelines() {
+  if (!state.projectRootUri) { return project.readAllTimelines(); }
+  return [...project.currentTimelineLines()].map(([key, lines]) => {
+    const resPath = state.cachedTimelinePaths.get(key);
+    return resPath
+      ? { uri: project.resolveResourcePath(resPath), identifier: key, lines }
+      : { uri: vscode.Uri.parse(key), identifier: null, lines }; // open, not registered yet
+  });
+}
+
+/**
  * @param {string} query
  * @returns {Promise<vscode.SymbolInformation[]>}
  */
 async function provideWorkspaceSymbols(query) {
   const symbols = [];
-  for (const timeline of await project.readAllTimelines()) {
+  for (const timeline of await listTimelines()) {
     const fileName = timeline.uri.path.split('/').pop().replace(/\.dtl$/i, '');
     const container = timeline.identifier || fileName;
     if (matchesSymbolQuery(query, container)) {

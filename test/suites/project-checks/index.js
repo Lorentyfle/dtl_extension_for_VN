@@ -1,5 +1,5 @@
 const vscode = require('vscode');
-const { check, info, sleep, suite, path, fs } = require('../../harness');
+const { check, info, sleep, waitFor, suite, path, fs } = require('../../harness');
 const diagsOf = uri => vscode.languages.getDiagnostics(uri).map(d => ({ code: d.code, from: d.range.start.line, to: d.range.end.line, tags: d.tags || [], message: d.message }));
 const labelsAt = async (uri, line, character) => {
   const list = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', uri, new vscode.Position(line, character));
@@ -120,6 +120,12 @@ exports.run = suite(async () => {
     await sleep(800);
     d = diagsOf(char3Uri);
     info('Test Character3: ' + JSON.stringify(d.map(x => x.code)));
+    // A script naming a character counts as using it - updated when the
+    // script is saved, without re-reading the whole project.
+    fs.writeFileSync(path.join(root.fsPath, 'scripts', 'starter.gd'), 'extends Node\n\nfunc _ready() -> void:\n\tDialogic.start("flow", "from_script")\n\tprint("Test Character3")\n');
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(char3Uri));
+    const scriptCounted = await waitFor(() => !diagsOf(char3Uri).some(x => x.code === 'unusedCharacter'), 10000);
+    check('saving a script naming a character: not unused anymore', scriptCounted, diagsOf(char3Uri));
     // Using a portrait live removes the report.
     const flowDoc = await open(flowUri);
     const edit = new vscode.WorkspaceEdit();

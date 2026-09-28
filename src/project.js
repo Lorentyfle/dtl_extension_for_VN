@@ -70,11 +70,13 @@ async function refreshTimelineLabels() {
  * @returns {Map<string, string[]>}
  */
 function currentTimelineLines() {
-  const result = new Map(state.cachedTimelineLines);
-  for (const document of vscode.workspace.textDocuments) {
-    if (document.languageId === 'dtl') { result.set(timelineKey(document), syntax.documentLines(document)); }
-  }
-  return result;
+  return problems.oncePerRound('timelineLines', () => {
+    const result = new Map(state.cachedTimelineLines);
+    for (const document of vscode.workspace.textDocuments) {
+      if (document.languageId === 'dtl') { result.set(timelineKey(document), syntax.documentLines(document)); }
+    }
+    return result;
+  });
 }
 
 /**
@@ -517,17 +519,52 @@ async function readAllTimelines(current) {
  * cachedScriptStrings (Dialogic's own addon is left out).
  */
 async function refreshScriptStrings() {
-  const strings = new Set();
+  scriptStringsByFile.clear();
   for (const resPath of state.cachedResourcePaths) {
-    if (!resPath.toLowerCase().endsWith('.gd') || resPath.startsWith('res://addons/dialogic/')) { continue; }
-    try {
-      const text = Buffer.from(await vscode.workspace.fs.readFile(resolveResourcePath(resPath))).toString('utf8');
-      for (const match of text.matchAll(/"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'/g)) { strings.add(match[1] !== undefined ? match[1] : match[2]); }
-    } catch (error) {
-      // unreadable script - skip it
-    }
+    if (isOwnScript(resPath)) { scriptStringsByFile.set(resPath, readScriptStrings(await readScriptText(resPath))); }
   }
-  state.cachedScriptStrings = strings;
+  state.cachedScriptStrings = new Set([...scriptStringsByFile.values()].flatMap(strings => [...strings]));
+}
+
+/** The string literals of each of the project's own scripts, by res:// path. @type {Map<string, Set<string>>} */
+const scriptStringsByFile = new Map();
+
+/** A script of the project itself - not of Dialogic's addon. @param {string} resPath */
+const isOwnScript = resPath => resPath.toLowerCase().endsWith('.gd') && !resPath.startsWith('res://addons/dialogic/');
+
+/** @param {string} resPath @returns {Promise<string>} '' if unreadable */
+async function readScriptText(resPath) {
+  try { return Buffer.from(await vscode.workspace.fs.readFile(resolveResourcePath(resPath))).toString('utf8'); } catch (error) { return ''; }
+}
+
+/** @param {string} text - a GDScript file @returns {Set<string>} its string literals */
+function readScriptStrings(text) {
+  const strings = new Set();
+  for (const match of text.matchAll(/"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'/g)) { strings.add(match[1] !== undefined ? match[1] : match[2]); }
+  return strings;
+}
+
+/**
+ * A .gd file was saved. An autoload's script or a custom event re-reads the
+ * project (their members and parameters feed completion and hover); any
+ * other script only updates its own string literals - not every script of
+ * the project again.
+ *
+ * @param {vscode.Uri} uri
+ */
+async function onScriptChanged(uri) {
+  const resPath = toResPath(uri);
+  if (!resPath) { return; }
+  const text = await readScriptText(resPath);
+  const isAutoload = [...state.cachedAutoloadSymbols.values()].some(symbols => symbols.scriptPath === resPath);
+  if (isAutoload || /^\s*extends\s+DialogicEvent\b/m.test(text)) {
+    await refreshProjectGodotData();
+    return;
+  }
+  if (!isOwnScript(resPath)) { return; }
+  scriptStringsByFile.set(resPath, readScriptStrings(text));
+  state.cachedScriptStrings = new Set([...scriptStringsByFile.values()].flatMap(strings => [...strings]));
+  problems.refreshAllDiagnostics();
 }
 
 // =============================================================================
@@ -560,4 +597,5 @@ Object.assign(module.exports, {
   toResPath,
   readAllTimelines,
   projectGodotUri,
+  onScriptChanged,
 });

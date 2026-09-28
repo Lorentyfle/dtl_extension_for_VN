@@ -87,12 +87,12 @@ function activate(context) {
   moodWatcher.onDidCreate(project.refreshProjectGodotData);
   moodWatcher.onDidDelete(project.refreshProjectGodotData);
   context.subscriptions.push(moodWatcher);
-  // Autoload scripts (declared in project.godot's [autoload] section) feed
-  // the do/if/elif Global.member autocomplete and hover - same
-  // full-refresh-on-any-change approach as the .dch/.tscn watcher above
-  // (which also covers autoload nodes, i.e. autoloads pointing at a scene).
+  // Scripts: an autoload's (the do/if/elif Global.member autocomplete and
+  // hover) or a custom event's re-reads the project; any other one only its
+  // string literals (a label or character a script names isn't "unused").
+  // A script created or deleted may be a new autoload: the project is re-read.
   const scriptWatcher = vscode.workspace.createFileSystemWatcher('**/*.gd');
-  scriptWatcher.onDidChange(project.refreshProjectGodotData);
+  scriptWatcher.onDidChange(project.onScriptChanged);
   scriptWatcher.onDidCreate(project.refreshProjectGodotData);
   scriptWatcher.onDidDelete(project.refreshProjectGodotData);
   context.subscriptions.push(scriptWatcher);

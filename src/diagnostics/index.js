@@ -75,7 +75,37 @@ function pushDiagnostic(diagnostics, check, range, message) {
  */
 function refreshAllDiagnostics() {
   if (!state.diagnosticCollection) { return; }
-  vscode.workspace.textDocuments.forEach(updateDiagnostics);
+  currentRound = new Map();
+  try {
+    vscode.workspace.textDocuments.forEach(updateDiagnostics);
+  } finally {
+    currentRound = null;
+  }
+}
+
+/**
+ * What refreshAllDiagnostics computed so far in its round of checks, by
+ * key (see oncePerRound). Null outside a round.
+ *
+ * @type {Map<string, any> | null}
+ */
+let currentRound = null;
+
+/**
+ * `compute()`, computed only once during a round of checks - every open
+ * document of the round needs the same project-wide data (the timelines'
+ * lines, the characters they use), and re-checking them all happens on
+ * each keystroke in a timeline. Outside a round, computed each time.
+ *
+ * @template T
+ * @param {string} key
+ * @param {() => T} compute
+ * @returns {T}
+ */
+function oncePerRound(key, compute) {
+  if (!currentRound) { return compute(); }
+  if (!currentRound.has(key)) { currentRound.set(key, compute()); }
+  return currentRound.get(key);
 }
 
 /**
@@ -107,6 +137,7 @@ function updateDiagnostics(document) {
 }
 
 Object.assign(module.exports, {
+  oncePerRound,
   pushDiagnostic,
   refreshAllDiagnostics,
   updateDiagnostics,
