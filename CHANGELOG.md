@@ -1,4 +1,11 @@
 # Changelog
+## [1.2.1]
+- The Translation View can show several languages at once: every translatable line gets its original text and one editable line per language, so you can translate into several languages, or check the other translations, side by side.
+- The languages are picked when opening the view (a multi-select list of every language in the CSV, plus "Other language..." for a new one), not in the settings. The last choice is remembered per workspace.
+- A globe button in the Translation View's title bar changes its languages: the view is replaced in place (the old tab is kept only if it has unsaved edits).
+- Saving writes the changed lines of every language at once. Lines left unchanged are never rewritten, so looking at another language is safe.
+- Bug: the language picker could pre-select a language the project doesn't have (e.g. `fr` from the translation mode setting set for another project). Only the project's own languages are pre-selected now: its CSV's, or the ones last picked in this workspace.
+- Bug: when project.godot doesn't set `translation/original_locale` (Godot leaves it out while it's at its default), the original language wasn't known, so it could be offered as a language to translate to. It's now taken from the CSV's first language column, which is always the original in Dialogic's CSVs.
 ## [1.2.0]
 - Translation View: "DTL: Open Translation View" (or the globe button at the top right of a timeline) opens, beside the timeline, an editor listing every translatable line of the timeline with its original text and an editable line for the translation language. Type the translations there like in any file (search, multi-cursor, copy/paste...) and save with Ctrl+S: every changed translation is written into Dialogic's CSV at once.
     - Each block shows its CSV key, the timeline line and who says it (speaker, narration, choice, label, text input).

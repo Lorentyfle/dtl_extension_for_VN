@@ -2,7 +2,7 @@
   "name": "dtl-reader",
   "displayName": "DTL Reader",
   "description": "Syntax highlighting for Dialogic2 TimeLine (.dtl) files",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "publisher": "lorentyfle",
   "icon": "./icons/favicon.png",
   "engines": {
@@ -134,6 +134,12 @@
         "icon": "$(globe)"
       },
       {
+        "command": "dtlReader.changeTranslationViewLanguages",
+        "title": "Change Translation View Languages",
+        "category": "DTL",
+        "icon": "$(globe)"
+      },
+      {
         "command": "dtlReader.translateLine",
         "title": "Translate Line",
         "category": "DTL"
@@ -154,6 +160,10 @@
         {
           "command": "dtlReader.openTranslationView",
           "when": "editorLangId == dtl"
+        },
+        {
+          "command": "dtlReader.changeTranslationViewLanguages",
+          "when": "resourceScheme == dtl-translation"
         },
         {
           "command": "dtlReader.translateLine",
@@ -185,6 +195,11 @@
         {
           "command": "dtlReader.openTranslationView",
           "when": "editorLangId == dtl",
+          "group": "navigation"
+        },
+        {
+          "command": "dtlReader.changeTranslationViewLanguages",
+          "when": "resourceScheme == dtl-translation",
           "group": "navigation"
         }
       ]

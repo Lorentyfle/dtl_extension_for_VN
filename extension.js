@@ -4378,6 +4378,26 @@ let cachedTranslationFiles = [];
 /** project.godot's `dialogic/translation/original_locale`, the language timelines are written in. @type {string|null} */
 let translationOriginalLocale = null;
 
+/**
+ * The first locale column of the translation CSVs. Dialogic always writes
+ * the original language there (`keys,en,...`), so it's the fallback when
+ * project.godot doesn't set `translation/original_locale` (Godot leaves a
+ * setting out of project.godot while it has its default value).
+ *
+ * @type {string|null}
+ */
+let cachedCsvOriginalLocale = null;
+
+/**
+ * The language the timelines are written in: project.godot's setting, else
+ * the CSVs' first locale column (see cachedCsvOriginalLocale).
+ *
+ * @returns {string | null}
+ */
+function getOriginalLocale() {
+  return translationOriginalLocale || cachedCsvOriginalLocale || null;
+}
+
 /** Decoration showing a line's translation after it. @type {vscode.TextEditorDecorationType | null} */
 let translationDecorationType = null;
 
@@ -4435,6 +4455,7 @@ async function refreshTranslations() {
   const fileOfKey = new Map();
   const locales = new Set();
   const files = [];
+  let firstLocale = null;
   if (projectRootUri) {
     try {
       const uris = await vscode.workspace.findFiles('**/dialogic_*.csv', '**/{.git,.godot,node_modules}/**');
@@ -4443,6 +4464,7 @@ async function refreshTranslations() {
         if (rows.length === 0 || rows[0][0] !== 'keys') { continue; } // not a translation CSV
         files.push(uri);
         const header = rows[0];
+        if (!firstLocale && header[1]) { firstLocale = header[1]; }
         header.slice(1).forEach(locale => { if (locale) { locales.add(locale); } });
         for (const row of rows.slice(1)) {
           const key = row[0];
@@ -4461,6 +4483,7 @@ async function refreshTranslations() {
   cachedTranslationFileOfKey = fileOfKey;
   cachedTranslationLocales = [...locales];
   cachedTranslationFiles = files;
+  cachedCsvOriginalLocale = firstLocale;
   updateAllTranslationDecorations();
   if (translationViewFileSystem) { translationViewFileSystem.refresh(); }
 }
@@ -4594,7 +4617,7 @@ function provideTranslationHover(document, position) {
   const markdown = new vscode.MarkdownString();
   markdown.appendMarkdown(`**Translation** \`${entry.key}\`\n\n`);
   const escape = text => text.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
-  const locales = [...cachedTranslationLocales].sort((a, b) => (a === translationOriginalLocale ? -1 : b === translationOriginalLocale ? 1 : 0));
+  const locales = [...cachedTranslationLocales].sort((a, b) => (a === getOriginalLocale() ? -1 : b === getOriginalLocale() ? 1 : 0));
   if (locales.length === 0) {
     markdown.appendMarkdown(cachedTranslationFiles.length === 0
       ? '_No Dialogic translation CSV found. Enable translation in Dialogic\'s settings and click "Update CSV files"._'
@@ -4603,8 +4626,8 @@ function provideTranslationHover(document, position) {
   }
   markdown.appendMarkdown('| Locale | Text |\n|---|---|\n');
   for (const locale of locales) {
-    const text = locale === translationOriginalLocale && !getTranslation(entry.key, locale) ? entry.original : getTranslation(entry.key, locale);
-    markdown.appendMarkdown(`| ${locale}${locale === translationOriginalLocale ? ' (original)' : ''} | ${text ? escape(text) : '_not translated_'} |\n`);
+    const text = locale === getOriginalLocale() && !getTranslation(entry.key, locale) ? entry.original : getTranslation(entry.key, locale);
+    markdown.appendMarkdown(`| ${locale}${locale === getOriginalLocale() ? ' (original)' : ''} | ${text ? escape(text) : '_not translated_'} |\n`);
   }
   return new vscode.Hover(markdown, new vscode.Range(position.line, entry.idStart, position.line, entry.idEnd));
 }
@@ -4618,11 +4641,11 @@ function provideTranslationHover(document, position) {
 async function selectTranslationLanguage() {
   const current = getTranslationLanguage();
   const items = cachedTranslationLocales
-    .filter(locale => locale !== translationOriginalLocale)
+    .filter(locale => locale !== getOriginalLocale())
     .map(locale => ({ label: locale, description: locale === current ? 'current' : '' }));
   items.push({ label: '$(add) Other language...', description: 'type a locale code, e.g. fr or pt_BR', other: true });
   if (current) { items.push({ label: '$(close) Turn translation mode off', off: true }); }
-  const picked = await vscode.window.showQuickPick(items, { title: 'DTL: Translation language', placeHolder: translationOriginalLocale ? `Timelines are written in "${translationOriginalLocale}"` : 'Language to translate the timelines to' });
+  const picked = await vscode.window.showQuickPick(items, { title: 'DTL: Translation language', placeHolder: getOriginalLocale() ? `Timelines are written in "${getOriginalLocale()}"` : 'Language to translate the timelines to' });
   if (!picked) { return null; }
   let language = picked.off ? '' : picked.label;
   if (picked.other) {
@@ -4662,8 +4685,8 @@ function findTranslationFileFor(key, document) {
  * a translation has no CSV to go to, or a target CSV has unsaved changes
  * in an editor.
  *
- * @param {{key: string, original: string, translation: string}[]} entries
- * @param {string} language
+ * @param {{key: string, original: string, translation: string, language?: string}[]} entries
+ * @param {string|null} language - locale of the entries that don't set their own `language`
  * @param {vscode.Uri} timelineUri - the timeline the entries come from
  * @returns {Promise<number>} how many translations were written
  */
@@ -4690,13 +4713,17 @@ async function writeTranslations(entries, language, timelineUri) {
     const rows = parseCsv(text);
     if (rows.length === 0) { rows.push(['keys']); }
     const header = rows[0];
-    let column = header.indexOf(language);
-    if (column === -1) {
-      header.push(language);
-      column = header.length - 1;
-    }
-    const originalColumn = translationOriginalLocale ? header.indexOf(translationOriginalLocale) : -1;
+    const columnOf = locale => {
+      let column = header.indexOf(locale);
+      if (column === -1) {
+        header.push(locale);
+        column = header.length - 1;
+      }
+      return column;
+    };
+    const originalColumn = getOriginalLocale() ? header.indexOf(getOriginalLocale()) : -1;
     for (const entry of fileEntries) {
+      const column = columnOf(entry.language || language);
       let row = rows.find((candidate, index) => index > 0 && candidate[0] === entry.key);
       if (!row) {
         row = [entry.key];
@@ -4761,7 +4788,7 @@ async function translateLineCommand(uri, line) {
   if (!language) { return; }
   const translation = await vscode.window.showInputBox({
     title: `Translate to ${language}`,
-    prompt: `${translationOriginalLocale || 'Original'}: ${entry.original}`,
+    prompt: `${getOriginalLocale() || 'Original'}: ${entry.original}`,
     value: getTranslation(entry.key, language),
     placeHolder: entry.original,
     ignoreFocusOut: true,
@@ -4835,23 +4862,24 @@ function provideTranslationCodeActions(document, range) {
 const TRANSLATION_VIEW_SCHEME = 'dtl-translation';
 
 /**
- * URI of the Translation View of a timeline in a language. The path is
- * what the tab shows ("test_timeline (fr).dtltr"); the query carries the
- * timeline's URI and the language, so reading/writing needs no other state.
+ * URI of the Translation View of a timeline in one or more languages. The
+ * path is what the tab shows ("test_timeline (fr, ja).dtltr"); the query
+ * carries the timeline's URI and the languages, so reading/writing needs
+ * no other state - and the languages never depend on the settings.
  *
  * @param {vscode.Uri} timelineUri
- * @param {string} language
+ * @param {string[]} languages
  * @returns {vscode.Uri}
  */
-function translationViewUri(timelineUri, language) {
+function translationViewUri(timelineUri, languages) {
   const name = timelineUri.path.split('/').pop().replace(/\.dtl$/i, '');
-  const query = `timeline=${encodeURIComponent(timelineUri.toString())}&language=${encodeURIComponent(language)}`;
-  return vscode.Uri.from({ scheme: TRANSLATION_VIEW_SCHEME, path: `/${name} (${language}).dtltr`, query });
+  const query = `timeline=${encodeURIComponent(timelineUri.toString())}&languages=${encodeURIComponent(languages.join(','))}`;
+  return vscode.Uri.from({ scheme: TRANSLATION_VIEW_SCHEME, path: `/${name} (${languages.join(', ')}).dtltr`, query });
 }
 
 /**
  * @param {vscode.Uri} uri - a Translation View URI
- * @returns {{timelineUri: vscode.Uri, language: string}}
+ * @returns {{timelineUri: vscode.Uri, languages: string[]}}
  */
 function parseTranslationViewUri(uri) {
   const params = {};
@@ -4859,7 +4887,8 @@ function parseTranslationViewUri(uri) {
     const [name, value = ''] = part.split('=');
     params[name] = decodeURIComponent(value);
   }
-  return { timelineUri: vscode.Uri.parse(params.timeline), language: params.language };
+  const languages = (params.languages || params.language || '').split(',').map(language => language.trim()).filter(Boolean);
+  return { timelineUri: vscode.Uri.parse(params.timeline), languages };
 }
 
 /**
@@ -4911,23 +4940,25 @@ function collectTranslatableLines(timelineText) {
 }
 
 /**
- * Build the Translation View text of a timeline in a language.
+ * Build the Translation View text of a timeline in one or more languages:
+ * per translatable line, its original text then one line per language.
  *
  * @param {vscode.Uri} timelineUri
- * @param {string} language
+ * @param {string[]} languages
  * @returns {Promise<string>}
  */
-async function buildTranslationView(timelineUri, language) {
+async function buildTranslationView(timelineUri, languages) {
   const timelineText = await readTimelineText(timelineUri);
   const timelineName = timelineUri.path.split('/').pop();
-  const original = translationOriginalLocale || 'original';
+  const original = getOriginalLocale() || 'original';
   const items = collectTranslatableLines(timelineText);
   const withoutId = timelineText.split(/\r?\n/).filter(text => isPlayerFacingTextLine(text) && !/#id:\S+\s*$/.test(text)).length;
-  const translated = items.filter(item => getTranslation(item.entry.key, language)).length;
+  const progress = languages.map(language => `${language} ${items.filter(item => getTranslation(item.entry.key, language)).length}/${items.length}`).join(', ');
   const lines = [
-    `# Translation of ${timelineName} to "${language}" - ${translated}/${items.length} lines translated.`,
-    `# Write each translation after "${language}:" and save (Ctrl+S) to put it in Dialogic's CSV.`,
-    `# The "${original}:" lines are the original text, for reference: editing them changes nothing.`,
+    `# Translation of ${timelineName} - ${progress} lines translated.`,
+    `# Write the translations after ${languages.map(language => `"${language}:"`).join(', ')} and save (Ctrl+S) to put them in Dialogic's CSV.`,
+    `# The "${original}:" lines are the original text, for reference: editing them changes nothing. Unchanged lines are never rewritten.`,
+    '# To show other languages, use the globe button at the top right of this editor.',
   ];
   if (withoutId > 0) {
     lines.push(`# ${withoutId} line(s) of the timeline have no translation id yet - "Update CSV files" in Dialogic's translation settings adds them.`);
@@ -4939,32 +4970,40 @@ async function buildTranslationView(timelineUri, language) {
     lines.push('');
     lines.push(`[${entry.key}]  line ${line + 1} - ${describeTranslatableLine(text, entry.key)}`);
     lines.push(`${original}: ${escapeViewText(entry.original)}`);
-    lines.push(`${language}: ${escapeViewText(getTranslation(entry.key, language))}`);
+    for (const language of languages) {
+      lines.push(`${language}: ${escapeViewText(getTranslation(entry.key, language))}`);
+    }
   }
   return lines.join('\n') + '\n';
 }
 
 /**
  * Read the translations back from a Translation View's text: for each
- * `[key]` block, the text after "<language>:". Blocks without that line
- * (deleted by accident) are simply left out, so nothing is erased.
+ * `[key]` block, the text after each "<language>:" (the first one per
+ * language counts). A block or a language line deleted by accident is
+ * simply left out, so nothing is erased.
  *
  * @param {string} text
- * @param {string} language
- * @returns {Map<string, string>} key -> translation
+ * @param {string[]} languages
+ * @returns {Map<string, Map<string, string>>} key -> language -> translation
  */
-function parseTranslationView(text, language) {
+function parseTranslationView(text, languages) {
   const translations = new Map();
-  const prefix = `${language}:`;
   let currentKey = null;
   for (const line of text.split(/\r?\n/)) {
     const headerMatch = line.match(/^\[([^\]]+)\]/);
     if (headerMatch) {
       currentKey = headerMatch[1];
-    } else if (currentKey && line.startsWith(prefix)) {
-      translations.set(currentKey, unescapeViewText(line.slice(prefix.length).replace(/^ /, '').replace(/\s+$/, '')));
-      currentKey = null; // one translation line per block
+      continue;
     }
+    if (!currentKey) { continue; }
+    const language = languages.find(candidate => line.startsWith(`${candidate}:`));
+    if (!language) { continue; }
+    const byLanguage = translations.get(currentKey) || new Map();
+    if (!byLanguage.has(language)) {
+      byLanguage.set(language, unescapeViewText(line.slice(language.length + 1).replace(/^ /, '').replace(/\s+$/, '')));
+    }
+    translations.set(currentKey, byLanguage);
   }
   return translations;
 }
@@ -4992,26 +5031,33 @@ class TranslationViewFileSystem {
   }
 
   async readFile(uri) {
-    const { timelineUri, language } = parseTranslationViewUri(uri);
+    const { timelineUri, languages } = parseTranslationViewUri(uri);
     try {
-      return Buffer.from(await buildTranslationView(timelineUri, language), 'utf8');
+      return Buffer.from(await buildTranslationView(timelineUri, languages), 'utf8');
     } catch (error) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
   }
 
   async writeFile(uri, content) {
-    const { timelineUri, language } = parseTranslationViewUri(uri);
-    const written = parseTranslationView(Buffer.from(content).toString('utf8'), language);
-    const items = collectTranslatableLines(await readTimelineText(timelineUri));
-    const changes = items
-      .filter(item => written.has(item.entry.key) && written.get(item.entry.key) !== getTranslation(item.entry.key, language))
-      .map(item => ({ ...item.entry, translation: written.get(item.entry.key) }));
+    const { timelineUri, languages } = parseTranslationViewUri(uri);
+    const written = parseTranslationView(Buffer.from(content).toString('utf8'), languages);
+    const changes = [];
+    for (const item of collectTranslatableLines(await readTimelineText(timelineUri))) {
+      const byLanguage = written.get(item.entry.key);
+      if (!byLanguage) { continue; }
+      for (const [language, translation] of byLanguage) {
+        if (translation !== getTranslation(item.entry.key, language)) {
+          changes.push({ ...item.entry, translation, language });
+        }
+      }
+    }
     this._suppressRefresh = true;
     try {
-      const count = await writeTranslations(changes, language, timelineUri);
+      const count = await writeTranslations(changes, null, timelineUri);
       this._mtimes.set(uri.toString(), Date.now());
-      vscode.window.setStatusBarMessage(count > 0 ? `DTL Reader: ${count} translation(s) saved to "${language}"` : 'DTL Reader: no translation changed', 4000);
+      const touched = [...new Set(changes.map(change => change.language))].join(', ');
+      vscode.window.setStatusBarMessage(count > 0 ? `DTL Reader: ${count} translation(s) saved (${touched})` : 'DTL Reader: no translation changed', 4000);
     } catch (error) {
       throw vscode.FileSystemError.Unavailable(`DTL Reader: ${error.message}`);
     } finally {
@@ -5046,10 +5092,58 @@ class TranslationViewFileSystem {
 /** @type {TranslationViewFileSystem | null} */
 let translationViewFileSystem = null;
 
+/** Where the last languages picked for the Translation View are remembered (per workspace). @type {vscode.Memento | null} */
+let translationViewMemento = null;
+
 /**
- * "DTL: Open Translation View" - opens the active timeline's Translation
- * View in the current translation language (asking for one if none is
- * set), beside the timeline.
+ * Ask which languages to show in a Translation View: every locale of the
+ * CSVs (except the original), several at once, plus "Other language..." to
+ * start a new one. Pre-selects the last choice (or the translation mode
+ * language). Doesn't touch any setting.
+ *
+ * @param {string[]} [current] - languages to pre-select
+ * @returns {Promise<string[] | null>} null if cancelled
+ */
+async function pickTranslationViewLanguages(current) {
+  const original = getOriginalLocale();
+  const csvTargets = cachedTranslationLocales.filter(locale => locale && locale !== original);
+  // Pre-select only languages of this project: the view's own, the last
+  // ones picked in this workspace, else the translation-mode language -
+  // but that setting may come from another project (User settings), so it
+  // only counts if this project's CSV actually has it.
+  const settingLanguage = getTranslationLanguage();
+  const remembered = current
+    || (translationViewMemento && translationViewMemento.get('translationView.languages'))
+    || (settingLanguage && csvTargets.includes(settingLanguage) ? [settingLanguage] : []);
+  const locales = [...new Set([...csvTargets, ...remembered])].filter(locale => locale && locale !== original);
+  const items = locales.map(locale => ({ label: locale, picked: remembered.includes(locale) }));
+  items.push({ label: '$(add) Other language...', description: 'a locale code not in the CSV yet, e.g. de or pt_BR', other: true });
+  const picked = await vscode.window.showQuickPick(items, {
+    canPickMany: true,
+    title: 'DTL: Translation View languages',
+    placeHolder: locales.length === 0
+      ? `This project's translations only have the original language${original ? ` ("${original}")` : ''} - pick "Other language..." to add one`
+      : `Pick the languages to show${original ? ` (the timelines are written in "${original}")` : ''} - each gets an editable line under every original line`,
+  });
+  if (!picked) { return null; }
+  const languages = picked.filter(item => !item.other).map(item => item.label);
+  if (picked.some(item => item.other)) {
+    const typed = (await vscode.window.showInputBox({ title: 'DTL: Other language', prompt: 'Locale code(s), comma-separated (e.g. de, pt_BR)' }) || '').split(',').map(code => code.trim()).filter(Boolean);
+    languages.push(...typed.filter(code => !languages.includes(code)));
+  }
+  const valid = languages.filter(language => language !== getOriginalLocale());
+  if (valid.length === 0) {
+    vscode.window.showInformationMessage('DTL Reader: pick at least one language to translate to.');
+    return null;
+  }
+  if (translationViewMemento) { await translationViewMemento.update('translationView.languages', valid); }
+  return valid;
+}
+
+/**
+ * "DTL: Open Translation View" - asks which languages to show (see
+ * pickTranslationViewLanguages) and opens the active timeline's
+ * Translation View beside it.
  */
 async function openTranslationViewCommand() {
   const editor = vscode.window.activeTextEditor;
@@ -5057,14 +5151,36 @@ async function openTranslationViewCommand() {
     vscode.window.showInformationMessage('DTL Reader: open a timeline (.dtl) first.');
     return;
   }
-  const language = getTranslationLanguage() || await selectTranslationLanguage();
-  if (!language) { return; }
-  if (language === translationOriginalLocale) {
-    vscode.window.showWarningMessage(`DTL Reader: "${language}" is the language the timelines are written in - pick another translation language.`);
-    return;
-  }
-  const document = await vscode.workspace.openTextDocument(translationViewUri(editor.document.uri, language));
+  const languages = await pickTranslationViewLanguages();
+  if (!languages) { return; }
+  const document = await vscode.workspace.openTextDocument(translationViewUri(editor.document.uri, languages));
   await vscode.window.showTextDocument(document, { viewColumn: vscode.ViewColumn.Beside, preview: false });
+}
+
+/**
+ * "DTL: Change Translation View Languages" - from a Translation View, pick
+ * other languages and replace it with a view of the same timeline in
+ * those languages, in the same place. The old tab is closed unless it has
+ * unsaved edits (then both stay open, so nothing is lost).
+ */
+async function changeTranslationViewLanguagesCommand() {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.uri.scheme !== TRANSLATION_VIEW_SCHEME) { return; }
+  const oldDocument = editor.document;
+  const { timelineUri, languages: current } = parseTranslationViewUri(oldDocument.uri);
+  const languages = await pickTranslationViewLanguages(current);
+  if (!languages) { return; }
+  const document = await vscode.workspace.openTextDocument(translationViewUri(timelineUri, languages));
+  await vscode.window.showTextDocument(document, { viewColumn: editor.viewColumn, preview: false });
+  if (!oldDocument.isDirty && vscode.window.tabGroups) {
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        if (tab.input && tab.input.uri && tab.input.uri.toString() === oldDocument.uri.toString()) {
+          await vscode.window.tabGroups.close(tab);
+        }
+      }
+    }
+  }
 }
 
 /** Set while one editor scrolls the other, so the other's own move doesn't bounce back. */
@@ -5131,6 +5247,7 @@ function syncTranslationScroll(event) {
 // ACTIVATE
 // =============================================================================
 function activate(context) {
+  translationViewMemento = context.workspaceState || null;
   // Created before the first project refresh, which already paints it.
   translationDecorationType = vscode.window.createTextEditorDecorationType({});
   context.subscriptions.push(translationDecorationType);
@@ -5202,6 +5319,7 @@ function activate(context) {
     vscode.commands.registerCommand('dtlReader.nextUntranslated', nextUntranslatedCommand),
     vscode.commands.registerCommand('dtlReader.selectTranslationLanguage', selectTranslationLanguage),
     vscode.commands.registerCommand('dtlReader.openTranslationView', openTranslationViewCommand),
+    vscode.commands.registerCommand('dtlReader.changeTranslationViewLanguages', changeTranslationViewLanguagesCommand),
     vscode.workspace.registerFileSystemProvider(TRANSLATION_VIEW_SCHEME, translationViewFileSystem = new TranslationViewFileSystem()),
     vscode.window.onDidChangeTextEditorSelection(syncTranslationScroll),
     vscode.workspace.onDidSaveTextDocument(document => {

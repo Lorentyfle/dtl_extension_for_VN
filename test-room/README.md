@@ -121,9 +121,11 @@ every DTL Reader feature without risking real project data.
   Use the lightbulb on it (or right-click > Translate Line) - the text is
   written into `translations/dialogic_timeline_translations.csv`. Hover
   `#id:greeting` to see both languages.
-- **Translation View**: with `test_timeline.dtl` open and the language set
-  to `fr`, click the globe button (top right) - a "test_timeline (fr)" tab
-  opens beside it with the 3 translatable lines. Fill in "Say goodbye",
+- **Translation View**: with `test_timeline.dtl` open, click the globe
+  button (top right) and pick `fr` (and "Other language..." > `ja` to try
+  several) - a "test_timeline (fr, ja)" tab opens beside it with the 3
+  translatable lines, one line per language. The globe button of that tab
+  changes its languages. Fill in "Say goodbye",
   press Ctrl+S, and check `translations/dialogic_timeline_translations.csv`.
   Click a line in either editor - the other scrolls to it.
 - **Settings**: set `DTL Reader > Diagnostics: Unknown Speaker` to `off`
