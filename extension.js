@@ -1631,20 +1631,30 @@ async function refreshTimelineLabels() {
 }
 
 /**
- * Every registered timeline's lines, by identifier - read live from its
- * editor if it's open (so unsaved edits count), else as last read from
- * disk (cachedTimelineLines).
+ * Every timeline's lines: the registered ones by identifier - read live
+ * from their editor if open (so unsaved edits count), else as last read
+ * from disk (cachedTimelineLines) - plus the open timelines not registered
+ * yet (a new one Dialogic hasn't indexed), by timelineKey.
  *
  * @returns {Map<string, string[]>}
  */
 function currentTimelineLines() {
   const result = new Map(cachedTimelineLines);
   for (const document of vscode.workspace.textDocuments) {
-    if (document.languageId !== 'dtl') { continue; }
-    const identifier = findTimelineIdentifier(document);
-    if (identifier) { result.set(identifier, documentLines(document)); }
+    if (document.languageId === 'dtl') { result.set(timelineKey(document), documentLines(document)); }
   }
   return result;
+}
+
+/**
+ * A timeline's key in currentTimelineLines: its identifier, or its URI
+ * while it isn't registered.
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {string}
+ */
+function timelineKey(document) {
+  return findTimelineIdentifier(document) || document.uri.toString();
 }
 
 /**
@@ -2658,10 +2668,9 @@ function createPositionCompletion(position) {
 function createCharacterCompletion(name, range) {
   const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.EnumMember);
   item.detail = 'Dialogic character (from project.godot)';
-  const needsQuoting = /[^\p{L}0-9_]/u.test(name);
-  if (needsQuoting) {
-    const quote = name.includes('"') ? "'" : '"';
-    item.insertText = `${quote}${name}${quote}`;
+  const written = formatCharacterName(name);
+  if (written !== name) {
+    item.insertText = written;
     item.detail += ' - name contains spaces/symbols, quoted automatically';
   }
   if (range) { item.range = range; }
@@ -7221,12 +7230,11 @@ async function refreshScriptStrings() {
  * @returns {Set<string> | null}
  */
 function collectJumpedLabels(document) {
-  const identifier = findTimelineIdentifier(document);
+  const identifier = findTimelineIdentifier(document); // null while unregistered: only its own jumps reach it
+  const ownKey = timelineKey(document);
   const labels = new Set(cachedScriptStrings);
-  const timelines = currentTimelineLines();
-  if (!identifier) { timelines.set(null, documentLines(document)); } // an unregistered timeline only counts its own jumps
-  for (const [timeline, lines] of timelines) {
-    const isThis = timeline === identifier;
+  for (const [timeline, lines] of currentTimelineLines()) {
+    const isThis = timeline === ownKey;
     for (const text of lines) {
       const jump = parseJumpLine(text);
       if (!jump || !jump.label) { continue; }
@@ -7493,6 +7501,9 @@ function computeDialogicEventIndices(lines) {
   let indentFormat = '';
   let previousWasOpener = false;
   const stripLeft = text => text.replace(/^[\x00-\x20]+/, ''); // Godot's strip_edges(true, false)
+  // Only a known shortcode event (built-in or custom) is one - `[b]Hi[/b]`
+  // starting a narration line is text.
+  const shortcodes = new Set([...RESERVED_BRACKET_NAMES, ...DTL_ENTRIES.filter(entry => entry.type === 'bracket').map(entry => entry.name)]);
   for (let line = 0; line < lines.length; line++) {
     indices[line] = count;
     const stripped = stripLeft(lines[line]);
@@ -7505,10 +7516,12 @@ function computeDialogicEventIndices(lines) {
     if (previousWasOpener && indent.length <= previousIndent.length) { count++; }
     previousIndent = indent;
     // An event may continue over the next lines (until an empty line).
-    const isShortcode = /^\[[A-Za-z_]/.test(stripped);
+    const shortcodeMatch = stripped.match(/^\[([A-Za-z_][A-Za-z0-9_]*)(?=[ \]])/); // Dialogic: begins with "[name " or "[name]"
+    const isShortcode = !!shortcodeMatch && shortcodes.has(shortcodeMatch[1]);
     // Dialogic's condition event: "if"/"elif" alone or followed by a space, or anything starting with "else".
     const isCondition = /^(?:(?:if|elif)(?: |$)|else)/.test(stripped);
-    const isText = !isShortcode && !isCondition && !/^(?:#|-|label |jump |return\b|join |leave |update |set |do |audio )/.test(stripped);
+    const keyword = (stripped.match(/^([a-z_]+)(?: |$)/) || [])[1];
+    const isText = !isShortcode && !isCondition && !/^[#-]/.test(stripped) && !(keyword && RESERVED_LINE_KEYWORDS.has(keyword));
     let content = stripped;
     const isFull = () => (isShortcode ? content.split('#id:')[0].trim().endsWith(']') : !(isText && content.endsWith('\\')));
     while (!isFull() && line + 1 < lines.length) {
@@ -7764,8 +7777,10 @@ function appendPoint(document) {
  */
 function timelineEndsFlow(document) {
   for (let line = document.lineCount - 1; line >= 0; line--) {
-    const text = document.lineAt(line).text.trim();
-    if (text === '' || text.startsWith('#')) { continue; }
+    const text = document.lineAt(line).text;
+    if (text.trim() === '' || text.trim().startsWith('#')) { continue; }
+    // Only at the top level: an indented one (in an if or a choice) can be
+    // skipped, and the flow then goes on past it.
     return /^(?:\[end_timeline\]|jump\b|return\b)/.test(text);
   }
   return true; // an empty timeline
@@ -8312,8 +8327,21 @@ function createSavedEditFix(title, edit, saveUris, diagnostic) {
   const action = new vscode.CodeAction(title, vscode.CodeActionKind.QuickFix);
   action.edit = edit;
   action.diagnostics = [diagnostic];
-  action.command = { command: 'dtlReader.saveAndRefresh', title: 'Save', arguments: [saveUris] };
+  action.command = { command: 'dtlReader.saveAndRefresh', title: 'Save', arguments: splitFilesToSave(saveUris) };
   return action;
+}
+
+/**
+ * Which of the files a quick fix changes can be saved with it: not those
+ * already open with unsaved changes of their own, which saving would
+ * write too - those are left for the person to save.
+ *
+ * @param {vscode.Uri[]} uris - checked before the fix is applied
+ * @returns {[vscode.Uri[], vscode.Uri[]]} [to save, left unsaved]
+ */
+function splitFilesToSave(uris) {
+  const isDirty = uri => vscode.workspace.textDocuments.some(document => document.isDirty && normalizeFsPath(document.uri.fsPath || '') === normalizeFsPath(uri.fsPath));
+  return [uris.filter(uri => !isDirty(uri)), uris.filter(isDirty)];
 }
 
 /**
@@ -8321,11 +8349,16 @@ function createSavedEditFix(title, edit, saveUris, diagnostic) {
  * project. An internal command, not in the Command Palette.
  *
  * @param {vscode.Uri[]} uris
+ * @param {vscode.Uri[]} [leftUnsaved] - changed too, but they had unsaved changes already
  */
-async function saveAndRefreshCommand(uris) {
+async function saveAndRefreshCommand(uris, leftUnsaved = []) {
   for (const uri of uris || []) {
     const document = vscode.workspace.textDocuments.find(candidate => normalizeFsPath(candidate.uri.fsPath || '') === normalizeFsPath(uri.fsPath));
     if (document && document.isDirty) { await document.save(); }
+  }
+  if (leftUnsaved.length > 0) {
+    const names = leftUnsaved.map(uri => uri.path.split('/').pop()).join(', ');
+    vscode.window.showInformationMessage(`${names} had unsaved changes, so it was changed but not saved - save it to apply the fix.`);
   }
   await refreshProjectGodotData();
 }
@@ -8472,8 +8505,9 @@ async function addCharacterCommand(args) {
   }
   const change = await createAddCharacterEdit(name, resPath, false, mood);
   if (!change) { return; }
+  const [save, leftUnsaved] = splitFilesToSave(change.saveUris);
   await vscode.workspace.applyEdit(change.edit);
-  await saveAndRefreshCommand(change.saveUris);
+  await saveAndRefreshCommand(save, leftUnsaved);
 }
 
 /**
@@ -9208,7 +9242,9 @@ function activate(context) {
   context.subscriptions.push(diagnosticCollection);
   vscode.workspace.textDocuments.forEach(updateDiagnostics);
   context.subscriptions.push(
-    vscode.workspace.onDidOpenTextDocument(updateDiagnostics)
+    // A timeline opened (or closed) changes what the others jump to and
+    // use - even one not registered yet - so all of them are re-checked.
+    vscode.workspace.onDidOpenTextDocument(document => (document.languageId === 'dtl' ? refreshAllDiagnostics() : updateDiagnostics(document)))
   );
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument(event => {
@@ -9217,7 +9253,10 @@ function activate(context) {
     })
   );
   context.subscriptions.push(
-    vscode.workspace.onDidCloseTextDocument(document => diagnosticCollection.delete(document.uri))
+    vscode.workspace.onDidCloseTextDocument(document => {
+      if (document.languageId === 'dtl') { refreshAllDiagnostics(); }
+      diagnosticCollection.delete(document.uri); // after: the re-check mustn't bring it back
+    })
   );
   // ===========================================================================
   // COMPLETION PROVIDER
@@ -9700,7 +9739,7 @@ function activate(context) {
   context.subscriptions.push(completionProvider);
   // Internals the test suite checks directly (`extension.exports`) - not an
   // API for other extensions.
-  return { forTests: { rankCharacterFolders, godotUserDataDir, setConfigFileValues, parseCustomEventScript, findGodotExecutable, computeDialogicEventIndices, scriptStrings: () => cachedScriptStrings, refreshScriptStrings, resourcePaths: () => cachedResourcePaths } };
+  return { forTests: { rankCharacterFolders, godotUserDataDir, setConfigFileValues, parseCustomEventScript, findGodotExecutable, computeDialogicEventIndices, scriptStrings: () => cachedScriptStrings, resourcePaths: () => cachedResourcePaths } };
 }
 // =============================================================================
 // DEACTIVATE

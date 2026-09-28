@@ -217,7 +217,7 @@ For a new character, the folders most likely to fit come first, each saying why:
 
 Press Enter for the first one, or pick **Other folder...** for any folder of the project. The file is always named after the character, since Dialogic uses the file name as the character's identifier.
 
-The fixes adding to project.godot save it right away. If the Godot editor is open, reload the project there afterwards (**Project > Reload Current Project**), so Godot doesn't write its older settings over them.
+The fixes adding to project.godot save it right away - unless it's open with unsaved changes of your own, which are then left for you to save. If the Godot editor is open, reload the project there afterwards (**Project > Reload Current Project**), so Godot doesn't write its older settings over them.
 
 ## Translation
 
