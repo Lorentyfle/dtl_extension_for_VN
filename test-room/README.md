@@ -19,11 +19,17 @@ every DTL Reader feature without risking real project data.
   (`TestCharacter`, `John Smith`), two audio channels (`music`, `sound`),
   and a `variables={...}` dictionary (`variable.test`/`Ttttt`/`Floating`,
   `Mamamya`) for `{variable.path}` autocomplete - plus an `[autoload]`
-  section declaring one global script, `Global`.
+  section declaring a global script, `Global`, and an autoload node
+  (scene), `SoundManager`.
 - `scripts/Global.gd` - a fake autoload script with a handful of `##`-
-  documented functions (and one deliberately undocumented, and one
-  `_`-prefixed to confirm it's excluded), for `do`/`if`/`elif`
-  `Global.function_name(...)` autocomplete and hover.
+  documented functions (one deliberately undocumented, one `_`-prefixed to
+  confirm it's excluded, one with a multi-line signature), plus variables,
+  constants, a named enum (`State`) and an unnamed one, for `do`/`if`/
+  `elif` `Global.member` and `{Global.property}` autocomplete and hover.
+- `scripts/SoundManager.tscn` + `scripts/SoundManager.gd` - an autoload
+  that points at a scene: its members come from the root node's script.
+- `scripts/Global.gd.uid`, `assets/bg.png.import` - Godot metadata files,
+  which must NOT show up in `res://` path autocomplete.
 - `characters/TestCharacter.dch` - one plain portrait (`Default`, no scene)
   and one scene-backed portrait (`LayeredPortrait`), plus `display_name`,
   `nicknames`, `description`, and `color` for the character hover.
@@ -65,6 +71,16 @@ every DTL Reader feature without risking real project data.
 - **`res://` path autocomplete**: inside `[voice path="`,
   `[background arg="`, or after `audio music "` - the placeholder files
   under `assets/` should be suggested.
+- **Autoload autocomplete**: type `do ` - `Global` and `SoundManager`
+  should appear; `do Global.` lists only functions, `if Global.` lists
+  functions, variables, constants and `State`, `if Global.State.` lists
+  its values, and `TestCharacter: {Global.` lists variables/constants.
+  Inside `do Global.has_achievement("` nothing should be suggested.
+- **No stray suggestions in dialogue**: typing `.` or a space at the end
+  of a dialogue sentence should NOT open a suggestion list.
+- **BBCode**: in dialogue type `[co` - `code` and `color` should appear;
+  after `[b][i]Hi [/`, `/i` then `/b` should be suggested. Hover
+  `[wave` or `[/b]` for their Godot documentation.
 - **Hover documentation**: hover over `join`, `[wait]`, `time=` inside
   `[wait ...]`, `pos=` on the `update` line, and `left`/`center`-style
   position keywords.

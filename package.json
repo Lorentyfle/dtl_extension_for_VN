@@ -2,7 +2,7 @@
   "name": "dtl-reader",
   "displayName": "DTL Reader",
   "description": "Syntax highlighting for Dialogic2 TimeLine (.dtl) files",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "publisher": "lorentyfle",
   "icon": "./icons/favicon.png",
   "engines": {
@@ -67,6 +67,16 @@
         "path": "./themes/dtl-color-theme-godot.json"
       }
     ],
+    "configuration": {
+      "title": "DTL Reader",
+      "properties": {
+        "dtlReader.includeAddonAutoloads": {
+          "type": "boolean",
+          "default": false,
+          "description": "Also suggest autoloads declared by addons (scripts or scenes under res://addons/, e.g. Dialogic's own \"Dialogic\" singleton) in do/if/elif and {...} autocomplete. Off by default, since addon autoloads usually expose hundreds of members that are not meant to be used from a timeline."
+        }
+      }
+    },
     "configurationDefaults": {
       "[dtl]": {
         "editor.quickSuggestions": {

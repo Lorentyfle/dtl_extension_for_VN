@@ -1,9 +1,11 @@
 # Changelog
-## TODO:
-- Add suggestion and documentation for autoload nodes.
-- Add godot variables, enum and const to suggestion and documentation for both nodes and Godot scripts.
-- For path suggestions, remove .import and .uid from suggestions.
-- Add documentation for all the available BBcodes from Godot (use Godot doc for it directly).
+## [1.0.5]
+- Addition of suggestion and documentation for autoload nodes: an autoload pointing at a `.tscn` scene now uses its root node's script.
+- Addition of Godot variables (`var`, including `@export`/`@onready`), enums and constants to suggestion and documentation, for both autoload nodes and autoload scripts. `Global.State.` suggests the enum's values, and `{Global.property}` is suggested inside `{}` too. Multi-line function signatures are now supported.
+- For path suggestions, `.import` and `.uid` files are no longer suggested.
+- Addition of documentation and suggestion for all the BBCodes available in Godot's RichTextLabel (hover on `[tag]` or `[/tag]`, with a link to the Godot documentation). BBCodes are only suggested inside dialogue, narration and choices, `[/` suggests closing the tags still open on the line, and self-closing tags like `[br]` are no longer flagged as unclosed.
+- Bug: far too many suggestions for autoloads. Inside a string or a function argument (e.g. `Global.has_achievement("intro`) every character and word of the file was suggested; now nothing is. `do` only suggests functions, and autoload names only pop up right after `do`/`if`/`elif`/`and`/`or`/`not` (typing a letter still suggests them anywhere). Autoloads declared by addons (e.g. Dialogic's own `Dialogic` singleton) are hidden unless the new `dtlReader.includeAddonAutoloads` setting is on. The unused `class_name` scanning was removed, since Dialogic can only reach autoloads.
+- Bug: typing `.` (or a space, or `'`) while writing dialogue no longer opens a list of every word in the file. Word suggestions only show while typing a word; `.` only suggests after a variable or an autoload.
 ## [1.0.4]
 - If no nicknames are given, make the nickname lines absent.
 - Minor correction for theme colors.

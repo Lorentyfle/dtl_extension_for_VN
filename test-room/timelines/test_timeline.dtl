@@ -31,6 +31,14 @@ if Global.has_achievement("intro_complete")
 elif not Global.has_achievement("intro_complete")
     TestCharacter: First time here, huh?
 
+# Autoload members beyond functions: variables, constants and enums, plus an
+# autoload NODE (SoundManager points at a .tscn - its root script is used).
+do SoundManager.play_sfx("door_open")
+if Global.state == Global.State.TALKING and Global.hearts < Global.MAX_HEARTS
+    TestCharacter: You look hurt. You have {Global.hearts} hearts left.
+
+TestCharacter: [color=red]Danger![/color] [wave amp=25 freq=5]Wheee[/wave][br]New line, [rainbow]fabulous[/rainbow].
+
 set {chapter} = 1
 if {chapter} == 1
     TestCharacter: This is chapter {chapter.value}.

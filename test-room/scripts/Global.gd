@@ -1,8 +1,23 @@
 extends Node
 ## Fake global script, only used to test DTL Reader's do/if/elif
-## Global.function_name(...) autocomplete and hover. Never meant to run.
+## Global.member autocomplete and hover. Never meant to run.
 
+## Current state of the (fake) game loop.
+enum State { IDLE, TALKING, CHOOSING = 5, ENDED }
+
+## Unnamed enums declare plain constants: Global.EASY, Global.HARD.
+enum { EASY, HARD }
+
+## Maximum number of hearts the player can have.
+const MAX_HEARTS: int = 3
+const GAME_TITLE = "DTL Reader Test Room" # "#" inside a string is not a comment
+
+## Achievements unlocked so far, by id.
 var unlocked_achievements: Array[String] = []
+## Player's current number of hearts.
+@export var hearts: int = MAX_HEARTS
+var state := State.IDLE
+var _secret_counter = 0 # "_"-prefixed: excluded from autocomplete/hover
 
 ## Checks whether the player has unlocked the given achievement.
 ## Returns true if unlocked, false otherwise.
@@ -17,6 +32,13 @@ func apply_tint(color: Color = Color(1, 1, 1, 1)) -> void:
 ## Returns a random greeting from a fixed list.
 func random_greeting() -> String:
 	return "Hello"
+
+## A function whose signature spans several lines.
+func give_item(
+	item_id: String,
+	amount: int = 1,
+) -> void:
+	pass
 
 # A plain "#" comment right above a function does NOT count as
 # documentation - only "##" lines do.

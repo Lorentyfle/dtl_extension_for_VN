@@ -42,3 +42,4 @@ variables={
 [autoload]
 
 Global="*res://scripts/Global.gd"
+SoundManager="*res://scripts/SoundManager.tscn"

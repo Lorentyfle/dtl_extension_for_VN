@@ -8,7 +8,9 @@
 // - Contextual character/position autocomplete for join/leave/update
 // - Word-based autocomplete for spoken dialogue text (named or narration)
 // - Parameter-name autocomplete + hover docs inside bracket commands
-// - Hover documentation for commands and balises
+// - Hover documentation for commands and Godot BBCode tags
+// - Autoload (script or scene) member autocomplete + hover docs: functions,
+//   variables, constants and enums, in do/if/elif and {...}
 // - Go to Definition for `jump NAME` -> `label NAME`
 // - Diagnostics: unresolved `jump` targets, unclosed [balise] tags
 // -----------------------------------------------------------------------------
@@ -136,31 +138,64 @@ function findCharacterNameAtPosition(document, position) {
 }
 
 /**
- * Find the `Global.function_name` call under the cursor on a `do`/`if`/
- * `elif` line, if any, resolved against cachedAutoloadFunctions. Used by
+ * Find the autoload reference under the cursor, if any - the autoload name
+ * itself (`Global`), one of its members (`Global.apply_tint`,
+ * `Global.max_hp`, `Global.State`), or a named enum's value
+ * (`Global.State.IDLE`) - resolved against cachedAutoloadSymbols. Only
+ * looked for where Dialogic actually evaluates such references: a
+ * `do`/`if`/`elif` expression, or inside a `{...}` variable block. Used by
  * the hover provider - isGlobalScriptExpressionLine is defined further
  * down alongside the completion logic that shares this same line shape.
  *
  * @param {vscode.TextDocument} document
  * @param {vscode.Position} position
- * @returns {{globalName: string, functionName: string, info: {params: string, returnType: string|null, doc: string}, range: vscode.Range} | null}
+ * @returns {{markdown: vscode.MarkdownString, range: vscode.Range} | null}
  */
-function findGlobalFunctionCallAtPosition(document, position) {
+function findAutoloadReferenceAtPosition(document, position) {
   const line = document.lineAt(position.line).text;
-  if (!isGlobalScriptExpressionLine(line)) { return null; }
-  const callPattern = /([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)/g;
+  const isExpressionLine = isGlobalScriptExpressionLine(line);
+  const referencePattern = /\b([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)(?:\.([A-Za-z_][A-Za-z0-9_]*))?/g;
   let match;
-  while ((match = callPattern.exec(line)) !== null) {
-    const [, globalName, functionName] = match;
-    const funcStart = match.index + globalName.length + 1;
-    const funcEnd = funcStart + functionName.length;
-    if (position.character < funcStart || position.character > funcEnd) { continue; }
-    const functions = cachedAutoloadFunctions.get(globalName);
-    const info = functions && functions.get(functionName);
-    if (!info) { return null; }
-    return { globalName, functionName, info, range: new vscode.Range(position.line, funcStart, position.line, funcEnd) };
+  while ((match = referencePattern.exec(line)) !== null) {
+    const [, globalName, memberName, subName] = match;
+    const symbols = cachedAutoloadSymbols.get(globalName);
+    if (!symbols) { continue; }
+    if (!isExpressionLine && !isInsideVariableBlock(line, match.index)) { continue; }
+
+    const globalStart = match.index;
+    const memberStart = globalStart + globalName.length + 1;
+    const subStart = memberStart + memberName.length + 1;
+    const rangeOf = (start, name) => new vscode.Range(position.line, start, position.line, start + name.length);
+    const covers = (start, name) => position.character >= start && position.character <= start + name.length;
+
+    if (covers(globalStart, globalName)) {
+      return { markdown: createAutoloadDocumentation(globalName, symbols), range: rangeOf(globalStart, globalName) };
+    }
+    if (covers(memberStart, memberName)) {
+      const markdown = createAutoloadMemberDocumentation(globalName, memberName, symbols);
+      return markdown ? { markdown, range: rangeOf(memberStart, memberName) } : null;
+    }
+    if (subName && covers(subStart, subName)) {
+      const enumInfo = symbols.enums.get(memberName);
+      const valueInfo = enumInfo && enumInfo.values.find(value => value.name === subName);
+      return valueInfo
+        ? { markdown: createEnumValueDocumentation(globalName, memberName, valueInfo), range: rangeOf(subStart, subName) }
+        : null;
+    }
   }
   return null;
+}
+
+/**
+ * True when `index` on `line` sits inside an open `{...}` variable block.
+ *
+ * @param {string} line
+ * @param {number} index
+ * @returns {boolean}
+ */
+function isInsideVariableBlock(line, index) {
+  const before = line.slice(0, index);
+  return before.lastIndexOf('{') > before.lastIndexOf('}');
 }
 
 // =============================================================================
@@ -387,36 +422,392 @@ const DTL_ENTRIES = [
     example: '[end_timeline]',
     variables: {
     }
-  },
+  }
+];
+// =============================================================================
+// GODOT BBCODE DOCUMENTATION
+// =============================================================================
+// Every BBCode tag Godot 4's RichTextLabel understands, which is what
+// Dialogic renders dialogue/narration/choice text with. Descriptions follow
+// the official "BBCode in RichTextLabel" page (GODOT_BBCODE_DOCS_URL).
+//
+// Same shape as DTL_ENTRIES (so createDocumentation renders both), plus:
+// - selfClosing: the tag has no [/name] closer (e.g. [br], [lb]) - never
+//   flagged as an unclosed balise, and inserted without one.
+// - snippet: custom completion insert text (after the already-typed '['),
+//   for tags whose value is part of the opening tag, e.g. [color=red].
+
+/** @type {string} */
+const GODOT_BBCODE_DOCS_URL = 'https://docs.godotengine.org/en/stable/tutorials/ui/bbcode_in_richtextlabel.html';
+
+const DTL_BBCODES = [
+  // --- Text style -----------------------------------------------------------
   {
     name: 'b',
-    type: 'bracket',
-    syntax: '[b] ... [/b]',
-    description: 'BBCode-style balise: wraps the enclosed dialogue/narration/choice text in bold.',
+    syntax: '[b]{text}[/b]',
+    description: 'Makes {text} use the bold (or bold italics) font of the RichTextLabel.',
     example: 'Laripo: This is [b]important[/b].'
   },
   {
     name: 'i',
-    type: 'bracket',
-    syntax: '[i] ... [/i]',
-    description: 'BBCode-style balise: wraps the enclosed dialogue/narration/choice text in italics.',
+    syntax: '[i]{text}[/i]',
+    description: 'Makes {text} use the italics (or bold italics) font of the RichTextLabel.',
     example: 'Laripo: This is [i]interesting[/i].'
   },
   {
     name: 'u',
-    type: 'bracket',
-    syntax: '[u] ... [/u]',
-    description: 'BBCode-style balise: wraps the enclosed dialogue/narration/choice text in an underline.',
+    syntax: '[u]{text}[/u]',
+    description: 'Makes {text} underlined.',
     example: 'Laripo: This is [u]underlined[/u].'
   },
   {
     name: 's',
-    type: 'bracket',
-    syntax: '[s] ... [/s]',
-    description: 'BBCode-style balise: wraps the enclosed dialogue/narration/choice text in a strikethrough.',
+    syntax: '[s]{text}[/s]',
+    description: 'Makes {text} strikethrough.',
     example: 'Laripo: This is [s]struck out[/s].'
-  }
-];
+  },
+  {
+    name: 'code',
+    syntax: '[code]{text}[/code]',
+    description: 'Makes {text} use the mono font of the RichTextLabel. BBCode tags inside [code] are not parsed.',
+    example: 'Laripo: Type [code]git status[/code] to check.'
+  },
+  {
+    name: 'color',
+    syntax: '[color={code/name}]{text}[/color]',
+    description: 'Changes the color of {text}. Accepts a color name (e.g. `red`, `aqua`) or a hexadecimal code (`#ff00ff`, `#ff00ff80` with alpha).',
+    example: 'Laripo: The [color=red]red[/color] button.',
+    snippet: 'color=${1:red}]$0[/color]'
+  },
+  {
+    name: 'bgcolor',
+    syntax: '[bgcolor={code/name}]{text}[/bgcolor]',
+    description: 'Draws a background color behind {text}. Accepts a color name or a hexadecimal code.',
+    example: 'Laripo: [bgcolor=yellow]Highlighted[/bgcolor] text.',
+    snippet: 'bgcolor=${1:yellow}]$0[/bgcolor]'
+  },
+  {
+    name: 'fgcolor',
+    syntax: '[fgcolor={code/name}]{text}[/fgcolor]',
+    description: 'Draws a foreground color in front of {text}, which can be used to "redact" it by using an opaque color.',
+    example: 'Laripo: The password is [fgcolor=black]hunter2[/fgcolor].',
+    snippet: 'fgcolor=${1:black}]$0[/fgcolor]'
+  },
+  {
+    name: 'outline_size',
+    syntax: '[outline_size={size}]{text}[/outline_size]',
+    description: 'Uses a custom font outline size for {text}, in pixels.',
+    example: '[outline_size=4]Outlined[/outline_size]',
+    snippet: 'outline_size=${1:4}]$0[/outline_size]'
+  },
+  {
+    name: 'outline_color',
+    syntax: '[outline_color={code/name}]{text}[/outline_color]',
+    description: 'Uses a custom font outline color for {text}. Accepts a color name or a hexadecimal code.',
+    example: '[outline_size=4][outline_color=black]Outlined[/outline_color][/outline_size]',
+    snippet: 'outline_color=${1:black}]$0[/outline_color]'
+  },
+  {
+    name: 'font',
+    syntax: '[font={path} {options}]{text}[/font]',
+    description: 'Makes {text} use a font resource from the {path}. Options can also be passed without a path to customize the current font.',
+    example: '[font=res://fonts/Handwriting.ttf]Dear diary...[/font]',
+    snippet: 'font=${1:res://}]$0[/font]',
+    variables: {
+      'name': 'Path to the font resource (alternative to `[font={path}]`).',
+      'size': 'Custom font size.',
+      'glyph_spacing': 'Extra spacing for each glyph.',
+      'space_spacing': 'Extra spacing for the space character.',
+      'top_spacing': 'Extra spacing at the top of the line.',
+      'bottom_spacing': 'Extra spacing at the bottom of the line.',
+      'embolden': 'Font embolden strength. If not 0, emboldens the font outlines.',
+      'face_index': 'Active face index for TrueType / OpenType collections.',
+      'slant': 'Font slant (horizontal skew) - positive values slant to the right.',
+      'opentype_variation': 'List of OpenType variation tags, e.g. `wght=600,wdth=100`.',
+      'opentype_features': 'List of OpenType feature tags, e.g. `calt=0,zero=1`.',
+    }
+  },
+  {
+    name: 'font_size',
+    syntax: '[font_size={size}]{text}[/font_size]',
+    description: 'Uses a custom font size for {text}.',
+    example: 'Laripo: [font_size=40]HEY![/font_size]',
+    snippet: 'font_size=${1:24}]$0[/font_size]'
+  },
+  {
+    name: 'opentype_features',
+    syntax: '[opentype_features={list}]{text}[/opentype_features]',
+    description: 'Enables custom OpenType font features for {text}. Features must be provided as a comma-separated list, e.g. `calt=0,zero=1`.',
+    example: '[opentype_features=zero=1]0123[/opentype_features]',
+    snippet: 'opentype_features=${1:calt=0}]$0[/opentype_features]'
+  },
+  {
+    name: 'lang',
+    syntax: '[lang={code}]{text}[/lang]',
+    description: 'Overrides the language for {text} set by the BiDi > Language property in RichTextLabel.',
+    example: '[lang=fr]Bonjour[/lang]',
+    snippet: 'lang=${1:en}]$0[/lang]'
+  },
+  {
+    name: 'char',
+    syntax: '[char={codepoint}]',
+    description: 'Adds a Unicode character with its hexadecimal UTF-32 {codepoint}.',
+    example: '[char=2665]',
+    snippet: 'char=${1:2665}]',
+    selfClosing: true
+  },
+  // --- Links, images, tooltips ---------------------------------------------
+  {
+    name: 'url',
+    syntax: '[url]{link}[/url] or [url={link}]{text}[/url]',
+    description: 'Creates a hyperlink (underlined and clickable text). Clicking it emits RichTextLabel\'s `meta_clicked` signal - opening the link has to be handled by the game code.',
+    example: 'Laripo: See the [url=https://docs.dialogic.pro]docs[/url].'
+  },
+  {
+    name: 'hint',
+    syntax: '[hint={tooltip text}]{text}[/hint]',
+    description: 'Creates a tooltip hint that is displayed when hovering the text with the mouse. Tooltip text should be quoted if it contains spaces.',
+    example: 'Laripo: I love [hint="A lot of cheese."]fondue[/hint].',
+    snippet: 'hint="${1:tooltip}"]$0[/hint]'
+  },
+  {
+    name: 'img',
+    syntax: '[img {options}]{path}[/img]',
+    description: 'Inserts an image from the {path} (can be any valid Texture2D resource). The shorthand `[img={width}x{height}]` also resizes it.',
+    example: '[img width=32]res://icons/heart.png[/img]',
+    variables: {
+      'width': 'Target width in pixels (or percent of the control width with a `%` suffix). Keeps the aspect ratio if only one of width/height is given.',
+      'height': 'Target height in pixels (or percent with a `%` suffix).',
+      'region': 'Region of the texture to display, as `x,y,width,height`.',
+      'color': 'Color the image is multiplied (tinted) by.',
+      'tooltip': 'Tooltip shown when hovering the image.',
+      'pad': 'If true, pads the image to keep its size when it fails to load.',
+    }
+  },
+  // --- Paragraphs and alignment --------------------------------------------
+  {
+    name: 'p',
+    syntax: '[p {options}]{text}[/p]',
+    description: 'Adds a new paragraph with {text}. Supports configuration options.',
+    example: '[p align=center]Chapter One[/p]',
+    variables: {
+      'align': 'Text horizontal alignment: `left` (`l`), `center` (`c`), `right` (`r`), or `fill` (`f`).',
+      'bidi_override': 'Structured text override (also `st`): `default`, `uri`, `file`, `email`, `list`, `none`, or `custom`.',
+      'direction': 'Base BiDi direction (also `dir`): `ltr`, `rtl`, `auto`, or `inherit`.',
+      'language': 'Locale override for this paragraph (also `lang`), e.g. `en` or `ja`.',
+      'tab_stops': 'List of floating-point numbers, e.g. `10.0,30.0`: overrides the default tab stops.',
+      'justification_flags': 'Justification flags (also `jst`), e.g. `kashida,word,trim,after_last_tab`.',
+    }
+  },
+  {
+    name: 'center',
+    syntax: '[center]{text}[/center]',
+    description: 'Makes {text} horizontally centered. Same as `[p align=center]`.',
+    example: '[center]THE END[/center]'
+  },
+  {
+    name: 'left',
+    syntax: '[left]{text}[/left]',
+    description: 'Makes {text} horizontally left-aligned. Same as `[p align=left]`.',
+    example: '[left]Left-aligned[/left]'
+  },
+  {
+    name: 'right',
+    syntax: '[right]{text}[/right]',
+    description: 'Makes {text} horizontally right-aligned. Same as `[p align=right]`.',
+    example: '[right]Right-aligned[/right]'
+  },
+  {
+    name: 'fill',
+    syntax: '[fill]{text}[/fill]',
+    description: 'Makes {text} fill the full width of the RichTextLabel. Same as `[p align=fill]`.',
+    example: '[fill]Justified text[/fill]'
+  },
+  {
+    name: 'indent',
+    syntax: '[indent]{text}[/indent]',
+    description: 'Indents {text} once. The indentation width is the same as with `[ul]` or `[ol]`, but without a bullet point.',
+    example: '[indent]Indented quote.[/indent]'
+  },
+  {
+    name: 'dropcap',
+    syntax: '[dropcap {options}]{text}[/dropcap]',
+    description: 'Uses a different font size and color for {text}, while making the tag\'s contents span multiple lines if it\'s large enough. A drop cap is typically one uppercase character, but it can contain several characters.',
+    example: '[dropcap font_size=48 margins=0,-5,5,0]O[/dropcap]nce upon a time...',
+    variables: {
+      'font': 'Path to the font resource used for the drop cap.',
+      'font_size': 'Font size of the drop cap.',
+      'color': 'Color of the drop cap.',
+      'outline_size': 'Outline size of the drop cap.',
+      'outline_color': 'Outline color of the drop cap.',
+      'margins': 'Margins around the drop cap, as `left,top,right,bottom` in pixels.',
+    }
+  },
+  // --- Lists and tables -----------------------------------------------------
+  {
+    name: 'ul',
+    syntax: '[ul bullet={bullet}]{items}[/ul]',
+    description: 'Adds an unordered list. List {items} must be provided by putting one item per line of text. The bullet point can be customized using the `bullet` parameter.',
+    example: '[ul]Apples\nPears[/ul]',
+    variables: {
+      'bullet': 'Custom bullet character(s), e.g. `*` or `-`. Defaults to `•`.',
+    }
+  },
+  {
+    name: 'ol',
+    syntax: '[ol type={type}]{items}[/ol]',
+    description: 'Adds an ordered (numbered) list of the given {type}. List {items} must be provided by putting one item per line of text.',
+    example: '[ol type=1]First\nSecond[/ol]',
+    variables: {
+      'type': 'Numbering style: `1` (numbers), `a` (lowercase letters), `A` (uppercase letters), `i` (lowercase roman numerals), `I` (uppercase roman numerals).',
+    }
+  },
+  {
+    name: 'table',
+    syntax: '[table={columns},{inline_align}]{cells}[/table]',
+    description: 'Creates a table with the {columns} number of columns. Use `[cell]` to define table cells. {inline_align} is optional (`top`, `center`, `baseline`, `bottom`).',
+    example: '[table=2][cell]Name[/cell][cell]HP[/cell][/table]',
+    snippet: 'table=${1:2}]$0[/table]'
+  },
+  {
+    name: 'cell',
+    syntax: '[cell {options}]{text}[/cell]',
+    description: 'Adds a cell with {text} to the table. If a ratio is provided (e.g. `[cell=2]`), the cell will try to expand to the specified ratio relative to other cells.',
+    example: '[cell border=#ffffff40 padding=2,2,2,2]Name[/cell]',
+    variables: {
+      'expand': 'Expansion ratio of the cell relative to other cells (same as `[cell={ratio}]`).',
+      'border': 'Cell border color.',
+      'bg': 'Cell background color. Two comma-separated colors alternate odd/even rows.',
+      'padding': 'Cell padding, as `left,top,right,bottom` in pixels.',
+    }
+  },
+  // --- Text effects -----------------------------------------------------------
+  {
+    name: 'pulse',
+    syntax: '[pulse freq=1.0 color=#ffffff40 ease=-2.0]{text}[/pulse]',
+    description: 'Creates an animated pulsing effect that multiplies each character\'s opacity and color. It can be used to bring attention to specific text.',
+    example: 'Laripo: [pulse]Look here![/pulse]',
+    variables: {
+      'freq': 'Number of pulses per second.',
+      'color': 'Target color multiplier at the peak of the pulse.',
+      'ease': 'Easing exponent (negative values ease in and out).',
+    }
+  },
+  {
+    name: 'wave',
+    syntax: '[wave amp=50.0 freq=5.0 connected=1]{text}[/wave]',
+    description: 'Makes the text go up and down.',
+    example: 'Laripo: [wave amp=25 freq=5]Wheee![/wave]',
+    variables: {
+      'amp': 'Amplitude: how high and low the effect goes.',
+      'freq': 'Frequency: how fast the text goes up and down.',
+      'connected': '`1` (default) keeps glyph clusters (e.g. ligatures) together; `0` animates each glyph independently.',
+    }
+  },
+  {
+    name: 'tornado',
+    syntax: '[tornado radius=10.0 freq=1.0 connected=1]{text}[/tornado]',
+    description: 'Makes the text move around in a circle.',
+    example: 'Laripo: [tornado radius=5 freq=2]I\'m dizzy...[/tornado]',
+    variables: {
+      'radius': 'Radius of the circle that controls the offset.',
+      'freq': 'How fast the text moves in a circle.',
+      'connected': '`1` (default) keeps glyph clusters (e.g. ligatures) together; `0` animates each glyph independently.',
+    }
+  },
+  {
+    name: 'shake',
+    syntax: '[shake rate=20.0 level=5 connected=1]{text}[/shake]',
+    description: 'Makes the text shake.',
+    example: 'Laripo: [shake rate=20 level=10]I-it\'s cold![/shake]',
+    variables: {
+      'rate': 'How fast the text shakes.',
+      'level': 'How far the text is offset from its origin.',
+      'connected': '`1` (default) keeps glyph clusters (e.g. ligatures) together; `0` animates each glyph independently.',
+    }
+  },
+  {
+    name: 'fade',
+    syntax: '[fade start=4 length=14]{text}[/fade]',
+    description: 'Creates a static fade effect that multiplies each character\'s opacity.',
+    example: '[fade start=0 length=10]Fading away...[/fade]',
+    variables: {
+      'start': 'Starting position of the falloff relative to where the fade command is inserted.',
+      'length': 'Number of characters over which the fade out takes place.',
+    }
+  },
+  {
+    name: 'rainbow',
+    syntax: '[rainbow freq=1.0 sat=0.8 val=0.8 speed=1.0]{text}[/rainbow]',
+    description: 'Gives the text a rainbow color that changes over time.',
+    example: 'Laripo: [rainbow]Fabulous![/rainbow]',
+    variables: {
+      'freq': 'Number of letters the rainbow extends over before it repeats itself.',
+      'sat': 'Saturation of the rainbow.',
+      'val': 'Value (brightness) of the rainbow.',
+      'speed': 'Number of full rainbow cycles per second. Negative values make the rainbow go backwards.',
+    }
+  },
+  // --- Escapes and control characters (no closing tag) --------------------------
+  {
+    name: 'br',
+    syntax: '[br]',
+    description: 'Adds a line break in the text, without adding a new paragraph.',
+    example: 'Laripo: First line[br]Second line',
+    selfClosing: true
+  },
+  {
+    name: 'hr',
+    syntax: '[hr {options}]',
+    description: 'Adds a horizontal rule (separator line).',
+    example: '[hr width=50% color=#ffffff80]',
+    selfClosing: true,
+    variables: {
+      'width': 'Width of the rule in pixels (or percent with a `%` suffix).',
+      'height': 'Thickness of the rule in pixels.',
+      'color': 'Color of the rule.',
+      'align': 'Horizontal alignment: `left`, `center`, or `right`.',
+    }
+  },
+  { name: 'lb', syntax: '[lb]', description: 'Adds `[`. Used to escape BBCode markup.', example: '[lb]b[rb]text[lb]/b[rb]', selfClosing: true },
+  { name: 'rb', syntax: '[rb]', description: 'Adds `]`. Used to escape BBCode markup.', example: '[lb]b[rb]text[lb]/b[rb]', selfClosing: true },
+  { name: 'lrm', syntax: '[lrm]', description: 'Adds a left-to-right mark (LRM, U+200E): a zero-width character that affects BiDi text ordering.', example: '[lrm]', selfClosing: true },
+  { name: 'rlm', syntax: '[rlm]', description: 'Adds a right-to-left mark (RLM, U+200F): a zero-width character that affects BiDi text ordering.', example: '[rlm]', selfClosing: true },
+  { name: 'lre', syntax: '[lre]', description: 'Adds a left-to-right embedding control character (LRE, U+202A).', example: '[lre]', selfClosing: true },
+  { name: 'rle', syntax: '[rle]', description: 'Adds a right-to-left embedding control character (RLE, U+202B).', example: '[rle]', selfClosing: true },
+  { name: 'lro', syntax: '[lro]', description: 'Adds a left-to-right override control character (LRO, U+202D).', example: '[lro]', selfClosing: true },
+  { name: 'rlo', syntax: '[rlo]', description: 'Adds a right-to-left override control character (RLO, U+202E).', example: '[rlo]', selfClosing: true },
+  { name: 'pdf', syntax: '[pdf]', description: 'Adds a pop directional formatting control character (PDF, U+202C).', example: '[pdf]', selfClosing: true },
+  { name: 'alm', syntax: '[alm]', description: 'Adds an Arabic letter mark (ALM, U+061C).', example: '[alm]', selfClosing: true },
+  { name: 'lri', syntax: '[lri]', description: 'Adds a left-to-right isolate control character (LRI, U+2066).', example: '[lri]', selfClosing: true },
+  { name: 'rli', syntax: '[rli]', description: 'Adds a right-to-left isolate control character (RLI, U+2067).', example: '[rli]', selfClosing: true },
+  { name: 'fsi', syntax: '[fsi]', description: 'Adds a first strong isolate control character (FSI, U+2068).', example: '[fsi]', selfClosing: true },
+  { name: 'pdi', syntax: '[pdi]', description: 'Adds a pop directional isolate control character (PDI, U+2069).', example: '[pdi]', selfClosing: true },
+  { name: 'zwj', syntax: '[zwj]', description: 'Adds a zero-width joiner (U+200D): joins the characters on either side into a single glyph when the font supports it.', example: '[zwj]', selfClosing: true },
+  { name: 'zwnj', syntax: '[zwnj]', description: 'Adds a zero-width non-joiner (U+200C): prevents the characters on either side from being joined.', example: '[zwnj]', selfClosing: true },
+  { name: 'wj', syntax: '[wj]', description: 'Adds a word joiner (U+2060): prevents a line break between the characters on either side.', example: '[wj]', selfClosing: true },
+  { name: 'shy', syntax: '[shy]', description: 'Adds a soft hyphen (U+00AD): an invisible hyphen shown only if the word is broken across lines there.', example: 'extra[shy]ordinary', selfClosing: true },
+].map(entry => ({ ...entry, type: 'bbcode', docsUrl: GODOT_BBCODE_DOCS_URL }));
+
+/**
+ * BBCode tags that have no `[/name]` closer, so they're never flagged as
+ * unclosed balises by findUnclosedBaliseDiagnostics.
+ *
+ * @type {Set<string>}
+ */
+const SELF_CLOSING_BBCODE_NAMES = new Set(DTL_BBCODES.filter(entry => entry.selfClosing).map(entry => entry.name));
+
+/**
+ * Look up a bracket command (DTL_ENTRIES, type "bracket") or Godot BBCode
+ * tag (DTL_BBCODES) by name - DTL's own commands win if a name is shared.
+ *
+ * @param {string} name
+ * @returns {object | undefined}
+ */
+function findBracketOrBbcodeEntry(name) {
+  return DTL_ENTRIES.find(entry => entry.name === name && entry.type === 'bracket')
+    || DTL_BBCODES.find(entry => entry.name === name);
+}
 // =============================================================================
 // POSITIONS
 // =============================================================================
@@ -659,38 +1050,23 @@ let cachedVariablesTree = new Map();
 let cachedCharacterInfo = new Map();
 
 /**
- * Per autoload/global-script name (from project.godot's `[autoload]`
- * section), the top-level functions declared in that `.gd` script - name
- * -> {params, returnType, doc}, where `doc` is the GDScript `##`
- * documentation comment directly above the function, if any. Powers
- * `Global.function_name(...)` autocomplete and hover after `do`, `if`, and
- * `elif`. An autoload whose script isn't a `.gd` file (e.g. a singleton
- * scene) simply has no entry here.
+ * Per autoload name (from project.godot's `[autoload]` section), the
+ * public top-level symbols of its script (see parseGdScript) - plus where
+ * that script came from. An autoload can point either straight at a `.gd`
+ * script, or at a `.tscn` scene ("autoload node"), in which case the
+ * scene's root node script is used, since that's the node Dialogic reaches
+ * as `Name`. Powers `Name.member` autocomplete and hover after `do`, `if`
+ * and `elif`, and inside `{Name.property}` variable blocks.
  *
- * @type {Map<string, Map<string, {params: string, returnType: string|null, doc: string}>>}
+ * Only autoloads are included - not every `class_name` script - because
+ * that's all Dialogic can actually resolve by name at runtime. Autoloads
+ * declared by addons (`res://addons/...`, e.g. Dialogic's own `Dialogic`
+ * singleton with its hundreds of members) are skipped unless the
+ * `dtlReader.includeAddonAutoloads` setting is on.
+ *
+ * @type {Map<string, GdScriptSymbols & {scriptPath: string, scenePath: string|null}>}
  */
-let cachedAutoloadFunctions = new Map();
-
-/**
- * Per globally-reachable name, the functions callable on it as
- * `Name.function_name(...)` - name -> {params, returnType, doc, isStatic}.
- * Sourced from two places, matching what Dialogic's `do`/`if`/`elif` can
- * actually reach at runtime:
- *
- * - Autoloads (project.godot's `[autoload]` section): a live singleton
- *   node, so every top-level function is included, static or not.
- * - `class_name`-declared scripts anywhere in the project: NOT an
- *   instance, so only `static func` declarations are included - a
- *   non-static method can't be called as `ClassName.method()` without
- *   first creating an instance.
- *
- * `doc` is the GDScript `##` documentation comment directly above the
- * function, if any. An autoload whose script isn't a `.gd` file (e.g. a
- * singleton scene) simply has no entry here.
- *
- * @type {Map<string, Map<string, {params: string, returnType: string|null, doc: string, isStatic: boolean}>>}
- */
-let cachedGlobalFunctions = new Map();
+let cachedAutoloadSymbols = new Map();
 
 function extractCharacterNames(text) {
   const sectionMatch = text.match(/(?:^|\n)\[dialogic\]([\s\S]*?)(\n\[|$)/);
@@ -874,8 +1250,8 @@ function extractCharacterPaths(text) {
  * project.godot's `[autoload]` section, e.g. `Global="*res://global.gd"`.
  * The optional leading `*` (marks it enabled in-editor) is ignored either
  * way. Entries pointing at a `.tscn` (a singleton scene rather than a
- * plain script) are kept too - refreshAutoloadFunctions filters those out
- * before trying to parse them as GDScript.
+ * plain script) are kept too - refreshAutoloadSymbols resolves those to
+ * their root node's script.
  *
  * @param {string} text - raw project.godot content
  * @returns {Map<string, string>}
@@ -891,80 +1267,284 @@ function extractAutoloadPaths(text) {
 }
 
 /**
- * Scan a single line starting at `openParenIndex` (must point at a '(')
- * for its matching ')', tracking nested `()`/`[]`/`{}` depth so a
- * parameter's default value - e.g. `Color(1, 1, 1, 1)` or `[1, 2]` -
- * doesn't prematurely end the scan at its own closing character.
- * Multi-line function signatures aren't supported: the closing ')' must
- * be on the same line, or this returns -1.
+ * @typedef {{params: string, returnType: string|null, doc: string, isStatic: boolean}} GdFunctionInfo
+ * @typedef {{type: string|null, defaultValue: string|null, doc: string, isStatic: boolean}} GdVariableInfo
+ * @typedef {{type: string|null, value: string, doc: string}} GdConstantInfo
+ * @typedef {{name: string, value: string, doc: string}} GdEnumValueInfo
+ * @typedef {{values: GdEnumValueInfo[], doc: string}} GdEnumInfo
+ * @typedef {{
+ *   doc: string,
+ *   functions: Map<string, GdFunctionInfo>,
+ *   variables: Map<string, GdVariableInfo>,
+ *   constants: Map<string, GdConstantInfo>,
+ *   enums: Map<string, GdEnumInfo>
+ * }} GdScriptSymbols
+ */
+
+/**
+ * Strip a trailing `# comment` from one line of GDScript, ignoring any `#`
+ * that sits inside a string literal (e.g. `const TAG = "#hero"`).
  *
  * @param {string} line
- * @param {number} openParenIndex
- * @returns {number} index of the matching ')', or -1 if not found on this line
+ * @returns {string}
  */
-function findMatchingParenOnLine(line, openParenIndex) {
-  let depth = 0;
-  for (let i = openParenIndex; i < line.length; i++) {
+function stripGdComment(line) {
+  let quote = null;
+  for (let i = 0; i < line.length; i++) {
     const ch = line[i];
-    if (ch === '(' || ch === '[' || ch === '{') { depth++; }
-    else if (ch === ')' || ch === ']' || ch === '}') {
-      depth--;
-      if (depth === 0 && ch === ')') { return i; }
+    if (quote) {
+      if (ch === '\\') { i++; }
+      else if (ch === quote) { quote = null; }
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (ch === '#') {
+      return line.slice(0, i);
     }
   }
-  return -1;
+  return line;
 }
 
 /**
- * Parse a GDScript file's top-level `func` declarations into a name ->
- * {params, returnType, doc} map, where `doc` is the GDScript
- * documentation-comment convention: consecutive `##`-prefixed lines
- * directly above the function (see
- * https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_documentation_comments.html).
- * Indented (nested/inner) functions are skipped, since only top-level
- * methods are callable as `Global.function_name(...)`; functions whose
- * name starts with `_` are skipped too, since that's GDScript's own
- * convention for "not meant to be called from outside" (this also
- * excludes engine lifecycle callbacks like `_ready`/`_process`, which
- * wouldn't make sense to call from dialogue anyway). Multi-line function
- * signatures aren't supported (see findMatchingParenOnLine); such a
- * function is simply skipped rather than misparsed.
+ * Starting at `lines[startIndex]`, join as many lines as needed (comments
+ * stripped) for the bracket opened at `openIndex` of the first line to be
+ * closed again, tracking nested `()`/`[]`/`{}` depth so e.g. a parameter's
+ * default value `Color(1, 1, 1, 1)` doesn't end the scan early. Lets
+ * multi-line function signatures and multi-line enums be parsed the same
+ * way as single-line ones.
+ *
+ * @param {string[]} lines
+ * @param {number} startIndex
+ * @param {number} openIndex - index of the opening bracket in the first (comment-stripped) line
+ * @returns {{text: string, closeIndex: number, lastLineIndex: number} | null}
+ *   the joined text, the index of the matching closer inside it, and the
+ *   last line index consumed - or null if never closed (within 50 lines).
+ */
+function joinUntilBracketCloses(lines, startIndex, openIndex) {
+  let text = '';
+  let depth = 0;
+  for (let lineIndex = startIndex; lineIndex < lines.length && lineIndex < startIndex + 50; lineIndex++) {
+    const offset = text.length;
+    text += stripGdComment(lines[lineIndex]) + '\n';
+    for (let i = lineIndex === startIndex ? openIndex : offset; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === '(' || ch === '[' || ch === '{') { depth++; }
+      else if (ch === ')' || ch === ']' || ch === '}') {
+        depth--;
+        if (depth === 0) { return { text, closeIndex: i, lastLineIndex: lineIndex }; }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Split an enum body (text between its braces) into its values, resolving
+ * GDScript's implicit numbering (each value is the previous one + 1,
+ * starting at 0). A `##` comment line inside the body documents the value
+ * directly below it, same as for top-level members.
+ *
+ * @param {string[]} bodyLines - raw lines of the enum body (braces excluded)
+ * @returns {GdEnumValueInfo[]}
+ */
+function parseGdEnumBody(bodyLines) {
+  const values = [];
+  let nextValue = 0;
+  let pendingDoc = [];
+  for (const rawLine of bodyLines) {
+    const docMatch = rawLine.match(/^\s*##\s?(.*)$/);
+    if (docMatch) {
+      pendingDoc.push(docMatch[1]);
+      continue;
+    }
+    for (const item of stripGdComment(rawLine).split(',')) {
+      const itemMatch = item.trim().match(/^([A-Za-z_][A-Za-z0-9_]*)\s*(?:=\s*(.+))?$/);
+      if (!itemMatch) { continue; }
+      let value;
+      if (itemMatch[2] !== undefined) {
+        value = itemMatch[2].trim();
+        const numeric = Number(value);
+        nextValue = Number.isInteger(numeric) ? numeric + 1 : null;
+      } else {
+        value = nextValue === null ? '?' : String(nextValue);
+        if (nextValue !== null) { nextValue++; }
+      }
+      values.push({ name: itemMatch[1], value, doc: pendingDoc.join('\n').trim() });
+      pendingDoc = [];
+    }
+  }
+  return values;
+}
+
+/**
+ * Parse a GDScript file's public top-level symbols: functions, variables
+ * (`var`, including `@export`/`@onready`/`static` ones), constants, and
+ * enums - plus the script's own class documentation. Each symbol's `doc`
+ * follows GDScript's documentation-comment convention: consecutive
+ * `##`-prefixed lines directly above it (see
+ * https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_documentation_comments.html);
+ * the script's own doc is the `##` block after `extends`/`class_name`,
+ * before any member.
+ *
+ * Indented lines (function bodies, inner classes) are skipped, since only
+ * top-level members are reachable as `Global.member`. Names starting with
+ * `_` are skipped too, since that's GDScript's own "private" convention
+ * (this also excludes engine callbacks like `_ready`). An unnamed
+ * `enum { A, B }` declares plain constants, so its values are listed as
+ * constants rather than as an enum.
  *
  * @param {string} text - raw .gd file content
- * @returns {Map<string, {params: string, returnType: string|null, doc: string}>}
+ * @returns {GdScriptSymbols}
  */
-function parseGdScriptFunctions(text) {
-  const functions = new Map();
+function parseGdScript(text) {
+  const symbols = { doc: '', functions: new Map(), variables: new Map(), constants: new Map(), enums: new Map() };
+  const lines = text.split(/\r?\n/);
   let pendingDocLines = [];
-  for (const line of text.split(/\r?\n/)) {
-    const docMatch = line.match(/^##\s?(.*)$/);
+  let seenMember = false;
+  const takeDoc = () => {
+    const doc = pendingDocLines.join('\n').trim();
+    pendingDocLines = [];
+    return doc;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
+    const docMatch = rawLine.match(/^##\s?(.*)$/);
     if (docMatch) {
       pendingDocLines.push(docMatch[1]);
       continue;
     }
-    const headerMatch = line.match(/^(?:static\s+)?func\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
-    if (headerMatch) {
-      const name = headerMatch[1];
-      const openParenIndex = headerMatch.index + headerMatch[0].length - 1;
-      const closeParenIndex = findMatchingParenOnLine(line, openParenIndex);
-      if (closeParenIndex !== -1 && !name.startsWith('_')) {
-        const returnMatch = line.slice(closeParenIndex + 1).match(/^\s*->\s*([A-Za-z_][A-Za-z0-9_.]*)/);
-        functions.set(name, {
-          params: line.slice(openParenIndex + 1, closeParenIndex).trim(),
-          returnType: returnMatch ? returnMatch[1] : null,
-          doc: pendingDocLines.join('\n').trim(),
-        });
-      }
-      pendingDocLines = [];
+    if (rawLine.trim() === '') {
+      // A `##` block followed by a blank line before any member has been
+      // declared is the script's own doc (e.g. right after `extends Node`).
+      if (!seenMember && !symbols.doc && pendingDocLines.length > 0) { symbols.doc = takeDoc(); }
       continue;
     }
-    // Any other non-blank, non-comment line breaks the doc-comment chain -
-    // a `##` block only documents the symbol directly below it.
-    if (line.trim() !== '' && !line.trim().startsWith('#')) {
-      pendingDocLines = [];
+    if (/^\s/.test(rawLine)) {
+      pendingDocLines = []; // indented: a function body or inner class member
+      continue;
+    }
+    if (rawLine.startsWith('#')) {
+      continue; // a plain comment doesn't break the `##` chain
+    }
+
+    // Leading annotations (`@export`, `@onready`, `@export_range(0, 10)`,
+    // ...) are dropped - an annotation-only line keeps the `##` chain intact.
+    let code = stripGdComment(rawLine).trim();
+    let annotationMatch;
+    while ((annotationMatch = code.match(/^@[A-Za-z_][A-Za-z0-9_]*(?:\([^)]*\))?\s*/))) {
+      code = code.slice(annotationMatch[0].length);
+    }
+    if (code === '') { continue; }
+
+    if (/^(?:extends|class_name)\b/.test(code)) {
+      if (pendingDocLines.length > 0 && !symbols.doc) { symbols.doc = takeDoc(); }
+      continue;
+    }
+
+    const funcMatch = code.match(/^(static\s+)?func\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
+    if (funcMatch) {
+      seenMember = true;
+      const doc = takeDoc();
+      const name = funcMatch[2];
+      const lineOffset = stripGdComment(rawLine).indexOf(funcMatch[0]);
+      const openIndex = lineOffset + funcMatch[0].length - 1;
+      const joined = joinUntilBracketCloses(lines, i, openIndex);
+      if (!joined) { continue; }
+      i = joined.lastLineIndex;
+      if (name.startsWith('_')) { continue; }
+      const params = joined.text.slice(openIndex + 1, joined.closeIndex).replace(/\s+/g, ' ').replace(/,\s*$/, '').trim();
+      const returnMatch = joined.text.slice(joined.closeIndex + 1).match(/^\s*->\s*([A-Za-z_][A-Za-z0-9_.\[\], ]*?)\s*:/);
+      symbols.functions.set(name, { params, returnType: returnMatch ? returnMatch[1] : null, doc, isStatic: !!funcMatch[1] });
+      continue;
+    }
+
+    const varMatch = code.match(/^(static\s+)?var\s+([A-Za-z_][A-Za-z0-9_]*)\s*(.*)$/);
+    if (varMatch) {
+      seenMember = true;
+      const doc = takeDoc();
+      if (varMatch[2].startsWith('_')) { continue; }
+      // A trailing ':' opens a setter/getter block - not part of the value.
+      const rest = varMatch[3].replace(/:\s*$/, '').trim();
+      const typedMatch = rest.match(/^(?::\s*([^=]+?))?\s*(?::?=\s*(.*))?$/);
+      symbols.variables.set(varMatch[2], {
+        type: typedMatch && typedMatch[1] ? typedMatch[1].trim() : null,
+        defaultValue: typedMatch && typedMatch[2] ? typedMatch[2].trim() : null,
+        doc,
+        isStatic: !!varMatch[1],
+      });
+      continue;
+    }
+
+    const constMatch = code.match(/^const\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*([^=]+?))?\s*:?=\s*(.*)$/);
+    if (constMatch) {
+      seenMember = true;
+      const doc = takeDoc();
+      if (constMatch[1].startsWith('_')) { continue; }
+      symbols.constants.set(constMatch[1], { type: constMatch[2] ? constMatch[2].trim() : null, value: constMatch[3].trim(), doc });
+      continue;
+    }
+
+    const enumMatch = code.match(/^enum\s*([A-Za-z_][A-Za-z0-9_]*)?\s*\{/);
+    if (enumMatch) {
+      seenMember = true;
+      const doc = takeDoc();
+      const openIndex = stripGdComment(rawLine).indexOf('{');
+      const joined = joinUntilBracketCloses(lines, i, openIndex);
+      if (!joined) { continue; }
+      // Re-split the raw (comment-intact) lines so `##` value docs survive.
+      const rawBody = lines.slice(i, joined.lastLineIndex + 1).join('\n');
+      const bodyStart = rawBody.indexOf('{') + 1;
+      const bodyEnd = rawBody.lastIndexOf('}');
+      const values = parseGdEnumBody(rawBody.slice(bodyStart, bodyEnd).split('\n'))
+        .filter(value => !value.name.startsWith('_'));
+      i = joined.lastLineIndex;
+      const enumName = enumMatch[1];
+      if (enumName) {
+        if (!enumName.startsWith('_')) { symbols.enums.set(enumName, { values, doc }); }
+      } else {
+        for (const value of values) {
+          symbols.constants.set(value.name, { type: 'int', value: value.value, doc: value.doc || doc });
+        }
+      }
+      continue;
+    }
+
+    // Anything else (signal, class, a stray statement...) breaks the chain.
+    seenMember = true;
+    pendingDocLines = [];
+  }
+  return symbols;
+}
+
+/**
+ * Find the `res://` path of the script attached to a `.tscn` scene's root
+ * node - used to resolve an autoload that points at a scene ("autoload
+ * node") to the script whose members are reachable as `Name.member`.
+ * Handles both the Godot 4 (`ExtResource("1_abc")`) and Godot 3
+ * (`ExtResource( 1 )`) id formats. A root node with no script, or with a
+ * built-in (SubResource) script, yields null.
+ *
+ * @param {string} text - raw .tscn file content
+ * @returns {string | null}
+ */
+function extractSceneRootScriptPath(text) {
+  const scriptResources = new Map();
+  const extResourcePattern = /\[ext_resource\b([^\]]*)\]/g;
+  let match;
+  while ((match = extResourcePattern.exec(text)) !== null) {
+    const attributes = match[1];
+    const typeMatch = attributes.match(/\btype="([^"]+)"/);
+    const pathMatch = attributes.match(/\bpath="([^"]+)"/);
+    const idMatch = attributes.match(/\bid=(?:"([^"]+)"|(\d+))/);
+    if (typeMatch && typeMatch[1] === 'Script' && pathMatch && idMatch) {
+      scriptResources.set(idMatch[1] || idMatch[2], pathMatch[1]);
     }
   }
-  return functions;
+  // The root is the only [node] without a parent= attribute.
+  const rootMatch = text.match(/\[node\b(?![^\]]*\bparent=)[^\]]*\]([\s\S]*?)(?=\r?\n\[|$)/);
+  if (!rootMatch) { return null; }
+  const scriptMatch = rootMatch[1].match(/^\s*script\s*=\s*ExtResource\(\s*"?([^")\s]+)"?\s*\)/m);
+  return scriptMatch ? (scriptResources.get(scriptMatch[1]) || null) : null;
 }
 
 /**
@@ -1123,24 +1703,119 @@ function createCharacterDocumentation(rawName, info) {
   return markdown;
 }
 
+/** Shown in place of a missing `##` documentation comment. @type {string} */
+const NO_GD_DOC_MESSAGE = '_No `##` documentation comment found above this symbol in its script._';
+
 /**
- * Build the hover shown for a `Global.function_name` call - its signature
- * (parameters and return type, from the .gd file itself) as the title,
- * followed by its GDScript `##` documentation comment, if any.
+ * One-line GDScript-style signature of an autoload member, e.g.
+ * `func Global.apply_tint(color: Color) -> void` or `var Global.hp: int = 10`.
+ * Shared by the hover (as its code block title) and the completion detail.
  *
  * @param {string} globalName
- * @param {string} functionName
- * @param {{params: string, returnType: string|null, doc: string}} info
+ * @param {string} memberName
+ * @param {'function'|'variable'|'constant'|'enum'} kind
+ * @param {object} info - the member's entry from GdScriptSymbols
+ * @returns {string}
+ */
+function formatAutoloadMemberSignature(globalName, memberName, kind, info) {
+  const qualifiedName = `${globalName}.${memberName}`;
+  switch (kind) {
+    case 'function':
+      return `${info.isStatic ? 'static ' : ''}func ${qualifiedName}(${info.params})${info.returnType ? ' -> ' + info.returnType : ''}`;
+    case 'variable':
+      return `${info.isStatic ? 'static ' : ''}var ${qualifiedName}${info.type ? ': ' + info.type : ''}${info.defaultValue !== null ? ' = ' + info.defaultValue : ''}`;
+    case 'constant':
+      return `const ${qualifiedName}${info.type ? ': ' + info.type : ''} = ${info.value}`;
+    case 'enum':
+      return `enum ${qualifiedName} { ${info.values.map(value => `${value.name} = ${value.value}`).join(', ')} }`;
+  }
+  return qualifiedName;
+}
+
+/**
+ * Find a member on an autoload by name, whatever its kind.
+ *
+ * @param {GdScriptSymbols} symbols
+ * @param {string} memberName
+ * @returns {{kind: 'function'|'variable'|'constant'|'enum', info: object} | null}
+ */
+function findAutoloadMember(symbols, memberName) {
+  if (symbols.functions.has(memberName)) { return { kind: 'function', info: symbols.functions.get(memberName) }; }
+  if (symbols.variables.has(memberName)) { return { kind: 'variable', info: symbols.variables.get(memberName) }; }
+  if (symbols.constants.has(memberName)) { return { kind: 'constant', info: symbols.constants.get(memberName) }; }
+  if (symbols.enums.has(memberName)) { return { kind: 'enum', info: symbols.enums.get(memberName) }; }
+  return null;
+}
+
+/**
+ * Build the hover shown for an autoload member (`Global.apply_tint`,
+ * `Global.max_hp`, `Global.State`, ...) - its signature as the title,
+ * followed by its GDScript `##` documentation comment, if any. An enum
+ * additionally lists each of its values with their own docs.
+ *
+ * @param {string} globalName
+ * @param {string} memberName
+ * @param {GdScriptSymbols} symbols
+ * @returns {vscode.MarkdownString | null} null if no such member exists
+ */
+function createAutoloadMemberDocumentation(globalName, memberName, symbols) {
+  const member = findAutoloadMember(symbols, memberName);
+  if (!member) { return null; }
+  const markdown = new vscode.MarkdownString();
+  markdown.appendCodeblock(formatAutoloadMemberSignature(globalName, memberName, member.kind, member.info), 'gdscript');
+  markdown.appendMarkdown(member.info.doc || NO_GD_DOC_MESSAGE);
+  if (member.kind === 'enum' && member.info.values.length > 0) {
+    markdown.appendMarkdown('\n\n**Values:**\n\n');
+    for (const value of member.info.values) {
+      markdown.appendMarkdown(`- \`${value.name}\` = \`${value.value}\`${value.doc ? ': ' + value.doc : ''}\n`);
+    }
+  }
+  return markdown;
+}
+
+/**
+ * Build the hover shown for a named enum's value, e.g. `Global.State.IDLE`.
+ *
+ * @param {string} globalName
+ * @param {string} enumName
+ * @param {GdEnumValueInfo} valueInfo
  * @returns {vscode.MarkdownString}
  */
-function createGlobalFunctionDocumentation(globalName, functionName, info) {
+function createEnumValueDocumentation(globalName, enumName, valueInfo) {
   const markdown = new vscode.MarkdownString();
-  const returnPart = info.returnType ? ` -> ${info.returnType}` : '';
-  markdown.appendCodeblock(`${globalName}.${functionName}(${info.params})${returnPart}`, 'gdscript');
-  if (info.doc) {
-    markdown.appendMarkdown(info.doc);
-  } else {
-    markdown.appendMarkdown('_No `##` documentation comment found above this function in its script._');
+  markdown.appendCodeblock(`${globalName}.${enumName}.${valueInfo.name} = ${valueInfo.value}`, 'gdscript');
+  markdown.appendMarkdown(valueInfo.doc || NO_GD_DOC_MESSAGE);
+  return markdown;
+}
+
+/**
+ * Build the hover shown for an autoload name itself, e.g. `Global` in
+ * `do Global.foo()`: where it's declared (script, and scene for an
+ * autoload node), the script's own `##` class documentation, and a count
+ * of what it exposes.
+ *
+ * @param {string} globalName
+ * @param {GdScriptSymbols & {scriptPath: string, scenePath: string|null}} symbols
+ * @returns {vscode.MarkdownString}
+ */
+function createAutoloadDocumentation(globalName, symbols) {
+  const markdown = new vscode.MarkdownString();
+  markdown.appendMarkdown(`**${globalName}** _(${symbols.scenePath ? 'autoload node' : 'autoload script'})_\n\n`);
+  if (symbols.scenePath) {
+    markdown.appendMarkdown(`Scene: \`${symbols.scenePath}\`\n\n`);
+  }
+  markdown.appendMarkdown(`Script: \`${symbols.scriptPath}\`\n\n`);
+  if (symbols.doc) {
+    markdown.appendMarkdown(`${symbols.doc}\n\n`);
+  }
+  const counts = [
+    [symbols.functions.size, 'function'],
+    [symbols.variables.size, 'variable'],
+    [symbols.constants.size, 'constant'],
+    [symbols.enums.size, 'enum'],
+  ].filter(([count]) => count > 0).map(([count, label]) => `${count} ${label}${count > 1 ? 's' : ''}`);
+  if (counts.length > 0) {
+    markdown.appendMarkdown(`_${counts.join(', ')}_`);
   }
   return markdown;
 }
@@ -1184,8 +1859,7 @@ async function refreshProjectGodotData() {
     cachedCharacterMoods = new Map();
     cachedVariablesTree = new Map();
     cachedCharacterInfo = new Map();
-    cachedAutoloadFunctions = new Map();
-    cachedGlobalFunctions = new Map();
+    cachedAutoloadSymbols = new Map();
     projectRootUri = null;
     cachedResourcePaths = [];
     return;
@@ -1198,7 +1872,7 @@ async function refreshProjectGodotData() {
     cachedAudioChannels = extractAudioChannels(text);
     cachedVariablesTree = extractVariablesTree(text);
     await refreshCharacterMoods(extractCharacterPaths(text));
-    await refreshAutoloadFunctions(extractAutoloadPaths(text));
+    await refreshAutoloadSymbols(extractAutoloadPaths(text));
   } catch (error) {
     console.error('DTL Reader: could not read project.godot', error);
     cachedCharacterNames = [];
@@ -1206,81 +1880,46 @@ async function refreshProjectGodotData() {
     cachedCharacterMoods = new Map();
     cachedVariablesTree = new Map();
     cachedCharacterInfo = new Map();
-    cachedAutoloadFunctions = new Map();
-    cachedGlobalFunctions = new Map();
+    cachedAutoloadSymbols = new Map();
   }
   await refreshResourcePaths();
 }
 
 /**
- * For every declared autoload (project.godot's `[autoload]` section)
- * whose script is a `.gd` file, read it and parse its top-level functions
- * (see parseGdScriptFunctions), so `do`/`if`/`elif` can autocomplete
- * `Global.function_name(...)` calls with hover-ready documentation,
- * without touching disk on every keystroke. An autoload whose script
- * isn't a `.gd` file (a singleton scene), or is unreadable, is simply
- * left out rather than failing the whole refresh.
+ * For every declared autoload (project.godot's `[autoload]` section), read
+ * its script and parse its public top-level symbols (see parseGdScript),
+ * so `do`/`if`/`elif` and `{...}` can autocomplete `Name.member` with
+ * hover-ready documentation, without touching disk on every keystroke.
+ * An autoload pointing at a `.tscn` scene (an "autoload node") uses the
+ * scene root's script instead (see extractSceneRootScriptPath). Addon
+ * autoloads are skipped unless `dtlReader.includeAddonAutoloads` is on.
+ * An autoload whose script is missing or unreadable is simply left out
+ * rather than failing the whole refresh.
  *
- * @param {Map<string, string>} autoloadPaths - name -> res:// script path
+ * @param {Map<string, string>} autoloadPaths - name -> res:// script or scene path
  */
-async function refreshAutoloadFunctions(autoloadPaths) {
-  const functionsByGlobal = new Map();
+async function refreshAutoloadSymbols(autoloadPaths) {
+  const includeAddons = vscode.workspace.getConfiguration('dtlReader').get('includeAddonAutoloads', false);
+  const symbolsByGlobal = new Map();
   for (const [name, path] of autoloadPaths) {
-    if (!path.toLowerCase().endsWith('.gd')) { continue; } // e.g. a singleton scene, not a script
+    if (!includeAddons && /^res:\/\/addons\//i.test(path)) { continue; }
     try {
-      const bytes = await vscode.workspace.fs.readFile(resolveResourcePath(path));
-      functionsByGlobal.set(name, parseGdScriptFunctions(Buffer.from(bytes).toString('utf8')));
-    } catch (error) {
-      console.error(`DTL Reader: autoload "${name}" declares script "${path}" but it could not be read - its functions will be unavailable for do/if/elif autocomplete.`, error);
-    }
-  }
-  cachedAutoloadFunctions = functionsByGlobal;
-}
-
-
-/**
- * Populate cachedGlobalFunctions from every autoload and every
- * `class_name`-declared script in the project, so `do`/`if`/`elif` can
- * autocomplete/hover `Name.function_name(...)` calls for anything
- * Dialogic can actually reach globally - not just autoloads. See
- * cachedGlobalFunctions' own doc comment for the autoload-vs-class_name
- * distinction (all functions vs. static-only). A script that can't be
- * read or parsed is simply left out rather than failing the whole
- * refresh.
- *
- * @param {Map<string, string>} autoloadPaths - name -> res:// script path
- */
-async function refreshGlobalFunctions(autoloadPaths) {
-  const functionsByGlobal = new Map();
-
-  for (const [name, path] of autoloadPaths) {
-    if (!path.toLowerCase().endsWith('.gd')) { continue; } // e.g. a singleton scene, not a script
-    try {
-      const bytes = await vscode.workspace.fs.readFile(resolveResourcePath(path));
-      functionsByGlobal.set(name, parseGdScriptFunctions(Buffer.from(bytes).toString('utf8')));
-    } catch (error) {
-      console.error(`DTL Reader: autoload "${name}" declares script "${path}" but it could not be read - its functions will be unavailable for do/if/elif autocomplete.`, error);
-    }
-  }
-
-  const scriptFiles = await vscode.workspace.findFiles('**/*.gd', '**/{.git,.godot,node_modules}/**');
-  for (const fileUri of scriptFiles) {
-    try {
-      const bytes = await vscode.workspace.fs.readFile(fileUri);
-      const text = Buffer.from(bytes).toString('utf8');
-      const classNameMatch = text.match(/^class_name\s+([A-Za-z_][A-Za-z0-9_]*)/m);
-      if (!classNameMatch) { continue; } // most scripts aren't a global class - nothing to add
-      const staticFunctions = new Map();
-      for (const [functionName, info] of parseGdScriptFunctions(text)) {
-        if (info.isStatic) { staticFunctions.set(functionName, info); }
+      let scriptPath = path;
+      let scenePath = null;
+      if (path.toLowerCase().endsWith('.tscn')) {
+        const sceneBytes = await vscode.workspace.fs.readFile(resolveResourcePath(path));
+        scenePath = path;
+        scriptPath = extractSceneRootScriptPath(Buffer.from(sceneBytes).toString('utf8'));
+        if (!scriptPath) { continue; } // root node has no (external) script - nothing to expose
       }
-      functionsByGlobal.set(classNameMatch[1], staticFunctions);
+      if (!scriptPath.toLowerCase().endsWith('.gd')) { continue; } // e.g. a binary .scn, or a C# script
+      const bytes = await vscode.workspace.fs.readFile(resolveResourcePath(scriptPath));
+      symbolsByGlobal.set(name, { ...parseGdScript(Buffer.from(bytes).toString('utf8')), scriptPath, scenePath });
     } catch (error) {
-      console.error(`DTL Reader: could not read/parse "${fileUri.fsPath}" while scanning for a class_name declaration.`, error);
+      console.error(`DTL Reader: autoload "${name}" declares "${path}" but it (or its root script) could not be read - its members will be unavailable for do/if/elif and {...} autocomplete.`, error);
     }
   }
-
-  cachedGlobalFunctions = functionsByGlobal;
+  cachedAutoloadSymbols = symbolsByGlobal;
 }
 
 
@@ -1330,6 +1969,16 @@ async function refreshCharacterMoods(characterPaths) {
 }
 
 /**
+ * Godot's own sidecar metadata files - `.import` (import settings next to
+ * every imported asset) and `.uid` (Godot 4.4+ resource UIDs next to every
+ * script/shader) - which are never valid targets for a `res://` path in a
+ * timeline, and would otherwise double or triple the path suggestions.
+ *
+ * @type {RegExp}
+ */
+const GODOT_METADATA_FILE_PATTERN = /\.(?:import|uid)$/i;
+
+/**
  * Re-list every file under the Godot project root and cache each one as a
  * `res://`-relative path, for the `[voice path="..."]` / `[background
  * arg="..."]`-style path autocomplete. No-op if project.godot hasn't been
@@ -1346,6 +1995,7 @@ async function refreshResourcePaths() {
     cachedResourcePaths = files
       .map(uri => uri.fsPath.replace(/\\/g, '/'))
       .filter(fsPath => fsPath.startsWith(rootPath))
+      .filter(fsPath => !GODOT_METADATA_FILE_PATTERN.test(fsPath))
       .map(fsPath => 'res://' + fsPath.slice(rootPath.length).replace(/^\/+/, ''));
   } catch (error) {
     console.error('DTL Reader: could not list project resource files', error);
@@ -1379,6 +2029,9 @@ function createDocumentation(entry) {
   if (entry.example) {
     markdown.appendMarkdown('**Example:**\n\n');
     markdown.appendCodeblock(entry.example,'dtl');
+  }
+  if (entry.docsUrl) {
+    markdown.appendMarkdown(`[Godot documentation](${entry.docsUrl})`);
   }
   return markdown;
 }
@@ -1916,6 +2569,12 @@ function createVariableCompletion(name, entry) {
  * one path segment at a time - typing `variable.` lists `variable`'s
  * children, mirroring how extra_data's LayeredPortrait node paths work.
  *
+ * Dialogic also resolves `{Autoload.property}` against autoloads, so the
+ * top level lists autoload names too, and `{Global.` lists that
+ * autoload's variables, constants and enums (not its functions - a `{...}`
+ * block reads a value, it doesn't call anything). A Dialogic variable
+ * group with the same name as an autoload wins, same as in Dialogic.
+ *
  * @param {string} typedPath - text typed so far inside the currently open '{'
  * @returns {vscode.CompletionItem[]}
  */
@@ -1923,6 +2582,18 @@ function createVariableSuggestions(typedPath) {
   const lastDot = typedPath.lastIndexOf('.');
   const parentSegments = lastDot === -1 ? [] : typedPath.slice(0, lastDot).split('.');
   const prefix = (lastDot === -1 ? typedPath : typedPath.slice(lastDot + 1)).toLowerCase();
+
+  if (parentSegments.length > 0 && !cachedVariablesTree.has(parentSegments[0])) {
+    const symbols = cachedAutoloadSymbols.get(parentSegments[0]);
+    if (!symbols) { return []; }
+    if (parentSegments.length === 1) {
+      return createAutoloadMemberSuggestions(parentSegments[0], symbols, prefix, { functions: false });
+    }
+    if (parentSegments.length === 2) {
+      return createEnumValueSuggestions(symbols, parentSegments[1], prefix);
+    }
+    return [];
+  }
 
   let level = cachedVariablesTree;
   for (const segment of parentSegments) {
@@ -1937,11 +2608,18 @@ function createVariableSuggestions(typedPath) {
       items.push(createVariableCompletion(name, entry));
     }
   }
+  if (parentSegments.length === 0) {
+    for (const name of cachedAutoloadSymbols.keys()) {
+      if (!cachedVariablesTree.has(name) && name.toLowerCase().startsWith(prefix)) {
+        items.push(createGlobalNameCompletion(name));
+      }
+    }
+  }
   return items;
 }
 
 // =============================================================================
-// GLOBAL SCRIPT (AUTOLOAD) FUNCTION HELPERS
+// GLOBAL SCRIPT (AUTOLOAD) HELPERS
 // =============================================================================
 
 /**
@@ -1960,86 +2638,275 @@ function isGlobalScriptExpressionLine(text) {
 }
 
 /**
- * Completion item for an autoload/global-script name itself (before its
- * `.`), e.g. `Global` in `do Global.`. Inserts a trailing `.` and
- * re-triggers suggestions, so its functions show up immediately.
+ * True when `text` ends inside a still-open `"..."` or `'...'` string
+ * literal (escaped quotes are skipped), e.g. `Global.foo("intro`.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+function endsInsideStringLiteral(text) {
+  let quote = null;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === '\\') { i++; }
+      else if (ch === quote) { quote = null; }
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    }
+  }
+  return quote !== null;
+}
+
+/**
+ * Completion item for an autoload name itself (before its `.`), e.g.
+ * `Global` in `do Global.`. Inserts a trailing `.` and re-triggers
+ * suggestions, so its members show up immediately.
  *
  * @param {string} name
  * @returns {vscode.CompletionItem}
  */
 function createGlobalNameCompletion(name) {
+  const symbols = cachedAutoloadSymbols.get(name);
   const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Class);
-  item.detail = 'Dialogic global script (autoload)';
+  item.detail = symbols && symbols.scenePath ? 'Dialogic autoload node' : 'Dialogic autoload script';
+  if (symbols) { item.documentation = createAutoloadDocumentation(name, symbols); }
   item.insertText = new vscode.SnippetString(`${name}.$0`);
-  item.command = { command: 'editor.action.triggerSuggest', title: 'Show DTL global functions' };
+  item.command = { command: 'editor.action.triggerSuggest', title: 'Show DTL autoload members' };
   return item;
 }
 
 /**
- * Completion item for a function on an autoload/global script, e.g.
- * `apply_tint` in `do Global.apply_tint()`. Its GDScript `##` doc comment
- * (if any) becomes the completion's own documentation, matching what the
- * hover shows for the same function.
+ * Completion item kind, sort group, and insert behavior for each kind of
+ * autoload member. Functions sort first, since calling one is the most
+ * common reason to reach into an autoload from a timeline.
+ */
+const AUTOLOAD_MEMBER_KINDS = {
+  function: { itemKind: vscode.CompletionItemKind.Method, sortGroup: '0' },
+  variable: { itemKind: vscode.CompletionItemKind.Field, sortGroup: '1' },
+  constant: { itemKind: vscode.CompletionItemKind.Constant, sortGroup: '2' },
+  enum: { itemKind: vscode.CompletionItemKind.Enum, sortGroup: '3' },
+};
+
+/**
+ * Completion item for one member of an autoload (function, variable,
+ * constant or enum). Its GDScript `##` doc comment (if any) becomes the
+ * completion's own documentation, matching what the hover shows. A
+ * function inserts `name(|)`; an enum inserts `Name.` and re-triggers so
+ * its values show up next.
  *
+ * @param {string} globalName
  * @param {string} name
- * @param {{params: string, returnType: string|null, doc: string}} info
+ * @param {'function'|'variable'|'constant'|'enum'} kind
+ * @param {object} info
  * @returns {vscode.CompletionItem}
  */
-function createGlobalFunctionCompletion(name, info) {
-  const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Method);
-  item.detail = `(${info.params})${info.returnType ? ' -> ' + info.returnType : ''}`;
-  item.documentation = new vscode.MarkdownString(info.doc || '_No `##` documentation comment found above this function._');
-  item.insertText = new vscode.SnippetString(`${name}($0)`);
+function createAutoloadMemberCompletion(globalName, name, kind, info) {
+  const { itemKind, sortGroup } = AUTOLOAD_MEMBER_KINDS[kind];
+  const item = new vscode.CompletionItem(name, itemKind);
+  item.detail = formatAutoloadMemberSignature(globalName, name, kind, info);
+  item.documentation = new vscode.MarkdownString(info.doc || NO_GD_DOC_MESSAGE);
+  item.sortText = `${sortGroup}_${name}`;
+  if (kind === 'function') {
+    item.insertText = new vscode.SnippetString(`${name}($0)`);
+  } else if (kind === 'enum') {
+    item.insertText = new vscode.SnippetString(`${name}.$0`);
+    item.command = { command: 'editor.action.triggerSuggest', title: 'Show DTL enum values' };
+  }
   return item;
 }
 
 /**
- * Build completions for a `do`/`if`/`elif` expression's `Global.` member
- * access: either the autoload names themselves (nothing typed yet, or a
- * partial name with no `.`), or a specific autoload's function names
- * (once `Name.` has been typed) - usable anywhere in the expression, not
- * just right after the keyword, since a condition can combine a Global
- * call with variables/operators (`if {chapter} == 1 and Global.foo()`).
+ * Build completions for the members of one autoload, filtered by the
+ * member-name prefix typed so far.
  *
- * @param {string} beforeCursor
- * @returns {vscode.CompletionItem[] | null} null if this position isn't a
- *   Global-reference spot at all, so the caller can fall through to other
- *   completion paths instead of suppressing everything.
+ * @param {string} globalName
+ * @param {GdScriptSymbols} symbols
+ * @param {string} prefix - lowercase member-name prefix typed so far
+ * @param {{functions?: boolean, values?: boolean}} [include] - which member
+ *   groups to offer: `functions` (default true) and `values` - variables,
+ *   constants and enums (default true)
+ * @returns {vscode.CompletionItem[]}
  */
-function createGlobalScriptSuggestions(beforeCursor) {
-  const memberMatch = beforeCursor.match(/([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)?$/);
-  if (memberMatch) {
-    const [, globalName, typedFunction] = memberMatch;
-    const functions = cachedAutoloadFunctions.get(globalName);
-    if (!functions) { return null; }
-    const prefix = (typedFunction || '').toLowerCase();
-    const items = [];
-    for (const [name, info] of functions) {
+function createAutoloadMemberSuggestions(globalName, symbols, prefix, include = {}) {
+  const { functions = true, values = true } = include;
+  const groups = [];
+  if (functions) { groups.push(['function', symbols.functions]); }
+  if (values) { groups.push(['variable', symbols.variables], ['constant', symbols.constants], ['enum', symbols.enums]); }
+  const items = [];
+  for (const [kind, members] of groups) {
+    for (const [name, info] of members) {
       if (name.toLowerCase().startsWith(prefix)) {
-        items.push(createGlobalFunctionCompletion(name, info));
+        items.push(createAutoloadMemberCompletion(globalName, name, kind, info));
       }
     }
-    return items;
   }
-  const nameMatch = beforeCursor.match(/(?:^|[\s(=!<>+\-*/%,])([A-Za-z_][A-Za-z0-9_]*)?$/);
-  if (nameMatch) {
-    const prefix = (nameMatch[1] || '').toLowerCase();
-    const items = [];
-    for (const name of cachedAutoloadFunctions.keys()) {
-      if (name.toLowerCase().startsWith(prefix)) {
-        items.push(createGlobalNameCompletion(name));
-      }
-    }
-    return items;
-  }
-  return null;
+  return items;
 }
 
+/**
+ * Build completions for a named enum's values, e.g. `IDLE` after
+ * `Global.State.`.
+ *
+ * @param {GdScriptSymbols} symbols
+ * @param {string} enumName
+ * @param {string} prefix - lowercase value-name prefix typed so far
+ * @returns {vscode.CompletionItem[]}
+ */
+function createEnumValueSuggestions(symbols, enumName, prefix) {
+  const enumInfo = symbols.enums.get(enumName);
+  if (!enumInfo) { return []; }
+  return enumInfo.values
+    .filter(value => value.name.toLowerCase().startsWith(prefix))
+    .map(value => {
+      const item = new vscode.CompletionItem(value.name, vscode.CompletionItemKind.EnumMember);
+      item.detail = `${enumName}.${value.name} = ${value.value}`;
+      if (value.doc) { item.documentation = new vscode.MarkdownString(value.doc); }
+      return item;
+    });
+}
 
+/**
+ * Build completions for a `do`/`if`/`elif` expression: either autoload
+ * names, a specific autoload's members (once `Name.` has been typed), or a
+ * named enum's values (once `Name.Enum.` has been typed).
+ *
+ * Kept deliberately narrow, so the list only opens where an autoload
+ * reference can actually go:
+ * - never inside a string literal, e.g. `Global.foo("intro`;
+ * - `do` only runs a method, so it offers autoload names only as its
+ *   first token, and only functions as members;
+ * - `if`/`elif` conditions can compare anything, so they offer every
+ *   member - but a bare name list is only popped open by a trigger
+ *   character (space, `(`, ...) right after the keyword or after
+ *   `and`/`or`/`not`, not after every space in the expression; typing a
+ *   letter still suggests matching names anywhere.
+ *
+ * @param {string} beforeCursor
+ * @param {string|null} triggerCharacter - the character that auto-opened
+ *   the suggest widget, or null if the person typed a word / asked
+ *   explicitly (Ctrl+Space)
+ * @returns {vscode.CompletionItem[]}
+ */
+function createGlobalScriptSuggestions(beforeCursor, triggerCharacter) {
+  const keywordMatch = beforeCursor.match(/^\s*(do|if|elif)\s+/);
+  if (!keywordMatch) { return []; }
+  const isDo = keywordMatch[1] === 'do';
+  const expression = beforeCursor.slice(keywordMatch[0].length);
+  if (endsInsideStringLiteral(expression)) { return []; }
+
+  const memberMatch = expression.match(/([A-Za-z_][A-Za-z0-9_]*)\.(?:([A-Za-z_][A-Za-z0-9_]*)\.)?([A-Za-z_][A-Za-z0-9_]*)?$/);
+  if (memberMatch) {
+    const [, globalName, enumName, typedMember] = memberMatch;
+    const symbols = cachedAutoloadSymbols.get(globalName);
+    if (!symbols) { return []; }
+    const prefix = (typedMember || '').toLowerCase();
+    if (enumName) {
+      return isDo ? [] : createEnumValueSuggestions(symbols, enumName, prefix);
+    }
+    return createAutoloadMemberSuggestions(globalName, symbols, prefix, { values: !isDo });
+  }
+
+  if (isDo && !/^[A-Za-z_][A-Za-z0-9_]*$|^$/.test(expression)) { return []; }
+  const nameMatch = expression.match(/(?:^|[\s(=!<>+\-*/%,&|])([A-Za-z_][A-Za-z0-9_]*)?$/);
+  if (!nameMatch) { return []; }
+  const typedName = nameMatch[1] || '';
+  if (triggerCharacter && typedName === '') {
+    const beforeName = expression.trimEnd();
+    if (beforeName !== '' && !/(?:\b(?:and|or|not)|&&|\|\||!)$/.test(beforeName)) { return []; }
+  }
+  const prefix = typedName.toLowerCase();
+  const items = [];
+  for (const name of cachedAutoloadSymbols.keys()) {
+    if (name.toLowerCase().startsWith(prefix)) {
+      items.push(createGlobalNameCompletion(name));
+    }
+  }
+  return items;
+}
 
 // =============================================================================
 // BALISE HELPERS
 // =============================================================================
+
+/**
+ * True when `textBeforeBracket` (a line up to a just-typed `[`) is inside
+ * player-facing text - dialogue, narration or a choice - i.e. where a
+ * Godot BBCode tag makes sense, as opposed to a standalone `[command]` line.
+ *
+ * @param {string} textBeforeBracket
+ * @returns {boolean}
+ */
+function isInPlayerFacingText(textBeforeBracket) {
+  return /^\s*-\s/.test(textBeforeBracket) || isInsideDialogueText(textBeforeBracket);
+}
+
+/**
+ * Completion item for a Godot BBCode tag, typed after `[`. Inserts the
+ * whole tag as a snippet - `b]|[/b]` for a paired tag, `br]` for a
+ * self-closing one, or the entry's own `snippet` for tags taking a value
+ * (`color=red]|[/color]`) - with the cursor landing between the tags.
+ *
+ * @param {object} entry - one of DTL_BBCODES
+ * @param {vscode.Range} range - the tag name typed so far, plus an
+ *   auto-closed `]` right after the cursor if there is one
+ * @returns {vscode.CompletionItem}
+ */
+function createBbcodeCompletion(entry, range) {
+  const item = new vscode.CompletionItem(entry.name, vscode.CompletionItemKind.Keyword);
+  item.detail = `Godot BBCode - ${entry.syntax}`;
+  item.documentation = createDocumentation(entry);
+  item.sortText = `1_${entry.name}`;
+  item.insertText = new vscode.SnippetString(
+    entry.snippet || (entry.selfClosing ? `${entry.name}]` : `${entry.name}]$0[/${entry.name}]`)
+  );
+  item.range = range;
+  return item;
+}
+
+/**
+ * Build completions for a closing tag being typed (`[/`), offering the
+ * tags still open earlier on the line - innermost first, so the tag that
+ * should be closed next is the default pick.
+ *
+ * @param {string} textBeforeTag - the line up to the `[/` being typed
+ * @param {string} prefix - tag name typed so far after `[/`
+ * @param {string} line - the full line
+ * @param {vscode.Position} position
+ * @returns {vscode.CompletionItem[]}
+ */
+function createClosingTagSuggestions(textBeforeTag, prefix, line, position) {
+  const openTags = [];
+  const tagPattern = /\[(\/)?([A-Za-z_][A-Za-z0-9_]*)(?:[=\s][^\]]*)?\]/g;
+  let match;
+  while ((match = tagPattern.exec(textBeforeTag)) !== null) {
+    const [, isClosing, name] = match;
+    if (RESERVED_BRACKET_NAMES.has(name) || SELF_CLOSING_BBCODE_NAMES.has(name)) { continue; }
+    if (!isClosing) {
+      openTags.push(name);
+    } else {
+      const openIndex = openTags.lastIndexOf(name);
+      if (openIndex !== -1) { openTags.splice(openIndex, 1); }
+    }
+  }
+  const nameStart = position.character - prefix.length;
+  const replaceEnd = line[position.character] === ']' ? position.character + 1 : position.character;
+  const range = new vscode.Range(position.line, nameStart, position.line, replaceEnd);
+  const seen = new Set();
+  const items = [];
+  openTags.reverse().forEach((name, index) => {
+    if (seen.has(name) || !name.toLowerCase().startsWith(prefix.toLowerCase())) { return; }
+    seen.add(name);
+    const item = new vscode.CompletionItem(`/${name}`, vscode.CompletionItemKind.Keyword);
+    item.detail = `Close [${name}]`;
+    item.filterText = name;
+    item.insertText = `${name}]`;
+    item.range = range;
+    item.sortText = String(index).padStart(3, '0');
+    items.push(item);
+  });
+  return items;
+}
 
 
 /**
@@ -2069,8 +2936,8 @@ function findUnclosedBaliseDiagnostics(document) {
     let match;
     while ((match = openTagPattern.exec(text)) !== null) {
       const tagName = match[1];
-      if (RESERVED_BRACKET_NAMES.has(tagName)) {
-        continue;
+      if (RESERVED_BRACKET_NAMES.has(tagName) || SELF_CLOSING_BBCODE_NAMES.has(tagName)) {
+        continue; // a DTL command, or a BBCode tag like [br] that never has a closer
       }
 
       const closingTag = `[/${tagName}]`;
@@ -2144,13 +3011,19 @@ function activate(context) {
   moodWatcher.onDidDelete(refreshProjectGodotData);
   context.subscriptions.push(moodWatcher);
   // Autoload scripts (declared in project.godot's [autoload] section) feed
-  // the do/if/elif Global.function() autocomplete and hover - same
-  // full-refresh-on-any-change approach as the .dch/.tscn watcher above.
+  // the do/if/elif Global.member autocomplete and hover - same
+  // full-refresh-on-any-change approach as the .dch/.tscn watcher above
+  // (which also covers autoload nodes, i.e. autoloads pointing at a scene).
   const scriptWatcher = vscode.workspace.createFileSystemWatcher('**/*.gd');
   scriptWatcher.onDidChange(refreshProjectGodotData);
   scriptWatcher.onDidCreate(refreshProjectGodotData);
   scriptWatcher.onDidDelete(refreshProjectGodotData);
   context.subscriptions.push(scriptWatcher);
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration(event => {
+      if (event.affectsConfiguration('dtlReader.includeAddonAutoloads')) { refreshProjectGodotData(); }
+    })
+  );
   // ===========================================================================
   // HOVER PROVIDER
   // ===========================================================================
@@ -2166,9 +3039,11 @@ function activate(context) {
           // [wait]
           // [audio]
           // [voice]
+          // [b] ... [/b]   <- Godot BBCode tags, opening or closing
           // -------------------------------------------------------------------
+          const isCharacterCommandLine = /^\s*(?:join|update|leave)\b/.test(line);
           const bracketRegex =
-            /\[([A-Za-z_][A-Za-z0-9_]*)/g;
+            /\[\/?([A-Za-z_][A-Za-z0-9_]*)/g;
           let match;
           while (
             (match = bracketRegex.exec(line)) !== null
@@ -2181,11 +3056,14 @@ function activate(context) {
               position.character <= end
             ) {
               const commandName = match[1];
+              // join/update/leave's own [options] bracket holds attribute
+              // names (e.g. "[fade=..."), never BBCode, so a same-named
+              // BBCode tag (like [fade]) mustn't shadow them there.
               const entry =
                 DTL_ENTRIES.find(
                   entry =>
                     entry.name === commandName
-                );
+                ) || (isCharacterCommandLine ? undefined : DTL_BBCODES.find(entry => entry.name === commandName));
               if (!entry) {
                 // Not a real bracket command - this is just an attribute
                 // name that happens to sit directly against '[' (e.g.
@@ -2221,9 +3099,7 @@ function activate(context) {
               const beforeParam = line.substring(0, paramWordRange.start.character);
               const enclosingBracketMatch = beforeParam.match(/\[([A-Za-z_][A-Za-z0-9_]*)\s+[^\]]*$/);
               if (enclosingBracketMatch) {
-                const enclosingEntry = DTL_ENTRIES.find(
-                  candidate => candidate.name === enclosingBracketMatch[1] && candidate.type === 'bracket'
-                );
+                const enclosingEntry = findBracketOrBbcodeEntry(enclosingBracketMatch[1]);
                 if (enclosingEntry && enclosingEntry.variables && enclosingEntry.variables[paramName]) {
                   const markdown = new vscode.MarkdownString();
                   markdown.appendMarkdown(`**${paramName}** _(parameter of \`[${enclosingEntry.name}]\`)_\n\n`);
@@ -2306,17 +3182,14 @@ function activate(context) {
             }
           }
           // -------------------------------------------------------------------
-          // Global script functions
+          // Autoload scripts / nodes and their members
           //
-          // do Global.apply_tint()      if Global.has_achievement("x")
-          //           ^^^^^^^^^^                 ^^^^^^^^^^^^^^^^ hovering either
+          // do Global.apply_tint()      if Global.state == Global.State.IDLE
+          //    ^^^^^^ ^^^^^^^^^^           {Global.max_hp}       ^^^^ hovering any part
           // -------------------------------------------------------------------
-          const globalFunctionHit = findGlobalFunctionCallAtPosition(document, position);
-          if (globalFunctionHit) {
-            return new vscode.Hover(
-              createGlobalFunctionDocumentation(globalFunctionHit.globalName, globalFunctionHit.functionName, globalFunctionHit.info),
-              globalFunctionHit.range
-            );
+          const autoloadHit = findAutoloadReferenceAtPosition(document, position);
+          if (autoloadHit) {
+            return new vscode.Hover(autoloadHit.markdown, autoloadHit.range);
           }
           // -------------------------------------------------------------------
           // Normal commands
@@ -2411,10 +3284,19 @@ function activate(context) {
   const completionProvider =
     vscode.languages.registerCompletionItemProvider('dtl',
       {
-        provideCompletionItems(document, position) {
+        provideCompletionItems(document, position, token, context) {
           const line = document.lineAt(position.line).text;
           const beforeCursor = line.substring(0,position.character);
           const items = [];
+          // The character that auto-opened the suggest widget (one of the
+          // trigger characters registered below), or null when the person
+          // is typing a word or asked explicitly with Ctrl+Space. Contexts
+          // that only make sense for a specific trigger (e.g. '.' after an
+          // autoload name) check this, so e.g. a '.' ending a dialogue
+          // sentence doesn't pop up a list of every word in the file.
+          const triggerCharacter = context && context.triggerKind === vscode.CompletionTriggerKind.TriggerCharacter
+            ? context.triggerCharacter
+            : null;
           // ===================================================================
           // VARIABLE PATH: "{variable.te" anywhere - dialogue text, a
           // bracket option's value, or a bare "set {...}" line. Checked
@@ -2427,17 +3309,17 @@ function activate(context) {
             return createVariableSuggestions(beforeCursor.slice(openBraceIndex + 1));
           }
           // ===================================================================
-          // GLOBAL SCRIPT FUNCTIONS: "do Global." / "if Global." /
-          // "elif Global." - either the autoload name itself, or a function
-          // name once "Name." has been typed. Usable anywhere in the
-          // expression (not just right after the keyword), since if/elif
-          // conditions can combine a Global call with variables/operators.
+          // AUTOLOADS: "do Global." / "if Global." / "elif Global." -
+          // either the autoload name itself, or a member once "Name." has
+          // been typed. Usable anywhere in the expression (not just right
+          // after the keyword), since if/elif conditions can combine an
+          // autoload reference with variables/operators. Always returns
+          // here (even an empty list) - nothing else below applies to an
+          // expression line, and falling through used to dump every
+          // character name and dialogue word into the list instead.
           // ===================================================================
           if (isGlobalScriptExpressionLine(beforeCursor)) {
-            const globalItems = createGlobalScriptSuggestions(beforeCursor);
-            if (globalItems !== null) {
-              return globalItems;
-            }
+            return createGlobalScriptSuggestions(beforeCursor, triggerCharacter);
           }
           // ===================================================================
           // MOOD TAG: "John (happy" or "join John (happy" - checked first
@@ -2607,7 +3489,14 @@ function activate(context) {
           }
           // =========================================================================
           // BRACKET COMMANDS
+          // Godot BBCode tags are offered too, but only inside player-facing
+          // text (dialogue, narration, choices) - on a standalone "[" line
+          // it can only be a DTL command.
           // =========================================================================
+          const closingTagMatch = beforeCursor.match(/\[\/([A-Za-z_][A-Za-z0-9_]*)?$/);
+          if (closingTagMatch) {
+            return createClosingTagSuggestions(beforeCursor.slice(0, closingTagMatch.index), closingTagMatch[1] || '', line, position);
+          }
           const bracketMatch = beforeCursor.match(/\[([A-Za-z_][A-Za-z0-9_]*)?$/);
           if (bracketMatch) {
             const prefix = bracketMatch[1] || '';
@@ -2621,7 +3510,20 @@ function activate(context) {
                 continue;
               }
               const item = createCommandCompletion(entry);
+              item.sortText = `0_${entry.name}`;
               items.push(item);
+            }
+            if (isInPlayerFacingText(beforeCursor.slice(0, bracketMatch.index))) {
+              // Replace an auto-closed "]" right after the cursor, since
+              // the BBCode snippet brings its own.
+              const nameStart = bracketMatch.index + 1;
+              const replaceEnd = line[position.character] === ']' ? position.character + 1 : position.character;
+              const range = new vscode.Range(position.line, nameStart, position.line, replaceEnd);
+              for (const entry of DTL_BBCODES) {
+                if (entry.name.startsWith(prefix)) {
+                  items.push(createBbcodeCompletion(entry, range));
+                }
+              }
             }
             return items;
           }
@@ -2633,9 +3535,7 @@ function activate(context) {
             const bracketContent = beforeCursor.slice(openBracketIndex + 1);
             const commandNameMatch = bracketContent.match(/^([A-Za-z_][A-Za-z0-9_]*)\s/);
             if (commandNameMatch) {
-              const bracketEntry = DTL_ENTRIES.find(
-                candidate => candidate.name === commandNameMatch[1] && candidate.type === 'bracket'
-              );
+              const bracketEntry = findBracketOrBbcodeEntry(commandNameMatch[1]);
               if (bracketEntry && bracketEntry.variables) {
                 const afterCommandName = bracketContent.slice(commandNameMatch[0].length);
                 const currentToken = getCurrentBracketToken(afterCommandName);
@@ -2754,15 +3654,21 @@ function activate(context) {
           }
           // =========================================================================
           // DIALOGUE TEXT (word-based suggestions, VS Code "txt" style)
+          // Only while a word is being typed: a trigger character here
+          // (a '.' or ' ' ending a sentence, a "'" in "don't", ...) isn't
+          // the start of anything worth suggesting.
           // =========================================================================
           if (isInsideDialogueText(beforeCursor)) {
-            return createWordSuggestions(document, beforeCursor);
+            return triggerCharacter ? [] : createWordSuggestions(document, beforeCursor);
           }
           /// Fall back
+          if (triggerCharacter) {
+            return [];
+          }
           for (const name of cachedCharacterNames) {
             items.push(createCharacterCompletion(name));
           }
-          items.push(createWordSuggestions(document, beforeCursor));
+          items.push(...createWordSuggestions(document, beforeCursor));
           return items;
           }
         }

@@ -28,6 +28,11 @@ Suggestions are available where they are useful, including:
 - Godot `res://` and `user://` paths
 - Layered Portrait `extra_data`
 - Labels and jump targets
+- Dialogic variables inside `{}`
+- Autoload scripts and autoload nodes (scenes) after `do`, `if` and `elif`, and inside `{}`: their functions, variables, constants and enums, with their `##` documentation comments
+- Every Godot BBCode tag (`[b]`, `[color=...]`, `[wave]`, `[br]`...) inside dialogue, narration and choices, plus the matching closing tag after `[/`
+
+Autoloads declared by addons (under `res://addons/`, like Dialogic's own `Dialogic` singleton) are hidden by default. Turn on the `dtlReader.includeAddonAutoloads` setting to show them.
 
 ![DTL autocomplete](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/demo_autocomplete.gif)
 
