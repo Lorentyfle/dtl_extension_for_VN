@@ -315,7 +315,7 @@ label ending
 
 ## Contributing
 
-Issues and pull requests are welcome at the [GitHub repository](https://github.com/Lorentyfle/dtl_extension_for_VN). The `test-room/` folder is a small fake Godot project with a timeline touching every feature - open it as a workspace to try everything (see its `README.md`).
+Issues and pull requests are welcome at the [GitHub repository](https://github.com/Lorentyfle/dtl_extension_for_VN). The `test-room/` folder is a small fake Godot project with a timeline touching every feature - open it as a workspace to try everything (see its `README.md`). `npm test` runs the automated tests in VS Code on a copy of it (see [`test/README.md`](test/README.md)).
 
 ## Credits
 

@@ -686,5 +686,8 @@
   },
   "devDependencies": {
     "@vscode/vsce": "^3.9.2"
+  },
+  "scripts": {
+    "test": "node test/run.js"
   }
 }

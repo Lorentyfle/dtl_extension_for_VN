@@ -7133,6 +7133,7 @@ function parseCustomEventScript(text, resPath) {
   const symbols = parseGdScript(text);
   const variables = {};
   const values = {};
+  const defaults = {};
   const header = text.match(/func\s+get_shortcode_parameters\s*\([^)]*\)[^:\n]*:/);
   const openIndex = header ? text.indexOf('{', header.index + header[0].length) : -1;
   const body = openIndex === -1 ? null : extractBalancedBraces(text, openIndex);
@@ -7145,18 +7146,21 @@ function parseCustomEventScript(text, resPath) {
     const type = info && info.type ? info.type : '';
     const details = [type && `\`${type}\``, defaultValue && `default \`${defaultValue}\``].filter(Boolean).join(', ');
     variables[key] = `${doc || `Sets \`${property}\`.`}${details ? ` (${details})` : ''}`;
+    defaults[key] = defaultValue;
     const suggested = [...parameter.matchAll(/["']value["']\s*:\s*([^,}\n]+)/g)].map(match => match[1].trim().replace(/^["']|["']$/g, ''));
     if (suggested.length > 0) { values[key] = suggested; }
     else if (type === 'bool' || /^(?:true|false)$/.test(defaultValue) || (info && /^(?:true|false)$/.test(info.defaultValue || ''))) { values[key] = ['true', 'false']; }
   }
   const firstParameter = Object.keys(variables)[0];
+  // The example sets the first parameter to a suggested value, else its default.
+  const exampleValue = firstParameter && (values[firstParameter] ? values[firstParameter][0] : (defaults[firstParameter] || '""'));
   return {
     entry: {
       name: shortcode,
       type: 'bracket',
       syntax: `[${shortcode} ...]`,
       description: `${eventName !== shortcode ? `${eventName}: ` : ''}${description || 'A custom Dialogic event.'}\n\n_Custom event, from \`${resPath}\`._`,
-      example: firstParameter ? `[${shortcode} ${firstParameter}=${values[firstParameter] ? values[firstParameter][0] : '""'}]` : `[${shortcode}]`,
+      example: firstParameter ? `[${shortcode} ${firstParameter}=${exampleValue}]` : `[${shortcode}]`,
       variables,
       custom: true,
     },
