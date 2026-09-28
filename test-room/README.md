@@ -100,8 +100,10 @@ every DTL Reader feature without risking real project data.
 - **Autoload colors in `{}`**: `{Global.hearts}` should be colored like
   `Global.hearts` on an `if` line; `{variable.test}` should not change.
 - **Outline**: open the Outline view - `loop_start` should list the
-  `while` block and both choices with their jumps. Setting
-  `dtlReader.outline.showFlow` to false leaves only the labels.
+  `while` block and both choices with their jumps, `jump loop_start`
+  saying "back to line 69". Set `DTL Reader > Outline: Style` to
+  `indentation` (no jumps, labels not grouping) or `dialogic` (labels
+  only), then edit the file or reopen it to refresh the Outline view.
 - **Cross-timeline jumps**: Ctrl+click `chapter2` or `intro` in
   `jump chapter2/intro` - it should open `chapter2.dtl`. Type
   `jump chapter2/` - `intro` and `Ending With Spaces` should be suggested.

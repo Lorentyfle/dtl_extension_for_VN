@@ -1,4 +1,10 @@
 # Changelog
+## [1.1.0]
+- New setting `dtlReader.outline.style` to choose how the Outline view, breadcrumbs and Go to Symbol show a timeline:
+    - `flow` (default): the flow of time. Each label is a section with its `if`/`elif`/`else`/`while` blocks and choices nested by indentation, and every `jump`/`return`/`[end_timeline]` says where it leads: back to an earlier line (a loop), ahead, to another timeline, or a runtime `{variable}` target. A label indented inside a choice or condition now stays inside it.
+    - `indentation`: the timeline's structure by indentation only. Labels, blocks and choices are nested under the block they're indented in, and labels are plain entries rather than sections. No jumps.
+    - `dialogic`: only the labels, like Dialogic organizes a timeline.
+- `dtlReader.outline.showFlow` is replaced by `outline.style` (turning it off still gives the `dialogic` style if no style is chosen).
 ## [1.0.10]
 - `.dch` files now use the same Dialogic icon as `.dtl` files.
 - Settings (File > Preferences > Settings > Extensions > DTL Reader), in 4 sections:

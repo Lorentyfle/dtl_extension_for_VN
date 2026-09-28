@@ -2,7 +2,7 @@
   "name": "dtl-reader",
   "displayName": "DTL Reader",
   "description": "Syntax highlighting for Dialogic2 TimeLine (.dtl) files",
-  "version": "1.0.10",
+  "version": "1.1.0",
   "publisher": "lorentyfle",
   "icon": "./icons/favicon.png",
   "engines": {
@@ -160,11 +160,28 @@
             "description": "Also suggest autoloads declared by addons (scripts or scenes under res://addons/, e.g. Dialogic's own \"Dialogic\" singleton) in do/if/elif and {...} autocomplete. Off by default, since addon autoloads usually expose hundreds of members that are not meant to be used from a timeline.",
             "order": 1
           },
+          "dtlReader.outline.style": {
+            "type": "string",
+            "enum": [
+              "flow",
+              "indentation",
+              "dialogic"
+            ],
+            "enumDescriptions": [
+              "Flow of time: each label as a section, with its if/elif/else/while blocks and choices nested by indentation, and every jump/return/end_timeline saying where it leads (back, ahead, another timeline).",
+              "Indentation: the timeline's structure by indentation only - labels, if/elif/else/while blocks and choices, each nested under the block it is indented in. No jumps.",
+              "Dialogic: only the labels, like Dialogic organizes a timeline."
+            ],
+            "default": "flow",
+            "order": 2,
+            "markdownDescription": "How the Outline view, breadcrumbs and Go to Symbol (`Ctrl+Shift+O`) show a timeline."
+          },
           "dtlReader.outline.showFlow": {
             "type": "boolean",
             "default": true,
             "description": "In the Outline view, list each label's flow (if/elif/else/while blocks, choices, jump/return/end_timeline), nested by indentation. When off, the outline only lists the labels.",
-            "order": 2
+            "order": 99,
+            "markdownDeprecationMessage": "Replaced by `#dtlReader.outline.style#` (`dialogic` = labels only)."
           }
         }
       },
