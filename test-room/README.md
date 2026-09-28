@@ -222,7 +222,8 @@ every DTL Reader feature without risking real project data.
   list the project's characters). Typing the same words inside dialogue
   suggests nothing.
 - **Play in Godot**: the play button at the top right of a timeline runs
-  it in Godot, like Dialogic's own play button. This test room has no
+  it in Godot, like Dialogic's own play button; Ctrl+Shift+F6 (or
+  Alt+click on it) plays from the cursor's line. This test room has no
   Dialogic addon, so it only says the test scene is missing - try it in a
   real project (set `dtlReader.godotPath` if `godot` isn't on your PATH).
 - **Quoted character names**: on a blank line type `join "John` - `John

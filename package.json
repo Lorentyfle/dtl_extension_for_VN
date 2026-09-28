@@ -159,6 +159,12 @@
         "title": "Play Timeline in Godot",
         "category": "DTL",
         "icon": "$(play)"
+      },
+      {
+        "command": "dtlReader.playTimelineFromLine",
+        "title": "Play Timeline from This Line",
+        "category": "DTL",
+        "icon": "$(debug-start)"
       }
     ],
     "menus": {
@@ -180,6 +186,10 @@
         },
         {
           "command": "dtlReader.playTimeline",
+          "when": "editorLangId == dtl"
+        },
+        {
+          "command": "dtlReader.playTimelineFromLine",
           "when": "editorLangId == dtl"
         }
       ],
@@ -203,13 +213,19 @@
           "command": "dtlReader.playTimeline",
           "when": "editorLangId == dtl",
           "group": "dtl@3"
+        },
+        {
+          "command": "dtlReader.playTimelineFromLine",
+          "when": "editorLangId == dtl",
+          "group": "dtl@4"
         }
       ],
       "editor/title": [
         {
           "command": "dtlReader.playTimeline",
           "when": "resourceLangId == dtl && config.dtlReader.playButton",
-          "group": "navigation"
+          "group": "navigation",
+          "alt": "dtlReader.playTimelineFromLine"
         },
         {
           "command": "dtlReader.openTranslationView",
@@ -658,7 +674,15 @@
       "[dtl-translation]": {
         "editor.wordWrap": "on"
       }
-    }
+    },
+    "keybindings": [
+      {
+        "command": "dtlReader.playTimelineFromLine",
+        "key": "ctrl+shift+f6",
+        "mac": "cmd+shift+f6",
+        "when": "editorTextFocus && editorLangId == dtl"
+      }
+    ]
   },
   "devDependencies": {
     "@vscode/vsce": "^3.9.2"

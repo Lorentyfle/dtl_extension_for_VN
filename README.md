@@ -34,7 +34,7 @@ Write your Dialogic timelines outside the Godot editor with syntax highlighting,
 | **Hover documentation** | Events and their parameters, text effects, BBCode tags, glossary words, characters (with their translated names), moods, LayeredPortrait layers, variables, autoload members, labels |
 | **Navigation** | Ctrl+Click on a `jump`, a character, a mood, a `res://` path, an autoload member or a glossary word; Go to Symbol in Workspace (Ctrl+T) for labels, timelines and characters; Find All References and Rename for labels, jump counts above labels, Outline view in three styles |
 | **Error checking** | Missing labels and timelines, unknown characters, moods and variables, unclosed BBCode tags, events that never run, unused characters and portraits - each one configurable, most with a quick fix |
-| **Play in Godot** | Run the timeline in your game with one click, like Dialogic's own play button |
+| **Play in Godot** | Run the timeline in your game with one click - or from the cursor's line - like Dialogic's own play buttons |
 | **BBCode preview** | `[color]`, `[rainbow]`, `[fade]`, `[b][i]`... show their effect right in the editor, in any combination |
 | **Translation** | Translations next to the original text, a side-by-side Translation View for one or several languages, written into Dialogic's CSV |
 | **Character files** | `.dch` highlighting, autocomplete of every key and value Dialogic uses, color picker, portraits suggested from your timelines |
@@ -244,6 +244,8 @@ Dialogic character files get their own support:
 
 The **play** button at the top right of a timeline (or **DTL: Play Timeline in Godot**, also in the right-click menu) runs it in your game, the way Dialogic's own play button does: the timeline is saved, set as the one to play in Dialogic's editor settings, and Godot starts Dialogic's test scene on it. Godot's output goes to the **DTL Reader: Godot** output panel.
 
+**Play from this line** - **Ctrl+Shift+F6** (Cmd+Shift+F6 on macOS), Alt+click on the play button, or **DTL: Play Timeline from This Line** in the right-click menu - starts the timeline at the event of the cursor's line, like Dialogic's own "Play from here": the events above are skipped, to test a condition or a variable change without replaying the whole timeline.
+
 It uses the Godot executable set in `dtlReader.godotPath`, else the one of the [godot-tools](https://marketplace.visualstudio.com/items?itemName=geequlim.godot-tools) extension, else `godot` from the PATH. `dtlReader.playButton` hides the button.
 
 ## Themes
@@ -287,6 +289,7 @@ From the Command Palette (Ctrl+Shift+P):
 | **DTL: Go to Next Untranslated Line** | Jump to the next line to translate |
 | **DTL: Select Translation Language** | Choose (or turn off) the translation mode language |
 | **DTL: Play Timeline in Godot** | Run the current timeline in Godot, with Dialogic's test scene |
+| **DTL: Play Timeline from This Line** | The same, starting at the cursor's line (Ctrl+Shift+F6) |
 
 ## Getting started
 

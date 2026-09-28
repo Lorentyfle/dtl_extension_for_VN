@@ -7474,6 +7474,57 @@ function setConfigFileValues(text, section, values) {
 }
 
 /**
+ * The index of the Dialogic event each line of a timeline belongs to - the
+ * `play_from_index` Dialogic's own "Play from here" uses. Mirrors
+ * DialogicTimeline.process(): every non-empty line is an event (comments
+ * included), a text line ending with `\` and a `[shortcode` not closed by
+ * `]` go on over the next lines, and Dialogic inserts an invisible "end
+ * branch" event after each if/elif/else/choice block - when the
+ * indentation goes back, and after a block left empty. An empty line
+ * belongs to the event after it.
+ *
+ * @param {string[]} lines
+ * @returns {number[]} event index, by line
+ */
+function computeDialogicEventIndices(lines) {
+  const indices = [];
+  let count = 0;
+  let previousIndent = '';
+  let indentFormat = '';
+  let previousWasOpener = false;
+  const stripLeft = text => text.replace(/^[\x00-\x20]+/, ''); // Godot's strip_edges(true, false)
+  for (let line = 0; line < lines.length; line++) {
+    indices[line] = count;
+    const stripped = stripLeft(lines[line]);
+    if (stripped === '') { continue; }
+    const indent = lines[line].slice(0, lines[line].length - stripped.length);
+    if (indent && !indentFormat) { indentFormat = indent; }
+    if (indent.length < previousIndent.length && indentFormat) {
+      count += Math.floor(previousIndent.length / indentFormat.length) - Math.floor(indent.length / indentFormat.length);
+    }
+    if (previousWasOpener && indent.length <= previousIndent.length) { count++; }
+    previousIndent = indent;
+    // An event may continue over the next lines (until an empty line).
+    const isShortcode = /^\[[A-Za-z_]/.test(stripped);
+    // Dialogic's condition event: "if"/"elif" alone or followed by a space, or anything starting with "else".
+    const isCondition = /^(?:(?:if|elif)(?: |$)|else)/.test(stripped);
+    const isText = !isShortcode && !isCondition && !/^(?:#|-|label |jump |return\b|join |leave |update |set |do |audio )/.test(stripped);
+    let content = stripped;
+    const isFull = () => (isShortcode ? content.split('#id:')[0].trim().endsWith(']') : !(isText && content.endsWith('\\')));
+    while (!isFull() && line + 1 < lines.length) {
+      line++;
+      indices[line] = count; // the empty line ending it included, like Dialogic
+      const next = stripLeft(lines[line]);
+      if (next === '') { break; }
+      content += '\n' + next;
+    }
+    count++;
+    previousWasOpener = isCondition || stripped.startsWith('-');
+  }
+  return indices;
+}
+
+/**
  * The Godot executable: `dtlReader.godotPath`, else the godot-tools
  * extension's `godotTools.editorPath.godot4`, else `godot` on the PATH.
  *
@@ -7496,7 +7547,37 @@ function findGodotExecutable() {
 async function playTimelineCommand(uri) {
   const target = uri || (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri);
   if (!target) { return; }
-  const document = await vscode.workspace.openTextDocument(target);
+  await playTimeline(await vscode.workspace.openTextDocument(target), -1);
+}
+
+/**
+ * DTL: Play Timeline from This Line - like Dialogic's "Play from here":
+ * the timeline starts at the event of the cursor's line, skipping the
+ * events above it - to test a condition or a variable change without
+ * replaying the whole timeline first.
+ *
+ * @param {vscode.Uri} [uri] - from a menu; else the active editor
+ */
+async function playTimelineFromLineCommand(uri) {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || (uri && editor.document.uri.toString() !== uri.toString())) {
+    vscode.window.showErrorMessage('Put the cursor on the line to play from, in the timeline.');
+    return;
+  }
+  const line = editor.selection.active.line;
+  const index = computeDialogicEventIndices(documentLines(editor.document))[line];
+  await playTimeline(editor.document, index, line);
+}
+
+/**
+ * Save a timeline, point Dialogic's test scene at it (from event
+ * `fromIndex`, -1 for the start), and run the project's Godot on that scene.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {number} fromIndex
+ * @param {number} [fromLine] - shown in the output
+ */
+async function playTimeline(document, fromIndex, fromLine) {
   if (document.languageId !== 'dtl') { vscode.window.showErrorMessage('Only a timeline (.dtl) can be played.'); return; }
   if (!projectRootUri) { vscode.window.showErrorMessage('Playing a timeline needs its Godot project: open the folder containing project.godot.'); return; }
   const resPath = toResPath(document.uri);
@@ -7513,7 +7594,7 @@ async function playTimelineCommand(uri) {
   try {
     fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
     const current = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile, 'utf8') : '';
-    fs.writeFileSync(settingsFile, setConfigFileValues(current, 'DES', { current_timeline_path: godotString(resPath), play_from_index: '-1' }));
+    fs.writeFileSync(settingsFile, setConfigFileValues(current, 'DES', { current_timeline_path: godotString(resPath), play_from_index: String(fromIndex) }));
   } catch (error) {
     vscode.window.showErrorMessage(`Could not write Dialogic's editor settings (${settingsFile}): ${error.message}`);
     return;
@@ -7522,7 +7603,8 @@ async function playTimelineCommand(uri) {
   if (!godotOutputChannel) { godotOutputChannel = vscode.window.createOutputChannel('DTL Reader: Godot'); }
   const executable = findGodotExecutable();
   const args = ['--path', projectRootUri.fsPath, scene];
-  godotOutputChannel.appendLine(`> ${executable} ${args.join(' ')}   (${resPath})`);
+  const from = fromIndex < 0 ? '' : `, from line ${fromLine + 1} (event ${fromIndex})`;
+  godotOutputChannel.appendLine(`> ${executable} ${args.join(' ')}   (${resPath}${from})`);
   const child = require('child_process').spawn(executable, args, { cwd: projectRootUri.fsPath });
   child.stdout.on('data', data => godotOutputChannel.append(data.toString()));
   child.stderr.on('data', data => godotOutputChannel.append(data.toString()));
@@ -9111,6 +9193,7 @@ function activate(context) {
     vscode.commands.registerCommand('dtlReader.saveAndRefresh', saveAndRefreshCommand),
     vscode.commands.registerCommand('dtlReader.addCharacter', addCharacterCommand),
     vscode.commands.registerCommand('dtlReader.playTimeline', playTimelineCommand),
+    vscode.commands.registerCommand('dtlReader.playTimelineFromLine', playTimelineFromLineCommand),
     { dispose: () => { if (godotOutputChannel) { godotOutputChannel.dispose(); } } }
   );
   context.subscriptions.push(
@@ -9617,7 +9700,7 @@ function activate(context) {
   context.subscriptions.push(completionProvider);
   // Internals the test suite checks directly (`extension.exports`) - not an
   // API for other extensions.
-  return { forTests: { rankCharacterFolders, godotUserDataDir, setConfigFileValues, parseCustomEventScript, findGodotExecutable, scriptStrings: () => cachedScriptStrings, refreshScriptStrings, resourcePaths: () => cachedResourcePaths } };
+  return { forTests: { rankCharacterFolders, godotUserDataDir, setConfigFileValues, parseCustomEventScript, findGodotExecutable, computeDialogicEventIndices, scriptStrings: () => cachedScriptStrings, refreshScriptStrings, resourcePaths: () => cachedResourcePaths } };
 }
 // =============================================================================
 // DEACTIVATE
