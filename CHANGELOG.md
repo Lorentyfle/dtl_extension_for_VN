@@ -1,4 +1,13 @@
 # Changelog
+## [1.0.9]
+- Bug: a label's translation id (`label choice A1 #id:cc3`) was read as part of its name, so `jump` suggested and inserted `choice A1 #id:cc3`. Like Dialogic, everything from `#id:` on is now ignored in a label, and colored as a translation id.
+- A `jump` with a `#id:` is now an error: a jump isn't translatable, so Dialogic doesn't cut the id off and would look for a label named `choice A1 #id:cc3`.
+- Support for Dialogic character files (`.dch`), as their own "Dialogic Character" language:
+    - Syntax highlighting.
+    - Autocomplete of the keys that make sense where the cursor is: the character's keys (`display_name`, `nicknames`, `color`, `default_portrait`, `portraits`...), a portrait's keys (`scene`, `export_overrides`, `scale`, `offset`, `mirror`, `ignore_char_scale`), and in `export_overrides` the `image` of the default portrait plus the `@export` variables of the portrait scene's script. Keys already set are not suggested again.
+    - Autocomplete of values: the file's portraits for `default_portrait`, `.tscn` scenes for `scene`, images for `image` (written as Dialogic expects, `"\"res://...\""`), `true`/`false`, and default `Color(...)`/`Vector2(...)` values.
+    - Hover documentation for every key, and for a portrait name (same as hovering the mood in a timeline).
+    - Errors for a `default_portrait` that isn't one of the portraits, and a portrait `scene` that doesn't exist in the project.
 ## [1.0.8]
 - Outline for `.dtl` files (Outline view, breadcrumbs, sticky scroll, Ctrl+Shift+O): one entry per `label`, with its display name or `##` documentation next to it. Each label also lists its flow, nested like the timeline: `if`/`elif`/`else`/`while` blocks, choices, and `jump`/`return`/`[end_timeline]`. The new `dtlReader.outline.showFlow` setting turns that off to only list the labels.
 - Jumps to another timeline, `jump Timeline/label` and `jump Timeline/` (its start), as Dialogic allows. Timelines come from project.godot's `directories/dtl_directory`:

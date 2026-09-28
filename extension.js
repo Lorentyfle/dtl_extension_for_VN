@@ -1146,6 +1146,9 @@ function createPathSuggestions(typedValue, position, extensions, options = {}) {
 /** Character names found in project.godot. @type {string[]} */
 let cachedCharacterNames = [];
 
+/** Character name -> `res://` `.dch` path, from project.godot. @type {Map<string, string>} */
+let cachedCharacterPaths = new Map();
+
 /** Audio channel/kind names found in project.godot's audio/channel_defaults. @type {string[]} */
 let cachedAudioChannels = [];
 
@@ -1626,6 +1629,8 @@ function parseGdScript(text) {
   const lines = text.split(/\r?\n/);
   let pendingDocLines = [];
   let seenMember = false;
+  // An `@export...` annotation, possibly on its own line above the var.
+  let pendingExport = false;
   const takeDoc = () => {
     const doc = pendingDocLines.join('\n').trim();
     pendingDocLines = [];
@@ -1658,9 +1663,12 @@ function parseGdScript(text) {
     let code = stripGdComment(rawLine).trim();
     let annotationMatch;
     while ((annotationMatch = code.match(/^@[A-Za-z_][A-Za-z0-9_]*(?:\([^)]*\))?\s*/))) {
+      if (annotationMatch[0].startsWith('@export')) { pendingExport = true; }
       code = code.slice(annotationMatch[0].length);
     }
     if (code === '') { continue; }
+    const isExported = pendingExport;
+    pendingExport = false;
 
     if (/^(?:extends|class_name)\b/.test(code)) {
       if (pendingDocLines.length > 0 && !symbols.doc) { symbols.doc = takeDoc(); }
@@ -1697,6 +1705,7 @@ function parseGdScript(text) {
         defaultValue: typedMatch && typedMatch[2] ? typedMatch[2].trim() : null,
         doc,
         isStatic: !!varMatch[1],
+        isExported,
       });
       continue;
     }
@@ -2168,7 +2177,8 @@ async function refreshProjectGodotData() {
     };
     cachedTimelinePaths = extractDialogicDirectory(text, 'dtl');
     await refreshTimelineLabels();
-    await refreshCharacterMoods(extractCharacterPaths(text));
+    cachedCharacterPaths = extractCharacterPaths(text);
+    await refreshCharacterMoods(cachedCharacterPaths);
     const autoloadPaths = extractAutoloadPaths(text);
     cachedAutoloadNames = new Set(autoloadPaths.keys());
     await refreshAutoloadSymbols(autoloadPaths);
@@ -2601,13 +2611,15 @@ function createWordSuggestions(document, beforeCursor) {
 /**
  * Parse a `label` line the way Dialogic does (`label +(?<name>[^(]+)
  * (\((?<display_name>.+)\))?`): the name is everything up to an optional
- * `(Display Name)`, so it may contain spaces.
+ * `(Display Name)`, so it may contain spaces. A label is translatable (its
+ * display name), so like Dialogic, everything from `#id:` on (its
+ * translation id) is cut off before parsing.
  *
  * @param {string} text - one line
  * @returns {{name: string, displayName: string|null, nameStart: number} | null}
  */
 function parseLabelLine(text) {
-  const match = text.match(/^(\s*label\s+)([^(\r\n]*?)\s*(?:\((.*)\))?\s*$/);
+  const match = text.split('#id:')[0].match(/^(\s*label\s+)([^(\r\n]*?)\s*(?:\((.*)\))?\s*$/);
   if (!match || match[2].trim() === '') { return null; }
   return { name: match[2].trim(), displayName: match[3] ? match[3].trim() : null, nameStart: match[1].length };
 }
@@ -2620,17 +2632,25 @@ function parseLabelLine(text) {
  * `/`, since a timeline identifier can itself be a short path
  * ("chapter1/intro") when two timelines share a file name.
  *
+ * A jump is NOT translatable, so Dialogic doesn't cut a ` #id:...` off it:
+ * `jump Other/choice A1 #id:cc3` looks for a label literally named
+ * "choice A1 #id:cc3". The target here stops before `#id:` (so the rest
+ * of the extension still resolves the intended label), and
+ * `translationIdStart` tells findUnresolvedJumpDiagnostics to flag it.
+ *
  * @param {string} text - one line
- * @returns {{target: string, timeline: string|null, label: string, targetStart: number, labelStart: number} | null}
+ * @returns {{target: string, timeline: string|null, label: string, targetStart: number, labelStart: number, translationIdStart: number} | null}
  */
 function parseJumpLine(text) {
-  const match = text.match(/^(\s*jump\s+)(.*?)\s*$/);
+  const idIndex = text.indexOf('#id:');
+  const match = (idIndex === -1 ? text : text.slice(0, idIndex)).match(/^(\s*jump\s+)(.*?)\s*$/);
   if (!match || match[2] === '') { return null; }
   const target = match[2];
   const targetStart = match[1].length;
+  const translationIdStart = idIndex;
   const lastSlash = target.lastIndexOf('/');
   if (lastSlash === -1) {
-    return { target, timeline: null, label: target, targetStart, labelStart: targetStart };
+    return { target, timeline: null, label: target, targetStart, labelStart: targetStart, translationIdStart };
   }
   return {
     target,
@@ -2638,6 +2658,7 @@ function parseJumpLine(text) {
     label: target.slice(lastSlash + 1).trim(),
     targetStart,
     labelStart: targetStart + lastSlash + 1,
+    translationIdStart,
   };
 }
 
@@ -2779,8 +2800,17 @@ function findUnresolvedJumpDiagnostics(document) {
   const localLabels = collectDocumentLabels(document);
   const diagnostics = [];
   for (let line = 0; line < document.lineCount; line++) {
-    const jump = parseJumpLine(document.lineAt(line).text);
-    if (!jump || jump.target.includes('{')) { continue; }
+    const lineText = document.lineAt(line).text;
+    const jump = parseJumpLine(lineText);
+    if (!jump) { continue; }
+    if (jump.translationIdStart !== -1) {
+      diagnostics.push(new vscode.Diagnostic(
+        new vscode.Range(line, jump.translationIdStart, line, lineText.trimEnd().length),
+        `A jump can't have a translation id: Dialogic would look for a label named "${lineText.slice(jump.labelStart).trim()}". Remove the #id part.`,
+        vscode.DiagnosticSeverity.Error
+      ));
+    }
+    if (jump.target.includes('{')) { continue; }
     if (jump.timeline === null) {
       if (!localLabels.has(jump.label)) {
         diagnostics.push(new vscode.Diagnostic(
@@ -3736,6 +3766,10 @@ function refreshAllDiagnostics() {
  * @param {vscode.TextDocument} document
  */
 function updateDiagnostics(document) {
+  if (document.languageId === 'dch') {
+    diagnosticCollection.set(document.uri, findDchDiagnostics(document));
+    return;
+  }
   if (document.languageId !== 'dtl') {
     return;
   }
@@ -3891,6 +3925,336 @@ function provideAutoloadSemanticTokens(document) {
     }
   }
   return builder.build();
+}
+
+// =============================================================================
+// DIALOGIC CHARACTER FILES (.dch)
+// =============================================================================
+// A .dch file is Godot's var_to_str() of inst_to_dict(DialogicCharacter):
+// a GDScript-literal dictionary. These describe its keys, per nesting level,
+// for autocomplete and hover. Taken from Dialogic's own DialogicCharacter
+// resource (addons/dialogic/Resources/character.gd) and character editor.
+
+/** @type {string} */
+const DIALOGIC_CHARACTER_DOCS_URL = 'https://docs.dialogic.pro/characters-and-portraits.html';
+
+/**
+ * Top-level keys of a .dch file.
+ *
+ * @type {Record<string, {type: string, value: string, doc: string}>}
+ */
+const DCH_CHARACTER_KEYS = {
+  'display_name': { type: 'String', value: '""', doc: 'Name shown in the dialogue name label. Can contain spaces and use variables, e.g. `{player_name}`.' },
+  'nicknames': { type: 'Array', value: '[""]', doc: 'Other names the character is recognized by: writing any of them in dialogue text is colored/linked to this character, like its display name.' },
+  'color': { type: 'Color', value: 'Color(1, 1, 1, 1)', doc: 'Color of the character\'s name label, and of its name when it appears in text (if enabled in the Text settings).' },
+  'description': { type: 'String', value: '""', doc: 'Free notes about the character, for the writers only - never shown in game. Shown by DTL Reader when hovering the character in a timeline.' },
+  'scale': { type: 'float', value: '1.0', doc: 'Scale applied to all of the character\'s portraits (a portrait can opt out with `ignore_char_scale`).' },
+  'offset': { type: 'Vector2', value: 'Vector2(0, 0)', doc: 'Offset in pixels applied to all of the character\'s portraits, on top of each portrait\'s own offset.' },
+  'mirror': { type: 'bool', value: 'false', doc: 'Mirrors all of the character\'s portraits horizontally.' },
+  'default_portrait': { type: 'String', value: '""', doc: 'Portrait used when none is given, e.g. `join Laripo left` without a `(mood)`. Must be one of the `portraits` keys.' },
+  'portraits': { type: 'Dictionary', value: '{}', doc: 'Every portrait (mood) of the character, by name. The names are what `(mood)` tags use in timelines, e.g. `join Laripo (happy) left`.' },
+  'custom_info': { type: 'Dictionary', value: '{}', doc: 'Extra data used by Dialogic modules and your own code (e.g. the typing sound settings, a custom style), edited in the character editor\'s other tabs.' },
+  '@path': { type: 'String', value: '"res://addons/dialogic/Resources/character.gd"', doc: 'Written by Godot\'s `inst_to_dict()`: the script this dictionary is an instance of. Leave it as is.' },
+  '@subpath': { type: 'NodePath', value: 'NodePath("")', doc: 'Written by Godot\'s `inst_to_dict()`. Leave it as is.' },
+};
+
+/**
+ * Keys of one portrait inside `portraits`.
+ *
+ * @type {Record<string, {type: string, value: string, doc: string}>}
+ */
+const DCH_PORTRAIT_KEYS = {
+  'scene': { type: 'String', value: '""', doc: 'Portrait scene (`.tscn`) to display, e.g. a LayeredPortrait. Leave empty to use Dialogic\'s default portrait scene, which shows the `image` set in `export_overrides`.' },
+  'export_overrides': { type: 'Dictionary', value: '{}', doc: 'Values for the portrait scene\'s `@export` variables, e.g. `image` for the default scene. Each value is a GDScript expression stored as a string, so a path is written `"\\"res://...png\\""`.' },
+  'scale': { type: 'float', value: '1.0', doc: 'Scale of this portrait, multiplied with the character\'s `scale` (unless `ignore_char_scale` is on).' },
+  'offset': { type: 'Vector2', value: 'Vector2(0, 0)', doc: 'Offset in pixels of this portrait, added to the character\'s `offset`.' },
+  'mirror': { type: 'bool', value: 'false', doc: 'Mirrors this portrait horizontally (combined with the character\'s `mirror`).' },
+  'ignore_char_scale': { type: 'bool', value: 'false', doc: 'If true, this portrait ignores the character\'s `scale` and only uses its own.' },
+};
+
+/** Doc of the `image` override of Dialogic's default portrait scene. @type {string} */
+const DCH_IMAGE_OVERRIDE_DOC = 'Image shown by Dialogic\'s default portrait scene (used when the portrait has no `scene`). Written as a quoted path inside the string: `"\\"res://portraits/happy.png\\""`.';
+
+/**
+ * Walk a .dch document up to `stopOffset`, tracking which dictionary /
+ * list the scanner is in (with the key each one is the value of), whether
+ * a key or a value is expected next, and every key token seen with its
+ * path - e.g. `portraits` > `Happy` > `scene`. Strings are skipped as a
+ * whole (escapes included) so braces/colons inside them don't count.
+ *
+ * @param {string} text
+ * @param {number} [stopOffset] - defaults to the whole text
+ * @returns {{
+ *   stack: {kind: 'dict'|'list', key: string|null, keys: Set<string>}[],
+ *   state: 'key'|'value'|'after',
+ *   pendingKey: string|null,
+ *   valueStart: number,
+ *   keyTokens: {name: string, start: number, end: number, path: string[]}[],
+ *   openString: {start: number, text: string} | null
+ * }}
+ */
+function scanDch(text, stopOffset = text.length) {
+  const stack = [];
+  const keyTokens = [];
+  let state = 'value';
+  let pendingKey = null;
+  let lastString = null;
+  let valueStart = 0;
+  const pathOf = () => stack.map(container => container.key).slice(1);
+  for (let i = 0; i < stopOffset; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      const start = i > 0 && text[i - 1] === '&' ? i - 1 : i;
+      let end = i + 1;
+      while (end < text.length && text[end] !== '"') { end += text[end] === '\\' ? 2 : 1; }
+      if (end >= stopOffset) {
+        return { stack, state, pendingKey, valueStart, keyTokens, openString: { start, text: text.slice(i + 1, stopOffset) } };
+      }
+      lastString = { value: text.slice(i + 1, end), start, end: end + 1 };
+      i = end;
+      continue;
+    }
+    const top = stack[stack.length - 1];
+    if (ch === '{' || ch === '[') {
+      stack.push({ kind: ch === '{' ? 'dict' : 'list', key: pendingKey, keys: new Set() });
+      pendingKey = null;
+      state = ch === '{' ? 'key' : 'value';
+      valueStart = i + 1;
+    } else if (ch === '}' || ch === ']') {
+      stack.pop();
+      state = 'after';
+    } else if (ch === ':' && top && top.kind === 'dict' && lastString) {
+      pendingKey = lastString.value;
+      top.keys.add(pendingKey);
+      keyTokens.push({ name: lastString.value, start: lastString.start, end: lastString.end, path: pathOf() });
+      state = 'value';
+      valueStart = i + 1;
+    } else if (ch === ',') {
+      state = top && top.kind === 'dict' ? 'key' : 'value';
+      if (top && top.kind === 'dict') { pendingKey = null; }
+      valueStart = i + 1;
+    }
+  }
+  return { stack, state, pendingKey, valueStart, keyTokens, openString: null };
+}
+
+/**
+ * The character a .dch document belongs to (its name in project.godot's
+ * `directories/dch_directory`), if it's registered.
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {string | null}
+ */
+function findCharacterForDocument(document) {
+  if (!projectRootUri) { return null; }
+  const documentPath = normalizeFsPath(document.uri.fsPath || '');
+  for (const [name, resPath] of cachedCharacterPaths) {
+    if (normalizeFsPath(resolveResourcePath(resPath).fsPath) === documentPath) { return name; }
+  }
+  return null;
+}
+
+/**
+ * The `@export` variables of a portrait scene's root script - what its
+ * `export_overrides` can set. Empty if the scene or script can't be read.
+ *
+ * @param {string} scenePath - res:// .tscn path
+ * @returns {Promise<Map<string, GdVariableInfo>>}
+ */
+async function readPortraitSceneExports(scenePath) {
+  try {
+    const sceneText = Buffer.from(await vscode.workspace.fs.readFile(resolveResourcePath(scenePath))).toString('utf8');
+    const scriptPath = extractSceneRootScriptPath(sceneText);
+    if (!scriptPath || !scriptPath.endsWith('.gd')) { return new Map(); }
+    const scriptText = Buffer.from(await vscode.workspace.fs.readFile(resolveResourcePath(scriptPath))).toString('utf8');
+    const exports = new Map();
+    for (const [name, info] of parseGdScript(scriptText).variables) {
+      if (info.isExported) { exports.set(name, info); }
+    }
+    return exports;
+  } catch (error) {
+    return new Map();
+  }
+}
+
+/**
+ * The keys that make sense at a given .dch dictionary path, with their
+ * docs: the character's own keys at the top, a portrait's keys inside
+ * `portraits` > name, and the portrait scene's `@export` variables inside
+ * `export_overrides` (plus `image`, for Dialogic's default portrait
+ * scene). Nothing for levels whose keys are free (portrait names,
+ * custom_info).
+ *
+ * @param {string[]} path
+ * @param {string} text - the whole document, to find the portrait's scene
+ * @returns {Promise<Record<string, {type: string, value: string, doc: string}>>}
+ */
+async function dchKeysForPath(path, text) {
+  if (path.length === 0) { return DCH_CHARACTER_KEYS; }
+  if (path.length === 2 && path[0] === 'portraits') { return DCH_PORTRAIT_KEYS; }
+  if (path.length === 3 && path[0] === 'portraits' && path[2] === 'export_overrides') {
+    const keys = { 'image': { type: 'String', value: '"\\"res://\\""', doc: DCH_IMAGE_OVERRIDE_DOC } };
+    const portrait = parseDchPortraits(text).get(path[1]);
+    if (portrait && portrait.scene) {
+      for (const [name, info] of await readPortraitSceneExports(portrait.scene)) {
+        keys[name] = { type: info.type || 'Variant', value: '""', doc: info.doc || `\`@export\` variable of \`${portrait.scene}\`'s root script.` };
+      }
+    }
+    return keys;
+  }
+  return {};
+}
+
+/**
+ * Completion items for a .dch document: keys for the current dictionary
+ * level (see dchKeysForPath), and values for known keys - portrait names
+ * for `default_portrait`, `.tscn` scenes for `scene`, images for the
+ * `image` override, true/false, and ready-made Color()/Vector2() literals.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Position} position
+ * @returns {Promise<vscode.CompletionItem[]>}
+ */
+async function provideDchCompletions(document, position) {
+  const text = document.getText();
+  const offset = document.offsetAt(position);
+  const scan = scanDch(text, offset);
+  const top = scan.stack[scan.stack.length - 1];
+  if (!top) { return []; }
+  const path = scan.stack.map(container => container.key).slice(1);
+  const line = document.lineAt(position.line).text;
+  const closingQuote = line[position.character] === '"' ? 1 : 0;
+  const items = [];
+
+  if (scan.state === 'key' && top.kind === 'dict') {
+    const keys = await dchKeysForPath(path, text);
+    const useStringNames = /&"/.test(text) || text.trim() === '' || text.trim() === '{}';
+    const bareTyped = scan.openString ? '' : (line.slice(0, position.character).match(/&?[A-Za-z_@]*$/) || [''])[0];
+    const typedStart = scan.openString ? document.positionAt(scan.openString.start) : new vscode.Position(position.line, position.character - bareTyped.length);
+    const range = new vscode.Range(typedStart, new vscode.Position(position.line, position.character + (scan.openString ? closingQuote : 0)));
+    // VS Code filters on the typed text, so match its shape: `&"disp` or `"disp` vs a bare `disp`.
+    const quotedFilter = !!scan.openString || bareTyped.startsWith('&');
+    for (const [name, info] of Object.entries(keys)) {
+      if (top.keys.has(name)) { continue; } // already set in this dictionary
+      const item = new vscode.CompletionItem({ label: name, description: info.type }, vscode.CompletionItemKind.Property);
+      item.documentation = new vscode.MarkdownString(info.doc);
+      item.filterText = quotedFilter ? `${useStringNames ? '&' : ''}"${name}"` : name;
+      item.insertText = new vscode.SnippetString(`${useStringNames ? '&' : ''}"${name}": \${1:${info.value.replace(/[$}\\]/g, '\\$&')}}`);
+      item.range = range;
+      item.sortText = name.startsWith('@') ? `2_${name}` : `1_${name}`;
+      items.push(item);
+    }
+    return items;
+  }
+
+  if (scan.state !== 'value' || !scan.pendingKey) { return []; }
+  const key = scan.pendingKey;
+  const valueStartPosition = scan.openString
+    ? document.positionAt(scan.openString.start)
+    : document.positionAt(scan.valueStart + (text.slice(scan.valueStart, offset).match(/^\s*/) || [''])[0].length);
+  const range = new vscode.Range(valueStartPosition, new vscode.Position(position.line, position.character + (scan.openString ? closingQuote : 0)));
+  const typed = scan.openString ? scan.openString.text : text.slice(document.offsetAt(valueStartPosition), offset);
+  const addValue = (label, insert, detail, kind = vscode.CompletionItemKind.Value) => {
+    const item = new vscode.CompletionItem(label, kind);
+    item.insertText = insert;
+    item.filterText = typeof insert === 'string' ? insert : label;
+    item.detail = detail;
+    item.range = range;
+    items.push(item);
+  };
+
+  if (path.length === 0 && key === 'default_portrait') {
+    for (const mood of parseDchPortraits(text).keys()) { addValue(mood, `"${mood}"`, 'Portrait of this character', vscode.CompletionItemKind.EnumMember); }
+  } else if (key === 'scene' && path.length === 2 && path[0] === 'portraits') {
+    for (const resPath of cachedResourcePaths) {
+      if (RESOURCE_EXTENSIONS.scene.includes(resPath.slice(resPath.lastIndexOf('.') + 1).toLowerCase()) && resPath.toLowerCase().startsWith(typed.toLowerCase())) {
+        addValue(resPath, `"${resPath}"`, 'Portrait scene', vscode.CompletionItemKind.File);
+      }
+    }
+  } else if (key === 'image' && path.length === 3 && path[2] === 'export_overrides') {
+    const typedPath = typed.replace(/^\\?"?/, '');
+    for (const resPath of cachedResourcePaths) {
+      if (RESOURCE_EXTENSIONS.image.includes(resPath.slice(resPath.lastIndexOf('.') + 1).toLowerCase()) && resPath.toLowerCase().startsWith(typedPath.toLowerCase())) {
+        addValue(resPath, `"\\"${resPath}\\""`, 'Portrait image', vscode.CompletionItemKind.File);
+      }
+    }
+  } else {
+    const keyInfo = (await dchKeysForPath(path, text))[key];
+    if (!keyInfo) { return []; }
+    if (keyInfo.type === 'bool') {
+      addValue('true', 'true', 'bool', vscode.CompletionItemKind.Keyword);
+      addValue('false', 'false', 'bool', vscode.CompletionItemKind.Keyword);
+    } else if (!scan.openString) {
+      addValue(keyInfo.value, keyInfo.value, `${keyInfo.type} (default)`);
+    }
+  }
+  return items;
+}
+
+/**
+ * Hover for a .dch key: what it does (character, portrait and
+ * export_overrides keys). Hovering a portrait's name inside `portraits`
+ * shows that mood's documentation, same as hovering it in a timeline.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Position} position
+ * @returns {Promise<vscode.Hover | undefined>}
+ */
+async function provideDchHover(document, position) {
+  const text = document.getText();
+  const offset = document.offsetAt(position);
+  const token = scanDch(text).keyTokens.find(candidate => offset >= candidate.start && offset <= candidate.end);
+  if (!token) { return undefined; }
+  const range = new vscode.Range(document.positionAt(token.start), document.positionAt(token.end));
+  if (token.path.length === 1 && token.path[0] === 'portraits') {
+    const character = findCharacterForDocument(document);
+    const markdown = character ? createMoodDocumentation(character, token.name) : null;
+    return markdown ? new vscode.Hover(markdown, range) : undefined;
+  }
+  const info = (await dchKeysForPath(token.path, text))[token.name];
+  if (!info) { return undefined; }
+  const where = token.path.length === 0 ? 'character' : token.path[2] === 'export_overrides' ? 'portrait scene override' : 'portrait';
+  const markdown = new vscode.MarkdownString();
+  markdown.appendMarkdown(`**${token.name}**: \`${info.type}\` _(${where})_\n\n${info.doc}\n\n`);
+  markdown.appendMarkdown(`[Dialogic documentation](${DIALOGIC_CHARACTER_DOCS_URL})`);
+  return new vscode.Hover(markdown, range);
+}
+
+/**
+ * Diagnostics for a .dch document: a `default_portrait` that isn't one of
+ * its `portraits`, and a portrait `scene` that doesn't exist in the
+ * project (only checked once the project's files are known).
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {vscode.Diagnostic[]}
+ */
+function findDchDiagnostics(document) {
+  const text = document.getText();
+  const diagnostics = [];
+  const portraits = parseDchPortraits(text);
+  const defaultMatch = text.match(/&?"default_portrait"\s*:\s*"([^"]*)"/);
+  if (defaultMatch && defaultMatch[1] && portraits.size > 0 && !portraits.has(defaultMatch[1])) {
+    const start = defaultMatch.index + defaultMatch[0].length - defaultMatch[1].length - 1;
+    diagnostics.push(new vscode.Diagnostic(
+      new vscode.Range(document.positionAt(start), document.positionAt(start + defaultMatch[1].length)),
+      `"${defaultMatch[1]}" is not one of this character's portraits (${[...portraits.keys()].join(', ')}).`,
+      vscode.DiagnosticSeverity.Error
+    ));
+  }
+  if (projectRootUri && cachedResourcePaths.length > 0) {
+    const scenePattern = /&?"scene"\s*:\s*"([^"]+)"/g;
+    let match;
+    while ((match = scenePattern.exec(text)) !== null) {
+      if (cachedResourcePaths.includes(match[1])) { continue; }
+      const start = match.index + match[0].length - match[1].length - 1;
+      diagnostics.push(new vscode.Diagnostic(
+        new vscode.Range(document.positionAt(start), document.positionAt(start + match[1].length)),
+        `"${match[1]}" doesn't exist in this project.`,
+        vscode.DiagnosticSeverity.Error
+      ));
+    }
+  }
+  return diagnostics;
 }
 
 // =============================================================================
@@ -4209,6 +4573,10 @@ function activate(context) {
     );
   context.subscriptions.push(hoverProvider);
   context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider('dch', { provideCompletionItems: provideDchCompletions }, '"', ':', ' ', '/', '&'),
+    vscode.languages.registerHoverProvider('dch', { provideHover: provideDchHover })
+  );
+  context.subscriptions.push(
     vscode.languages.registerDocumentSymbolProvider('dtl', { provideDocumentSymbols: provideTimelineOutline }, { label: 'DTL' })
   );
   context.subscriptions.push(
@@ -4255,6 +4623,7 @@ function activate(context) {
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument(event => {
       if (event.document.languageId === 'dtl') { refreshAllDiagnostics(); }
+      if (event.document.languageId === 'dch') { updateDiagnostics(event.document); }
     })
   );
   context.subscriptions.push(
@@ -4607,7 +4976,7 @@ function activate(context) {
           // ===================================================================
           // "jump |" offers this timeline's labels and the other timelines
           // ("Name/"); "jump Name/|" offers that timeline's labels.
-          const jumpCommandMatch = beforeCursor.match(/^\s*jump\s+(.*)$/);
+          const jumpCommandMatch = beforeCursor.match(/^\s*jump\s+([^#]*)$/);
           if (jumpCommandMatch) {
             const typed = jumpCommandMatch[1];
             const lastSlash = typed.lastIndexOf('/');

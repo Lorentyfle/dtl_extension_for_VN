@@ -2,7 +2,7 @@
   "name": "dtl-reader",
   "displayName": "DTL Reader",
   "description": "Syntax highlighting for Dialogic2 TimeLine (.dtl) files",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "publisher": "lorentyfle",
   "icon": "./icons/favicon.png",
   "engines": {
@@ -32,6 +32,16 @@
           "light": "./icons/dtl.svg",
           "dark": "./icons/favicon.svg"
         }
+      },
+      {
+        "id": "dch",
+        "aliases": [
+          "Dialogic Character"
+        ],
+        "extensions": [
+          ".dch"
+        ],
+        "configuration": "./dch-language-configuration.json"
       }
     ],
     "grammars": [
@@ -39,6 +49,11 @@
         "language": "dtl",
         "scopeName": "source.dtl",
         "path": "./syntaxes/dtl.tmLanguage.json"
+      },
+      {
+        "language": "dch",
+        "scopeName": "source.dch",
+        "path": "./syntaxes/dch.tmLanguage.json"
       }
     ],
     "themes": [
@@ -102,6 +117,13 @@
           "strings": true
         },
         "editor.autoIndent": "full"
+      },
+      "[dch]": {
+        "editor.quickSuggestions": {
+          "other": true,
+          "comments": false,
+          "strings": true
+        }
       }
     }
   },

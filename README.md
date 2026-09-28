@@ -53,6 +53,10 @@ DTL Reader understands the relationship between `jump` and `label`.
 - Get an error for characters, moods and `{variables}` that don't exist in the Godot project.
 - Document a label with `##` comment lines right above it: the doc shows when hovering a `jump` to it.
 
+### Dialogic character files (.dch)
+
+`.dch` files get syntax highlighting, autocomplete of the keys and values Dialogic expects at each level (character, portrait, `export_overrides`), hover documentation for every key, and errors for a missing default portrait or portrait scene.
+
 ### Hover documentation
 
 Hover a command, a BBCode tag, a character, a mood, a LayeredPortrait layer, a `{variable}` or an autoload member to see its documentation. It's read live from your Godot project: `.dch` files, `.tscn` scenes (the nodes' Editor Description), project.godot and `##` comments in scripts.

@@ -104,6 +104,13 @@ every DTL Reader feature without risking real project data.
   `jump chapter2/intro` - it should open `chapter2.dtl`. Type
   `jump chapter2/` - `intro` and `Ending With Spaces` should be suggested.
   Change it to `jump chapter2/nope` or `jump chapter9/intro` - error.
+- **Translation ids**: in `chapter2.dtl`, `label choice A1 (First choice)
+  #id:cc3` - type `jump chapter2/` in test_timeline and `choice A1` should
+  be suggested without the `#id`. Adding ` #id:x` after a jump is an error.
+- **.dch files**: open `characters/TestCharacter.dch` - it should be
+  highlighted. Inside a portrait, type `&"` for the portrait keys; after
+  `&"default_portrait": ` the portraits are suggested; hover any key.
+  Setting `default_portrait` to a missing portrait gives an error.
 - **No stray suggestions in dialogue**: typing `.` or a space at the end
   of a dialogue sentence should NOT open a suggestion list.
 - **BBCode**: in dialogue type `[co` - `code` and `color` should appear;

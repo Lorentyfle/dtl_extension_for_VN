@@ -1,0 +1,60 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Dialogic Character",
+  "scopeName": "source.dch",
+  "comment": "Dialogic character (.dch) files: Godot's var_to_str() of the character resource, i.e. a GDScript-literal dictionary. Reuses the DTL grammar's scope names so the DTL themes color both the same way.",
+  "patterns": [
+    { "include": "#keys" },
+    { "include": "#strings" },
+    { "include": "#constructors" },
+    { "include": "#constants" },
+    { "include": "#numbers" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "keys": {
+      "comment": "A dictionary key: a String or StringName (&\"key\") followed by ':'.",
+      "patterns": [
+        {
+          "match": "(&)?(\"[^\"\\\\]*(?:\\\\.[^\"\\\\]*)*\")(?=\\s*:)",
+          "captures": {
+            "1": { "name": "punctuation.definition.string-name.dch" },
+            "2": { "name": "entity.other.attribute-name.dtl" }
+          }
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.dtl",
+          "begin": "&?\"",
+          "end": "\"",
+          "patterns": [ { "name": "constant.character.escape.dtl", "match": "\\\\." } ]
+        }
+      ]
+    },
+    "constructors": {
+      "comment": "Godot built-in types written as constructors: Color(...), Vector2(...), NodePath(...).",
+      "patterns": [
+        { "name": "support.function.dtl", "match": "\\b[A-Z][A-Za-z0-9]*(?=\\()" }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        { "name": "constant.language.dtl", "match": "\\b(?:true|false|null)\\b" }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.dtl", "match": "-?\\b\\d+(?:\\.\\d+)?(?:e-?\\d+)?\\b" }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        { "name": "punctuation.section.dictionary.dch", "match": "[{}\\[\\]()]" },
+        { "name": "punctuation.separator.dch", "match": "[:,]" }
+      ]
+    }
+  }
+}
