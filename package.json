@@ -2,7 +2,7 @@
   "name": "dtl-reader",
   "displayName": "DTL Reader",
   "description": "Syntax highlighting for Dialogic2 TimeLine (.dtl) files",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "publisher": "lorentyfle",
   "icon": "./icons/favicon.png",
   "engines": {
@@ -82,6 +82,11 @@
     "configuration": {
       "title": "DTL Reader",
       "properties": {
+        "dtlReader.outline.showFlow": {
+          "type": "boolean",
+          "default": true,
+          "description": "In the Outline view, list each label's flow (if/elif/else/while blocks, choices, jump/return/end_timeline), nested by indentation. When off, the outline only lists the labels."
+        },
         "dtlReader.includeAddonAutoloads": {
           "type": "boolean",
           "default": false,

@@ -40,6 +40,8 @@ every DTL Reader feature without risking real project data.
   contains a space - for testing the quoted-character-name feature.
 - `assets/theme.ogg`, `assets/voice_line.ogg`, `assets/bg.png` - empty
   placeholder files so `res://` path autocomplete has real files to offer.
+- `timelines/chapter2.dtl` - a second timeline (registered in
+  `directories/dtl_directory`) for cross-timeline `jump chapter2/label`.
 - `timelines/test_timeline.dtl` - one file touching every language
   construct: comments, translation ids, `join`/`update`/`leave --All--`,
   transforms (`pos`/`size`), mood tags, `extra_data`, dialogue, narration,
@@ -95,6 +97,13 @@ every DTL Reader feature without risking real project data.
   `{nope}` - each should get an error or warning.
 - **Autoload colors in `{}`**: `{Global.hearts}` should be colored like
   `Global.hearts` on an `if` line; `{variable.test}` should not change.
+- **Outline**: open the Outline view - `loop_start` should list the
+  `while` block and both choices with their jumps. Setting
+  `dtlReader.outline.showFlow` to false leaves only the labels.
+- **Cross-timeline jumps**: Ctrl+click `chapter2` or `intro` in
+  `jump chapter2/intro` - it should open `chapter2.dtl`. Type
+  `jump chapter2/` - `intro` and `Ending With Spaces` should be suggested.
+  Change it to `jump chapter2/nope` or `jump chapter9/intro` - error.
 - **No stray suggestions in dialogue**: typing `.` or a space at the end
   of a dialogue sentence should NOT open a suggestion list.
 - **BBCode**: in dialogue type `[co` - `code` and `color` should appear;

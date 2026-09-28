@@ -71,5 +71,11 @@ while {chapter} < 3
     set {chapter} += 1
     jump loop_start
 
+# Cross-timeline jumps: Ctrl+click either part to open chapter2.dtl.
+- Go to chapter two
+    jump chapter2/intro
+- Go to its ending
+    jump chapter2/Ending With Spaces
+
 leave --All--
 [end_timeline]

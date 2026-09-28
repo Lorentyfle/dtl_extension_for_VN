@@ -158,6 +158,13 @@
       }
     },
     {
+      "scope": "entity.name.type.timeline.dtl",
+      "settings": {
+        "foreground": "#ffb86c",
+        "fontStyle": "italic"
+      }
+    },
+    {
       "comment": "Target name after 'label' / 'jump'.",
       "scope": "entity.name.label.dtl",
       "settings": {

@@ -1230,11 +1230,30 @@ let cachedPortraitDetails = new Map();
  * What project.godot actually declares, so diagnostics only report an
  * unknown character/variable when there's a real list to check against:
  * `characters` is true when `directories/dch_directory` exists, `variables`
- * when `[dialogic]` has a `variables={...}` entry.
+ * when `[dialogic]` has a `variables={...}` entry, `timelines` when
+ * `directories/dtl_directory` exists.
  *
- * @type {{characters: boolean, variables: boolean}}
+ * @type {{characters: boolean, variables: boolean, timelines: boolean}}
  */
-let declaredProjectData = { characters: false, variables: false };
+let declaredProjectData = { characters: false, variables: false, timelines: false };
+
+/**
+ * Timeline identifier -> `res://` path, from project.godot's
+ * `directories/dtl_directory` - how Dialogic names a timeline in
+ * `jump Timeline/label` (the file name, or a short unique path when two
+ * timelines share one).
+ *
+ * @type {Map<string, string>}
+ */
+let cachedTimelinePaths = new Map();
+
+/**
+ * Per timeline identifier, its labels as last read from disk (see
+ * getTimelineLabels, which prefers an open editor's live text).
+ *
+ * @type {Map<string, Map<string, DtlLabelInfo>>}
+ */
+let cachedTimelineLabels = new Map();
 
 function extractCharacterNames(text) {
   const sectionMatch = text.match(/(?:^|\n)\[dialogic\]([\s\S]*?)(\n\[|$)/);
@@ -1411,6 +1430,45 @@ function extractCharacterPaths(text) {
   let match;
   while ((match = entryPattern.exec(dictionaryMatch[1])) !== null) { paths.set(match[1], match[2]); }
   return paths;
+}
+
+/**
+ * Extract one of the `[dialogic]` `directories/<extension>_directory`
+ * dicts (identifier -> `res://` path), e.g. `dtl` for timelines. Same
+ * shape as the `dch` one extractCharacterPaths reads.
+ *
+ * @param {string} text - raw project.godot content
+ * @param {string} extension - e.g. "dtl"
+ * @returns {Map<string, string>}
+ */
+function extractDialogicDirectory(text, extension) {
+  const sectionMatch = text.match(/(?:^|\n)\[dialogic\]([\s\S]*?)(\n\[|$)/);
+  if (!sectionMatch) { return new Map(); }
+  const dictionaryMatch = sectionMatch[1].match(new RegExp(`directories\\/${extension}_directory\\s*=\\s*\\{([\\s\\S]*?)\\}`));
+  if (!dictionaryMatch) { return new Map(); }
+  const entryPattern = /"([^"]+)"\s*:\s*"([^"]*)"/g;
+  const paths = new Map();
+  let match;
+  while ((match = entryPattern.exec(dictionaryMatch[1])) !== null) { paths.set(match[1], match[2]); }
+  return paths;
+}
+
+/**
+ * Re-read every registered timeline's labels from disk, for cross-timeline
+ * `jump Timeline/label` completion, hover and diagnostics. An unreadable
+ * timeline just has no labels.
+ */
+async function refreshTimelineLabels() {
+  const labelsByTimeline = new Map();
+  for (const [identifier, resPath] of cachedTimelinePaths) {
+    try {
+      const bytes = await vscode.workspace.fs.readFile(resolveResourcePath(resPath));
+      labelsByTimeline.set(identifier, collectLabelsFromLines(Buffer.from(bytes).toString('utf8').split(/\r?\n/)));
+    } catch (error) {
+      console.error(`DTL Reader: timeline "${identifier}" declares "${resPath}" but it could not be read - its labels are unavailable for jump.`, error);
+    }
+  }
+  cachedTimelineLabels = labelsByTimeline;
 }
 
 /**
@@ -2087,7 +2145,9 @@ async function refreshProjectGodotData() {
     cachedAutoloadSymbols = new Map();
     cachedAutoloadNames = new Set();
     cachedPortraitDetails = new Map();
-    declaredProjectData = { characters: false, variables: false };
+    cachedTimelinePaths = new Map();
+    cachedTimelineLabels = new Map();
+    declaredProjectData = { characters: false, variables: false, timelines: false };
     projectRootUri = null;
     cachedResourcePaths = [];
     refreshAllDiagnostics();
@@ -2104,7 +2164,10 @@ async function refreshProjectGodotData() {
     declaredProjectData = {
       characters: /directories\/dch_directory\s*=/.test(dialogicSection),
       variables: /(?:^|\n)variables\s*=/.test(dialogicSection),
+      timelines: /directories\/dtl_directory\s*=/.test(dialogicSection),
     };
+    cachedTimelinePaths = extractDialogicDirectory(text, 'dtl');
+    await refreshTimelineLabels();
     await refreshCharacterMoods(extractCharacterPaths(text));
     const autoloadPaths = extractAutoloadPaths(text);
     cachedAutoloadNames = new Set(autoloadPaths.keys());
@@ -2119,7 +2182,9 @@ async function refreshProjectGodotData() {
     cachedAutoloadSymbols = new Map();
     cachedAutoloadNames = new Set();
     cachedPortraitDetails = new Map();
-    declaredProjectData = { characters: false, variables: false };
+    cachedTimelinePaths = new Map();
+    cachedTimelineLabels = new Map();
+    declaredProjectData = { characters: false, variables: false, timelines: false };
   }
   await refreshResourcePaths();
   refreshAllDiagnostics();
@@ -2534,23 +2599,153 @@ function createWordSuggestions(document, beforeCursor) {
 // =============================================================================
 
 /**
- * Find the `label NAME` declaration matching a jump target.
+ * Parse a `label` line the way Dialogic does (`label +(?<name>[^(]+)
+ * (\((?<display_name>.+)\))?`): the name is everything up to an optional
+ * `(Display Name)`, so it may contain spaces.
+ *
+ * @param {string} text - one line
+ * @returns {{name: string, displayName: string|null, nameStart: number} | null}
+ */
+function parseLabelLine(text) {
+  const match = text.match(/^(\s*label\s+)([^(\r\n]*?)\s*(?:\((.*)\))?\s*$/);
+  if (!match || match[2].trim() === '') { return null; }
+  return { name: match[2].trim(), displayName: match[3] ? match[3].trim() : null, nameStart: match[1].length };
+}
+
+/**
+ * Parse a `jump` line the way Dialogic does (`jump (?<timeline>.*\/)?
+ * (?<label>.*)?`): `jump label` stays in this timeline, `jump
+ * Timeline/label` goes to a label of another timeline, and `jump
+ * Timeline/` to its start. The timeline part is everything up to the LAST
+ * `/`, since a timeline identifier can itself be a short path
+ * ("chapter1/intro") when two timelines share a file name.
+ *
+ * @param {string} text - one line
+ * @returns {{target: string, timeline: string|null, label: string, targetStart: number, labelStart: number} | null}
+ */
+function parseJumpLine(text) {
+  const match = text.match(/^(\s*jump\s+)(.*?)\s*$/);
+  if (!match || match[2] === '') { return null; }
+  const target = match[2];
+  const targetStart = match[1].length;
+  const lastSlash = target.lastIndexOf('/');
+  if (lastSlash === -1) {
+    return { target, timeline: null, label: target, targetStart, labelStart: targetStart };
+  }
+  return {
+    target,
+    timeline: target.slice(0, lastSlash),
+    label: target.slice(lastSlash + 1).trim(),
+    targetStart,
+    labelStart: targetStart + lastSlash + 1,
+  };
+}
+
+/**
+ * @typedef {{line: number, nameStart: number, displayName: string|null, doc: string}} DtlLabelInfo
+ */
+
+/**
+ * Collect every label of a timeline with its documentation: the
+ * consecutive `##` comment lines directly above it (same convention as
+ * GDScript documentation comments - a plain `#` comment doesn't count).
+ *
+ * @param {string[]} lines
+ * @returns {Map<string, DtlLabelInfo>}
+ */
+function collectLabelsFromLines(lines) {
+  const labels = new Map();
+  for (let line = 0; line < lines.length; line++) {
+    const label = parseLabelLine(lines[line]);
+    if (!label || labels.has(label.name)) { continue; }
+    const docLines = [];
+    for (let above = line - 1; above >= 0; above--) {
+      const docMatch = lines[above].match(/^\s*##\s?(.*)$/);
+      if (!docMatch) { break; }
+      docLines.unshift(docMatch[1]);
+    }
+    labels.set(label.name, { line, nameStart: label.nameStart, displayName: label.displayName, doc: docLines.join('\n').trim() });
+  }
+  return labels;
+}
+
+/**
+ * @param {vscode.TextDocument} document
+ * @returns {string[]}
+ */
+function documentLines(document) {
+  const lines = [];
+  for (let line = 0; line < document.lineCount; line++) { lines.push(document.lineAt(line).text); }
+  return lines;
+}
+
+/**
+ * @param {vscode.TextDocument} document
+ * @returns {Map<string, DtlLabelInfo>}
+ */
+function collectDocumentLabels(document) {
+  return collectLabelsFromLines(documentLines(document));
+}
+
+/**
+ * Normalize a filesystem path for comparison (Windows paths are
+ * case-insensitive and may use either slash).
+ *
+ * @param {string} fsPath
+ * @returns {string}
+ */
+function normalizeFsPath(fsPath) {
+  return fsPath.replace(/\\/g, '/').toLowerCase();
+}
+
+/**
+ * The Dialogic timeline identifier of a document (its key in
+ * project.godot's `directories/dtl_directory`), if it's a registered
+ * timeline.
  *
  * @param {vscode.TextDocument} document
- * @param {string} labelName
- * @returns {vscode.Location | undefined}
+ * @returns {string | null}
  */
-function findLabelLocation(document, labelName) {
-  const labelDeclaration = new RegExp(`^\\s*label\\s+(${labelName})\\b`);
-  for (let line = 0; line < document.lineCount; line++) {
-    const text = document.lineAt(line).text;
-    const match = labelDeclaration.exec(text);
-    if (match) {
-      const nameStart = match.index + match[0].length - match[1].length;
-      return new vscode.Location(document.uri, new vscode.Position(line, nameStart));
-    }
+function findTimelineIdentifier(document) {
+  if (!projectRootUri) { return null; }
+  const documentPath = normalizeFsPath(document.uri.fsPath || '');
+  for (const [identifier, resPath] of cachedTimelinePaths) {
+    if (normalizeFsPath(resolveResourcePath(resPath).fsPath) === documentPath) { return identifier; }
   }
-  return undefined;
+  return null;
+}
+
+/**
+ * Labels of a timeline, by identifier - read live from its editor if it's
+ * open (so unsaved edits count), else from cachedTimelineLabels.
+ *
+ * @param {string} identifier
+ * @returns {Map<string, DtlLabelInfo> | null} null if the timeline is unknown
+ */
+function getTimelineLabels(identifier) {
+  const resPath = cachedTimelinePaths.get(identifier);
+  if (!resPath) { return null; }
+  const timelinePath = normalizeFsPath(resolveResourcePath(resPath).fsPath);
+  const openDocument = vscode.workspace.textDocuments.find(document => document.uri && document.uri.fsPath && normalizeFsPath(document.uri.fsPath) === timelinePath);
+  if (openDocument) { return collectDocumentLabels(openDocument); }
+  return cachedTimelineLabels.get(identifier) || new Map();
+}
+
+/**
+ * Resolve a parsed jump to the labels it targets: this document's own,
+ * or another registered timeline's.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {ReturnType<typeof parseJumpLine>} jump
+ * @returns {{labels: Map<string, DtlLabelInfo>, uri: vscode.Uri, timeline: string|null} | null}
+ */
+function resolveJumpTarget(document, jump) {
+  if (jump.timeline === null) {
+    return { labels: collectDocumentLabels(document), uri: document.uri, timeline: null };
+  }
+  const labels = getTimelineLabels(jump.timeline);
+  if (!labels) { return null; }
+  return { labels, uri: resolveResourcePath(cachedTimelinePaths.get(jump.timeline)), timeline: jump.timeline };
 }
 
 /**
@@ -2566,110 +2761,105 @@ const RESERVED_BRACKET_NAMES = new Set([
 ]);
 
 /**
- * Scan every `jump NAME` line and flag targets with no matching `label
- * NAME` anywhere in the same file, so a broken jump shows up as a warning
- * even when it can't be resolved by "Go to Definition".
+ * Flag `jump` targets that don't exist. Dialogic doesn't stop on these:
+ * it prints "[Dialogic] Label '...' not found for jump" and simply goes
+ * on with the next event, so the jump silently never happens - hence an
+ * Error, not a Warning.
+ * - `jump label` must match a label of this timeline;
+ * - `jump Timeline/label` (or `jump Timeline/`) must name a timeline of
+ *   project.godot's `directories/dtl_directory`, and the label must exist
+ *   there - only checked when project.godot declares that directory;
+ * - a target containing `{...}` is resolved from a variable at runtime,
+ *   so it's never flagged.
  *
  * @param {vscode.TextDocument} document
  * @returns {vscode.Diagnostic[]}
  */
 function findUnresolvedJumpDiagnostics(document) {
-  const declaredLabels = new Set();
-  for (let line = 0; line < document.lineCount; line++) {
-    const match = document.lineAt(line).text.match(/^\s*label\s+([A-Za-z_][A-Za-z0-9_]*)/);
-    if (match) {
-      declaredLabels.add(match[1]);
-    }
-  }
-
+  const localLabels = collectDocumentLabels(document);
   const diagnostics = [];
-  // Anchored to the start of the line (ignoring leading whitespace): a real
-  // `jump` command is always its own line, never embedded inside a `#`
-  // comment or inside spoken dialogue text, so this naturally excludes both.
-  const jumpLinePattern = /^\s*jump\s+([A-Za-z_][A-Za-z0-9_]*)/;
   for (let line = 0; line < document.lineCount; line++) {
-    const text = document.lineAt(line).text;
-    const match = text.match(jumpLinePattern);
-    if (!match) {
+    const jump = parseJumpLine(document.lineAt(line).text);
+    if (!jump || jump.target.includes('{')) { continue; }
+    if (jump.timeline === null) {
+      if (!localLabels.has(jump.label)) {
+        diagnostics.push(new vscode.Diagnostic(
+          new vscode.Range(line, jump.labelStart, line, jump.labelStart + jump.label.length),
+          `No "label ${jump.label}" in this timeline - Dialogic will print an error and skip this jump.`,
+          vscode.DiagnosticSeverity.Error
+        ));
+      }
       continue;
     }
-    const targetName = match[1];
-    if (declaredLabels.has(targetName)) {
-      continue;
+    if (!projectRootUri || !declaredProjectData.timelines) { continue; }
+    const labels = getTimelineLabels(jump.timeline);
+    if (!labels) {
+      diagnostics.push(new vscode.Diagnostic(
+        new vscode.Range(line, jump.targetStart, line, jump.targetStart + jump.timeline.length),
+        `No timeline "${jump.timeline}" in this project (project.godot's directories/dtl_directory).`,
+        vscode.DiagnosticSeverity.Error
+      ));
+    } else if (jump.label && !labels.has(jump.label)) {
+      diagnostics.push(new vscode.Diagnostic(
+        new vscode.Range(line, jump.labelStart, line, jump.labelStart + jump.label.length),
+        `No "label ${jump.label}" in the timeline "${jump.timeline}" - Dialogic will print an error and skip this jump.`,
+        vscode.DiagnosticSeverity.Error
+      ));
     }
-    const nameStart = match[0].length - targetName.length;
-    const range = new vscode.Range(line, nameStart, line, nameStart + targetName.length);
-    diagnostics.push(new vscode.Diagnostic(
-      range,
-      `No "label ${targetName}" found in this file, so ctrl+click can't jump there.`,
-      vscode.DiagnosticSeverity.Warning
-    ));
   }
-
   return diagnostics;
 }
 
-function createLabelCompletion(name, labelInfo) {
+/**
+ * Completion item for a label, after `jump `.
+ *
+ * @param {string} name
+ * @param {DtlLabelInfo} labelInfo
+ * @param {vscode.Range} range - the label text typed so far (labels can contain spaces)
+ * @param {string|null} timeline - the timeline it belongs to, if not this one
+ * @returns {vscode.CompletionItem}
+ */
+function createLabelCompletion(name, labelInfo, range, timeline) {
   const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Reference);
-  item.detail = 'DTL label (jump target)';
-  if (labelInfo) { item.documentation = createLabelDocumentation(name, labelInfo); }
+  item.detail = timeline ? `DTL label of ${timeline}` : 'DTL label (jump target)';
+  if (labelInfo) { item.documentation = createLabelDocumentation(name, labelInfo, timeline); }
+  item.range = range;
   return item;
 }
 
 /**
- * Collect every `label NAME` in the document with its documentation: the
- * consecutive `##` comment lines directly above it (same convention as
- * GDScript documentation comments - a plain `#` comment doesn't count).
+ * Completion item for another timeline, after `jump `. Inserts `Name/` and
+ * re-triggers suggestions so its labels show up next.
  *
- * @param {vscode.TextDocument} document
- * @returns {Map<string, {line: number, doc: string}>}
+ * @param {string} identifier
+ * @param {vscode.Range} range
+ * @returns {vscode.CompletionItem}
  */
-function collectLabelDocumentation(document) {
-  const labels = new Map();
-  for (let line = 0; line < document.lineCount; line++) {
-    const match = document.lineAt(line).text.match(/^\s*label\s+([A-Za-z_][A-Za-z0-9_]*)/);
-    if (!match || labels.has(match[1])) { continue; }
-    const docLines = [];
-    for (let above = line - 1; above >= 0; above--) {
-      const docMatch = document.lineAt(above).text.match(/^\s*##\s?(.*)$/);
-      if (!docMatch) { break; }
-      docLines.unshift(docMatch[1]);
-    }
-    labels.set(match[1], { line, doc: docLines.join('\n').trim() });
-  }
-  return labels;
+function createTimelineCompletion(identifier, range) {
+  const item = new vscode.CompletionItem(`${identifier}/`, vscode.CompletionItemKind.File);
+  item.detail = `Dialogic timeline - ${cachedTimelinePaths.get(identifier)}`;
+  item.documentation = new vscode.MarkdownString(`Jump to another timeline: \`${identifier}/\` starts it from the beginning, \`${identifier}/label\` from one of its labels.`);
+  item.range = range;
+  item.sortText = `1_${identifier}`;
+  item.command = { command: 'editor.action.triggerSuggest', title: 'Show the timeline labels' };
+  return item;
 }
 
 /**
  * Build the hover shown for a label, on either its `label NAME`
- * declaration or a `jump NAME` pointing at it.
+ * declaration or a `jump` pointing at it.
  *
  * @param {string} name
- * @param {{line: number, doc: string}} labelInfo
+ * @param {DtlLabelInfo} labelInfo
+ * @param {string|null} [timeline] - the timeline it belongs to, if not the hovered one
  * @returns {vscode.MarkdownString}
  */
-function createLabelDocumentation(name, labelInfo) {
+function createLabelDocumentation(name, labelInfo, timeline) {
   const markdown = new vscode.MarkdownString();
-  markdown.appendMarkdown(`**label ${name}** _(line ${labelInfo.line + 1})_\n\n`);
+  const where = timeline ? `${timeline}, line ${labelInfo.line + 1}` : `line ${labelInfo.line + 1}`;
+  markdown.appendMarkdown(`**label ${name}**${labelInfo.displayName ? ` - ${labelInfo.displayName}` : ''} _(${where})_\n\n`);
   markdown.appendMarkdown(labelInfo.doc || '_No `##` comment above this label. Write one or more `## ...` lines right above it to document it._');
   return markdown;
-}
-
-/**
- * Collect every label name declared via `label NAME` in the document.
- * Powers `jump` autocomplete.
- *
- * @param {vscode.TextDocument} document
- * @returns {string[]}
- */
-function collectDocumentLabels(document) {
-  const labelPattern = /^\s*label\s+([A-Za-z_][A-Za-z0-9_]*)/;
-  const labels = new Set();
-  for (let line = 0; line < document.lineCount; line++) {
-    const match = document.lineAt(line).text.match(labelPattern);
-    if (match) { labels.add(match[1]); }
-  }
-  return Array.from(labels);
 }
 
 // =============================================================================
@@ -3561,6 +3751,99 @@ function updateDiagnostics(document) {
 }
 
 // =============================================================================
+// OUTLINE (document symbols)
+// =============================================================================
+
+/**
+ * Build the outline of a timeline - what the Outline view, breadcrumbs,
+ * sticky scroll and "Go to Symbol" (Ctrl+Shift+O) show.
+ *
+ * Top level: one entry per `label`, as Dialogic organizes a timeline -
+ * each spanning until the next label (lines before the first label sit at
+ * the top level directly). With `dtlReader.outline.showFlow` on (default),
+ * each label also lists the timeline's flow, nested by indentation like
+ * the timeline itself: `if`/`elif`/`else`/`while` blocks, choices, and the
+ * events that leave the current flow (`jump`, `return`, `[end_timeline]`).
+ * Dialogue lines, joins, etc. are left out to keep it readable.
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {vscode.DocumentSymbol[]}
+ */
+function provideTimelineOutline(document) {
+  const showFlow = vscode.workspace.getConfiguration('dtlReader').get('outline.showFlow', true);
+  const lines = documentLines(document);
+  const labelDocs = collectLabelsFromLines(lines);
+  const rootSymbols = [];
+  let currentLabel = null;
+  // Open flow blocks (if/elif/else/while/choice), innermost last.
+  let openBlocks = [];
+  let lastContentLine = 0;
+
+  const lineRange = (line, start = 0) => new vscode.Range(line, start, line, lines[line].length);
+  const closeBlocksFrom = indent => {
+    while (openBlocks.length > 0 && openBlocks[openBlocks.length - 1].indent >= indent) {
+      const block = openBlocks.pop();
+      block.symbol.range = new vscode.Range(block.symbol.range.start, new vscode.Position(lastContentLine, lines[lastContentLine].length));
+    }
+  };
+  const addSymbol = symbol => {
+    const parent = openBlocks.length > 0 ? openBlocks[openBlocks.length - 1].symbol : currentLabel;
+    (parent ? parent.children : rootSymbols).push(symbol);
+  };
+  const closeLabel = () => {
+    if (!currentLabel) { return; }
+    currentLabel.range = new vscode.Range(currentLabel.range.start, new vscode.Position(lastContentLine, lines[lastContentLine].length));
+  };
+
+  for (let line = 0; line < lines.length; line++) {
+    const text = lines[line];
+    const trimmed = text.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) { continue; }
+    const indent = text.length - text.trimStart().length;
+    closeBlocksFrom(indent);
+
+    const label = parseLabelLine(text);
+    if (label) {
+      closeBlocksFrom(0);
+      closeLabel();
+      const info = labelDocs.get(label.name);
+      currentLabel = new vscode.DocumentSymbol(
+        label.name,
+        label.displayName || (info && info.doc ? info.doc.split('\n')[0] : ''),
+        vscode.SymbolKind.Module,
+        lineRange(line),
+        new vscode.Range(line, label.nameStart, line, label.nameStart + label.name.length)
+      );
+      rootSymbols.push(currentLabel);
+      lastContentLine = line;
+      continue;
+    }
+    lastContentLine = line;
+    if (!showFlow) { continue; }
+
+    const flowMatch = trimmed.match(/^(if|elif|else|while)\b\s*(.*?)\s*:?\s*$/);
+    const choiceMatch = trimmed.match(/^-\s+(.*)$/);
+    const jumpMatch = trimmed.match(/^(jump)\s+(.*)$|^(return)\b|^(\[end_timeline\])/);
+    if (flowMatch) {
+      const symbol = new vscode.DocumentSymbol(`${flowMatch[1]}${flowMatch[2] ? ' ' + flowMatch[2] : ''}`, '', vscode.SymbolKind.Operator, lineRange(line, indent), lineRange(line, indent));
+      addSymbol(symbol);
+      openBlocks.push({ indent, symbol });
+    } else if (choiceMatch) {
+      const choiceText = choiceMatch[1].split(/\s*\|/)[0].replace(/\s*#id:\S+/, '').trim() || '(choice)';
+      const symbol = new vscode.DocumentSymbol(choiceText, 'choice', vscode.SymbolKind.EnumMember, lineRange(line, indent), lineRange(line, indent));
+      addSymbol(symbol);
+      openBlocks.push({ indent, symbol });
+    } else if (jumpMatch) {
+      const name = jumpMatch[1] ? `jump ${jumpMatch[2]}` : (jumpMatch[3] || jumpMatch[4]);
+      addSymbol(new vscode.DocumentSymbol(name, '', vscode.SymbolKind.Event, lineRange(line, indent), lineRange(line, indent)));
+    }
+  }
+  closeBlocksFrom(0);
+  closeLabel();
+  return rootSymbols;
+}
+
+// =============================================================================
 // SEMANTIC TOKENS (autoload references inside {...})
 // =============================================================================
 
@@ -3651,6 +3934,14 @@ function activate(context) {
   scriptWatcher.onDidCreate(refreshProjectGodotData);
   scriptWatcher.onDidDelete(refreshProjectGodotData);
   context.subscriptions.push(scriptWatcher);
+  // Timelines feed cross-timeline `jump Timeline/label` - re-read their
+  // labels when one changes on disk, then re-check every open timeline.
+  const timelineWatcher = vscode.workspace.createFileSystemWatcher('**/*.dtl');
+  const refreshTimelines = async () => { await refreshTimelineLabels(); refreshAllDiagnostics(); };
+  timelineWatcher.onDidChange(refreshTimelines);
+  timelineWatcher.onDidCreate(refreshTimelines);
+  timelineWatcher.onDidDelete(refreshTimelines);
+  context.subscriptions.push(timelineWatcher);
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(event => {
       if (event.affectsConfiguration('dtlReader.includeAddonAutoloads')) { refreshProjectGodotData(); }
@@ -3853,14 +4144,29 @@ function activate(context) {
           // -------------------------------------------------------------------
           // Labels - on `label NAME` or `jump NAME`
           // -------------------------------------------------------------------
-          const labelLineMatch = line.match(/^(\s*(?:label|jump)\s+)([A-Za-z_][A-Za-z0-9_]*)/);
-          if (labelLineMatch) {
-            const start = labelLineMatch[1].length;
-            const end = start + labelLineMatch[2].length;
-            if (position.character >= start && position.character <= end) {
-              const labelInfo = collectLabelDocumentation(document).get(labelLineMatch[2]);
+          const labelLine = parseLabelLine(line);
+          if (labelLine && position.character >= labelLine.nameStart && position.character <= labelLine.nameStart + labelLine.name.length) {
+            const labelInfo = collectDocumentLabels(document).get(labelLine.name);
+            if (labelInfo) {
+              return new vscode.Hover(createLabelDocumentation(labelLine.name, labelInfo), new vscode.Range(position.line, labelLine.nameStart, position.line, labelLine.nameStart + labelLine.name.length));
+            }
+          }
+          const jump = parseJumpLine(line);
+          if (jump && !jump.target.includes('{')) {
+            const labelEnd = jump.labelStart + jump.label.length;
+            if (jump.timeline !== null && position.character >= jump.targetStart && position.character < jump.labelStart) {
+              const labels = getTimelineLabels(jump.timeline);
+              if (labels) {
+                const markdown = new vscode.MarkdownString();
+                markdown.appendMarkdown(`**${jump.timeline}** _(Dialogic timeline)_\n\n\`${cachedTimelinePaths.get(jump.timeline)}\`\n\n`);
+                markdown.appendMarkdown(labels.size > 0 ? `Labels: ${[...labels.keys()].map(name => `\`${name}\``).join(', ')}` : '_No labels._');
+                return new vscode.Hover(markdown, new vscode.Range(position.line, jump.targetStart, position.line, jump.labelStart - 1));
+              }
+            } else if (jump.label && position.character >= jump.labelStart && position.character <= labelEnd) {
+              const target = resolveJumpTarget(document, jump);
+              const labelInfo = target && target.labels.get(jump.label);
               if (labelInfo) {
-                return new vscode.Hover(createLabelDocumentation(labelLineMatch[2], labelInfo), new vscode.Range(position.line, start, position.line, end));
+                return new vscode.Hover(createLabelDocumentation(jump.label, labelInfo, target.timeline), new vscode.Range(position.line, jump.labelStart, position.line, labelEnd));
               }
             }
           }
@@ -3903,6 +4209,9 @@ function activate(context) {
     );
   context.subscriptions.push(hoverProvider);
   context.subscriptions.push(
+    vscode.languages.registerDocumentSymbolProvider('dtl', { provideDocumentSymbols: provideTimelineOutline }, { label: 'DTL' })
+  );
+  context.subscriptions.push(
     vscode.languages.registerDocumentSemanticTokensProvider('dtl', { provideDocumentSemanticTokens: provideAutoloadSemanticTokens }, SEMANTIC_TOKENS_LEGEND)
   );
   // ===========================================================================
@@ -3913,28 +4222,23 @@ function activate(context) {
       'dtl',
       {
         provideDefinition(document, position) {
-          const wordRange =
-            document.getWordRangeAtPosition(
-              position,
-              /[A-Za-z_][A-Za-z0-9_]*/
-            );
-
-          if (!wordRange) {
+          // Only a real `jump` command line (anchored to line start), not
+          // the word "jump" inside a comment or spoken dialogue text.
+          const jump = parseJumpLine(document.lineAt(position.line).text);
+          if (!jump || jump.target.includes('{') || position.character < jump.targetStart) {
             return undefined;
           }
-
-          const line = document.lineAt(position.line).text;
-          const beforeWord = line.substring(0, wordRange.start.character);
-
-          // Only resolve a definition when the line is a real `jump` command
-          // (anchored to line start), not the word "jump" inside a comment
-          // or inside spoken dialogue text.
-          if (!/^\s*jump\s+$/.test(beforeWord)) {
+          const target = resolveJumpTarget(document, jump);
+          if (!target) {
             return undefined;
           }
-
-          const labelName = document.getText(wordRange);
-          return findLabelLocation(document, labelName);
+          // On the timeline part, or `jump Timeline/` with no label: open
+          // the timeline itself.
+          if (position.character < jump.labelStart || !jump.label) {
+            return new vscode.Location(target.uri, new vscode.Position(0, 0));
+          }
+          const labelInfo = target.labels.get(jump.label);
+          return labelInfo ? new vscode.Location(target.uri, new vscode.Position(labelInfo.line, labelInfo.nameStart)) : undefined;
         }
       }
     );
@@ -3949,7 +4253,9 @@ function activate(context) {
     vscode.workspace.onDidOpenTextDocument(updateDiagnostics)
   );
   context.subscriptions.push(
-    vscode.workspace.onDidChangeTextDocument(event => updateDiagnostics(event.document))
+    vscode.workspace.onDidChangeTextDocument(event => {
+      if (event.document.languageId === 'dtl') { refreshAllDiagnostics(); }
+    })
   );
   context.subscriptions.push(
     vscode.workspace.onDidCloseTextDocument(document => diagnosticCollection.delete(document.uri))
@@ -4299,13 +4605,38 @@ function activate(context) {
           // ===================================================================
           // JUMP
           // ===================================================================
+          // "jump |" offers this timeline's labels and the other timelines
+          // ("Name/"); "jump Name/|" offers that timeline's labels.
           const jumpCommandMatch = beforeCursor.match(/^\s*jump\s+(.*)$/);
           if (jumpCommandMatch) {
-            const prefix = jumpCommandMatch[1].toLowerCase();
-            const labelDocs = collectLabelDocumentation(document);
-            for (const label of collectDocumentLabels(document)) {
-              if (!prefix || label.toLowerCase().startsWith(prefix)) {
-                items.push(createLabelCompletion(label, labelDocs.get(label)));
+            const typed = jumpCommandMatch[1];
+            const lastSlash = typed.lastIndexOf('/');
+            if (lastSlash !== -1) {
+              const timeline = typed.slice(0, lastSlash);
+              const labelPrefix = typed.slice(lastSlash + 1);
+              const labels = getTimelineLabels(timeline);
+              if (!labels) { return items; }
+              const range = new vscode.Range(position.line, position.character - labelPrefix.length, position.line, position.character);
+              for (const [label, info] of labels) {
+                if (label.toLowerCase().startsWith(labelPrefix.toLowerCase())) {
+                  items.push(createLabelCompletion(label, info, range, timeline));
+                }
+              }
+              return items;
+            }
+            const range = new vscode.Range(position.line, position.character - typed.length, position.line, position.character);
+            const prefix = typed.toLowerCase();
+            for (const [label, info] of collectDocumentLabels(document)) {
+              if (label.toLowerCase().startsWith(prefix)) {
+                const item = createLabelCompletion(label, info, range, null);
+                item.sortText = `0_${label}`;
+                items.push(item);
+              }
+            }
+            const currentTimeline = findTimelineIdentifier(document);
+            for (const identifier of cachedTimelinePaths.keys()) {
+              if (identifier !== currentTimeline && identifier.toLowerCase().startsWith(prefix)) {
+                items.push(createTimelineCompletion(identifier, range));
               }
             }
             return items;

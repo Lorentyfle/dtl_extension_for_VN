@@ -46,8 +46,9 @@ Autocomplete for character moods works with both Dialogic's normal mood system a
 
 DTL Reader understands the relationship between `jump` and `label`.
 
-- **Ctrl+Click** (or F12) a `jump` target to go to its label.
-- Get a warning when a `jump` points to a label that does not exist in the current timeline.
+- **Ctrl+Click** (or F12) a `jump` target to go to its label, including `jump OtherTimeline/label` in another timeline.
+- See the timeline's labels, and the choices and conditions inside them, in the **Outline** view and the breadcrumbs.
+- Get an error when a `jump` points to a label or timeline that does not exist.
 - Get a warning when a BBCode tag is not properly closed.
 - Get an error for characters, moods and `{variables}` that don't exist in the Godot project.
 - Document a label with `##` comment lines right above it: the doc shows when hovering a `jump` to it.

@@ -1,4 +1,13 @@
 # Changelog
+## [1.0.8]
+- Outline for `.dtl` files (Outline view, breadcrumbs, sticky scroll, Ctrl+Shift+O): one entry per `label`, with its display name or `##` documentation next to it. Each label also lists its flow, nested like the timeline: `if`/`elif`/`else`/`while` blocks, choices, and `jump`/`return`/`[end_timeline]`. The new `dtlReader.outline.showFlow` setting turns that off to only list the labels.
+- Jumps to another timeline, `jump Timeline/label` and `jump Timeline/` (its start), as Dialogic allows. Timelines come from project.godot's `directories/dtl_directory`:
+    - Autocomplete: `jump ` suggests this timeline's labels and the other timelines, `jump Timeline/` suggests that timeline's labels.
+    - Ctrl+click on the timeline opens it, on the label goes to it.
+    - Hover shows the other timeline's labels, and the label's `##` documentation.
+- A `jump` to a missing label is now an error, not a warning: Dialogic prints "Label not found" at runtime and silently skips the jump. A missing timeline or a missing label in another timeline is an error too. A `jump {variable}` is never flagged, since Dialogic resolves it at runtime.
+- Bug: `jump Timeline/label` was flagged as a missing label.
+- Labels follow Dialogic's syntax: the name can contain spaces, and `label Name (Display Name)` is supported (colored, shown in hovers and the outline).
 ## [1.0.7]
 - Bug: in DTL Dracula, autoload properties (e.g. `VnLibrary.Stat_dict`) had the same color as plain text; they're now orange. In DTL Godot-like they're a more visible blue.
 - Autoload references inside `{}` (e.g. `{VnManager.current_vn_time}`) are now colored like everywhere else (autoload, then property, enum or value). Only real autoloads are colored this way, so Dialogic variable folders like `{chapter.value}` are unaffected. The DTL themes turn on VS Code's semantic highlighting for this.

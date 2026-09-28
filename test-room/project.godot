@@ -16,6 +16,10 @@ directories/dch_directory={
 "Test Character3": "res://characters/Test Character3.dch",
 "John Smith": "res://characters/JohnSmith.dch"
 }
+directories/dtl_directory={
+"test_timeline": "res://timelines/test_timeline.dtl",
+"chapter2": "res://timelines/chapter2.dtl"
+}
 audio/channel_defaults={
 "music":{
 "audio_bus":"Master",

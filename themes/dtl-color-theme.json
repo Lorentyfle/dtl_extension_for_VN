@@ -127,6 +127,10 @@
       "settings": { "foreground": "#4fcc96" }
     },
     {
+      "scope": "entity.name.type.timeline.dtl",
+      "settings": { "foreground": "#e0af68", "fontStyle": "italic" }
+    },
+    {
       "scope": "entity.name.label.dtl",
       "settings": { "foreground": "#e0af68", "fontStyle": "bold" }
     },
