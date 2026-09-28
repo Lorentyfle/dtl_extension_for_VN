@@ -1,7 +1,7 @@
 # DTL Reader
 
-[![Marketplace version](https://img.shields.io/visual-studio-marketplace/v/lorentyfle.dtl-reader?label=Marketplace)](https://marketplace.visualstudio.com/items?itemName=lorentyfle.dtl-reader)
-[![Installs](https://img.shields.io/visual-studio-marketplace/i/lorentyfle.dtl-reader)](https://marketplace.visualstudio.com/items?itemName=lorentyfle.dtl-reader)
+[![Marketplace version](https://vsmarketplacebadges.dev/version-short/lorentyfle.dtl-reader.svg)](https://marketplace.visualstudio.com/items?itemName=lorentyfle.dtl-reader)
+[![Installs](https://vsmarketplacebadges.dev/installs-short/lorentyfle.dtl-reader.svg)](https://marketplace.visualstudio.com/items?itemName=lorentyfle.dtl-reader)
 [![CI](https://github.com/Lorentyfle/dtl_extension_for_VN/actions/workflows/ci.yml/badge.svg)](https://github.com/Lorentyfle/dtl_extension_for_VN/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
