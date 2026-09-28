@@ -1206,6 +1206,36 @@ let cachedCharacterInfo = new Map();
  */
 let cachedAutoloadSymbols = new Map();
 
+/**
+ * Every autoload name declared in project.godot - including the addon
+ * ones left out of cachedAutoloadSymbols - so `{Dialogic.x}`-style
+ * references are never reported as unknown variables just because their
+ * members aren't loaded.
+ *
+ * @type {Set<string>}
+ */
+let cachedAutoloadNames = new Set();
+
+/**
+ * Per character, per mood, the portrait settings from the `.dch` file
+ * (see parseDchPortraits) plus, for a scene-backed mood, the scene's node
+ * types/descriptions (see parseTscnNodeInfo). Powers the mood and
+ * LayeredPortrait layer hovers.
+ *
+ * @type {Map<string, Map<string, DchPortraitInfo & {nodes: Map<string, {type: string|null, description: string|null}>|null}>>}
+ */
+let cachedPortraitDetails = new Map();
+
+/**
+ * What project.godot actually declares, so diagnostics only report an
+ * unknown character/variable when there's a real list to check against:
+ * `characters` is true when `directories/dch_directory` exists, `variables`
+ * when `[dialogic]` has a `variables={...}` entry.
+ *
+ * @type {{characters: boolean, variables: boolean}}
+ */
+let declaredProjectData = { characters: false, variables: false };
+
 function extractCharacterNames(text) {
   const sectionMatch = text.match(/(?:^|\n)\[dialogic\]([\s\S]*?)(\n\[|$)/);
   if (!sectionMatch) { return []; }
@@ -1709,14 +1739,25 @@ function extractTopLevelDictEntries(dictBody) {
 }
 
 /**
+ * @typedef {{
+ *   scene: string|null,
+ *   image: string|null,
+ *   mirror: boolean,
+ *   offset: string|null,
+ *   scale: string|null
+ * }} DchPortraitInfo
+ */
+
+/**
  * Parse a `.dch` character file's `"portraits"` dictionary into mood name
- * -> declared scene `res://` path (or `null` for a plain/single-image
- * portrait with no `"scene"` key). The file uses GDScript-ish resource
- * syntax (`&"key": value` dictionaries), so this walks brace-balanced
- * blocks rather than treating it as JSON.
+ * -> its declared settings: the LayeredPortrait/custom `scene` `res://`
+ * path (null for a plain single-image portrait), the `image` set in its
+ * `export_overrides` (if any), and its mirror/offset/scale. The file uses
+ * GDScript-ish resource syntax (`&"key": value` dictionaries), so this
+ * walks brace-balanced blocks rather than treating it as JSON.
  *
  * @param {string} text - raw .dch file content
- * @returns {Map<string, string|null>}
+ * @returns {Map<string, DchPortraitInfo>}
  */
 function parseDchPortraits(text) {
   const portraits = new Map();
@@ -1728,7 +1769,19 @@ function parseDchPortraits(text) {
 
   for (const { key, body: moodBody } of extractTopLevelDictEntries(body)) {
     const sceneMatch = moodBody.match(/&?"scene"\s*:\s*"([^"]*)"/);
-    portraits.set(key, sceneMatch ? sceneMatch[1] : null);
+    // export_overrides values are GDScript literals stored as strings, so
+    // an image path looks like "\"res://...png\"" - quotes are optional.
+    const imageMatch = moodBody.match(/&?"image"\s*:\s*"(?:\\")?([^"\\]*)/);
+    const mirrorMatch = moodBody.match(/&?"mirror"\s*:\s*(true|false)/);
+    const offsetMatch = moodBody.match(/&?"offset"\s*:\s*(Vector2i?\([^)]*\))/);
+    const scaleMatch = moodBody.match(/&?"scale"\s*:\s*([\d.]+)/);
+    portraits.set(key, {
+      scene: sceneMatch && sceneMatch[1] ? sceneMatch[1] : null,
+      image: imageMatch && imageMatch[1] ? imageMatch[1] : null,
+      mirror: !!mirrorMatch && mirrorMatch[1] === 'true',
+      offset: offsetMatch ? offsetMatch[1] : null,
+      scale: scaleMatch ? scaleMatch[1] : null,
+    });
   }
   return portraits;
 }
@@ -1767,10 +1820,11 @@ function escapeXmlText(text) {
  * of these declared just has no hover.
  *
  * @param {string} text - raw .dch file content
- * @returns {{displayName: string|null, nicknames: string[], description: string|null, color: string|null}}
+ * @returns {{displayName: string|null, nicknames: string[], description: string|null, color: string|null, defaultPortrait: string|null}}
  */
 function parseDchCharacterInfo(text) {
   const displayNameMatch = text.match(/&?"display_name"\s*:\s*"([^"]*)"/);
+  const defaultPortraitMatch = text.match(/&?"default_portrait"\s*:\s*"([^"]*)"/);
   const descriptionMatch = text.match(/&?"description"\s*:\s*"([^"]*)"/);
   const colorMatch = text.match(/&?"color"\s*:\s*(Color\([^)]*\))/);
 
@@ -1790,6 +1844,7 @@ function parseDchCharacterInfo(text) {
     nicknames,
     description: descriptionMatch ? descriptionMatch[1] : null,
     color: colorMatch ? parseGodotColor(colorMatch[1]) : null,
+    defaultPortrait: defaultPortraitMatch && defaultPortraitMatch[1] ? defaultPortraitMatch[1] : null,
   };
 }
 
@@ -1987,6 +2042,38 @@ function parseTscnNodeTree(text) {
 }
 
 /**
+ * Parse a LayeredPortrait `.tscn` scene into node path (relative to the
+ * scene root, the same shape `extra_data="set ..."` uses, e.g.
+ * "Head/LeftEye") -> that node's type and `editor_description` - the
+ * "Editor Description" field of the node's inspector, which is where a
+ * layer can be documented from inside Godot. The root node itself is
+ * skipped, same as in parseTscnNodeTree.
+ *
+ * @param {string} text - raw .tscn file content
+ * @returns {Map<string, {type: string|null, description: string|null}>}
+ */
+function parseTscnNodeInfo(text) {
+  const nodes = new Map();
+  const headerPattern = /\[node\b([^\]]*)\]/g;
+  let match;
+  while ((match = headerPattern.exec(text)) !== null) {
+    const attributes = match[1];
+    const nameMatch = attributes.match(/\bname="([^"]+)"/);
+    const parentMatch = attributes.match(/\bparent="([^"]*)"/);
+    if (!nameMatch || !parentMatch) { continue; } // the scene root has no parent=
+    const typeMatch = attributes.match(/\btype="([^"]+)"/);
+    const bodyEnd = text.indexOf('\n[', headerPattern.lastIndex);
+    const body = text.slice(headerPattern.lastIndex, bodyEnd === -1 ? text.length : bodyEnd);
+    const descriptionMatch = body.match(/^editor_description\s*=\s*"((?:[^"\\]|\\.)*)"/m);
+    nodes.set(childNodePath(parentMatch[1], nameMatch[1]), {
+      type: typeMatch ? typeMatch[1] : null,
+      description: descriptionMatch ? descriptionMatch[1].replace(/\\n/g, '\n').replace(/\\(.)/g, '$1') : null,
+    });
+  }
+  return nodes;
+}
+
+/**
  * Re-read project.godot and refresh both caches from a single file read.
  */
 async function refreshProjectGodotData() {
@@ -1998,8 +2085,12 @@ async function refreshProjectGodotData() {
     cachedVariablesTree = new Map();
     cachedCharacterInfo = new Map();
     cachedAutoloadSymbols = new Map();
+    cachedAutoloadNames = new Set();
+    cachedPortraitDetails = new Map();
+    declaredProjectData = { characters: false, variables: false };
     projectRootUri = null;
     cachedResourcePaths = [];
+    refreshAllDiagnostics();
     return;
   }
   projectRootUri = vscode.Uri.joinPath(matches[0], '..');
@@ -2009,8 +2100,15 @@ async function refreshProjectGodotData() {
     cachedCharacterNames = extractCharacterNames(text);
     cachedAudioChannels = extractAudioChannels(text);
     cachedVariablesTree = extractVariablesTree(text);
+    const dialogicSection = (text.match(/(?:^|\n)\[dialogic\]([\s\S]*?)(\n\[|$)/) || [])[1] || '';
+    declaredProjectData = {
+      characters: /directories\/dch_directory\s*=/.test(dialogicSection),
+      variables: /(?:^|\n)variables\s*=/.test(dialogicSection),
+    };
     await refreshCharacterMoods(extractCharacterPaths(text));
-    await refreshAutoloadSymbols(extractAutoloadPaths(text));
+    const autoloadPaths = extractAutoloadPaths(text);
+    cachedAutoloadNames = new Set(autoloadPaths.keys());
+    await refreshAutoloadSymbols(autoloadPaths);
   } catch (error) {
     console.error('DTL Reader: could not read project.godot', error);
     cachedCharacterNames = [];
@@ -2019,8 +2117,12 @@ async function refreshProjectGodotData() {
     cachedVariablesTree = new Map();
     cachedCharacterInfo = new Map();
     cachedAutoloadSymbols = new Map();
+    cachedAutoloadNames = new Set();
+    cachedPortraitDetails = new Map();
+    declaredProjectData = { characters: false, variables: false };
   }
   await refreshResourcePaths();
+  refreshAllDiagnostics();
 }
 
 /**
@@ -2076,6 +2178,7 @@ async function refreshAutoloadSymbols(autoloadPaths) {
 async function refreshCharacterMoods(characterPaths) {
   const moodsByCharacter = new Map();
   const infoByCharacter = new Map();
+  const detailsByCharacter = new Map();
   for (const [name, dchPath] of characterPaths) {
     try {
       const dchBytes = await vscode.workspace.fs.readFile(resolveResourcePath(dchPath));
@@ -2084,26 +2187,32 @@ async function refreshCharacterMoods(characterPaths) {
       infoByCharacter.set(name, parseDchCharacterInfo(dchText));
 
       const moods = new Map();
-      for (const [moodName, scenePath] of portraits) {
-        if (!scenePath) {
+      const details = new Map();
+      for (const [moodName, portrait] of portraits) {
+        details.set(moodName, { ...portrait, nodes: null });
+        if (!portrait.scene) {
           moods.set(moodName, null);
           continue;
         }
         try {
-          const tscnBytes = await vscode.workspace.fs.readFile(resolveResourcePath(scenePath));
-          moods.set(moodName, parseTscnNodeTree(Buffer.from(tscnBytes).toString('utf8')));
+          const tscnBytes = await vscode.workspace.fs.readFile(resolveResourcePath(portrait.scene));
+          const tscnText = Buffer.from(tscnBytes).toString('utf8');
+          moods.set(moodName, parseTscnNodeTree(tscnText));
+          details.get(moodName).nodes = parseTscnNodeInfo(tscnText);
         } catch (error) {
-          console.error(`DTL Reader: mood "${moodName}" for "${name}" declares scene "${scenePath}" but it could not be read - extra_data node-path autocomplete will be unavailable for this mood.`, error);
+          console.error(`DTL Reader: mood "${moodName}" for "${name}" declares scene "${portrait.scene}" but it could not be read - extra_data node-path autocomplete will be unavailable for this mood.`, error);
           moods.set(moodName, null); // scene referenced but unreadable - mood name still valid
         }
       }
       moodsByCharacter.set(name, moods);
+      detailsByCharacter.set(name, details);
     } catch (error) {
       console.error(`DTL Reader: character "${name}" declares .dch path "${dchPath}" but it could not be read or parsed - no mood data or hover documentation for this character.`, error);
     }
   }
   cachedCharacterMoods = moodsByCharacter;
   cachedCharacterInfo = infoByCharacter;
+  cachedPortraitDetails = detailsByCharacter;
 }
 
 /**
@@ -2500,10 +2609,50 @@ function findUnresolvedJumpDiagnostics(document) {
   return diagnostics;
 }
 
-function createLabelCompletion(name) {
+function createLabelCompletion(name, labelInfo) {
   const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Reference);
   item.detail = 'DTL label (jump target)';
+  if (labelInfo) { item.documentation = createLabelDocumentation(name, labelInfo); }
   return item;
+}
+
+/**
+ * Collect every `label NAME` in the document with its documentation: the
+ * consecutive `##` comment lines directly above it (same convention as
+ * GDScript documentation comments - a plain `#` comment doesn't count).
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {Map<string, {line: number, doc: string}>}
+ */
+function collectLabelDocumentation(document) {
+  const labels = new Map();
+  for (let line = 0; line < document.lineCount; line++) {
+    const match = document.lineAt(line).text.match(/^\s*label\s+([A-Za-z_][A-Za-z0-9_]*)/);
+    if (!match || labels.has(match[1])) { continue; }
+    const docLines = [];
+    for (let above = line - 1; above >= 0; above--) {
+      const docMatch = document.lineAt(above).text.match(/^\s*##\s?(.*)$/);
+      if (!docMatch) { break; }
+      docLines.unshift(docMatch[1]);
+    }
+    labels.set(match[1], { line, doc: docLines.join('\n').trim() });
+  }
+  return labels;
+}
+
+/**
+ * Build the hover shown for a label, on either its `label NAME`
+ * declaration or a `jump NAME` pointing at it.
+ *
+ * @param {string} name
+ * @param {{line: number, doc: string}} labelInfo
+ * @returns {vscode.MarkdownString}
+ */
+function createLabelDocumentation(name, labelInfo) {
+  const markdown = new vscode.MarkdownString();
+  markdown.appendMarkdown(`**label ${name}** _(line ${labelInfo.line + 1})_\n\n`);
+  markdown.appendMarkdown(labelInfo.doc || '_No `##` comment above this label. Write one or more `## ...` lines right above it to document it._');
+  return markdown;
 }
 
 /**
@@ -2624,20 +2773,143 @@ function createMoodSuggestions(character, typedMood) {
  * @returns {Map<string, string[]> | null}
  */
 function findMoodTreeForLine(lineText) {
+  const layeredMood = findLayeredMoodForLine(lineText);
+  return layeredMood ? cachedCharacterMoods.get(layeredMood.character).get(layeredMood.mood) : null;
+}
+
+/**
+ * Same resolution as findMoodTreeForLine, but returning which character
+ * and mood were picked - needed to also look up that mood's
+ * cachedPortraitDetails (node types/descriptions) for the hover.
+ *
+ * @param {string} lineText
+ * @returns {{character: string, mood: string} | null}
+ */
+function findLayeredMoodForLine(lineText) {
   const commandMatch = lineText.match(new RegExp(`^\\s*(?:join|update)\\s+(${CHARACTER_NAME_SOURCE})`, 'u'));
   if (!commandMatch) { return null; }
-  const moods = cachedCharacterMoods.get(stripCharacterNameQuotes(commandMatch[1]));
+  const character = stripCharacterNameQuotes(commandMatch[1]);
+  const moods = cachedCharacterMoods.get(character);
   if (!moods) { return null; }
 
   const moodTagMatch = lineText.match(new RegExp(`^\\s*(?:join|update)\\s+${CHARACTER_NAME_SOURCE}\\s*\\(([\\p{L}_][\\p{L}0-9_]*)\\)`, 'u'));
   if (moodTagMatch && moods.get(moodTagMatch[1])) {
-    return moods.get(moodTagMatch[1]);
+    return { character, mood: moodTagMatch[1] };
   }
   // No usable mood tag typed yet - fall back to whichever portrait does
   // have a scene, since that's the only one extra_data's node path could
   // possibly refer to.
-  for (const tree of moods.values()) {
-    if (tree) { return tree; }
+  for (const [mood, tree] of moods) {
+    if (tree) { return { character, mood }; }
+  }
+  return null;
+}
+
+/**
+ * Find the `(mood)` tag under the cursor - after a dialogue speaker
+ * (`John (happy):`) or join/update's character (`join John (happy)`).
+ *
+ * @param {string} line
+ * @param {number} character - cursor column
+ * @returns {{characterName: string, mood: string, range: {start: number, end: number}} | null}
+ */
+function findMoodTagAtPosition(line, character) {
+  const tagMatch = line.match(new RegExp(`^(\\s*(?:(?:join|update)\\s+)?(${CHARACTER_NAME_SOURCE})\\s*\\()([\\p{L}_][\\p{L}0-9_]*)\\)`, 'u'));
+  if (!tagMatch) { return null; }
+  const characterName = stripCharacterNameQuotes(tagMatch[2]);
+  if (RESERVED_LINE_KEYWORDS.has(characterName)) { return null; }
+  const start = tagMatch[1].length;
+  const end = start + tagMatch[3].length;
+  if (character < start || character > end) { return null; }
+  return { characterName, mood: tagMatch[3], range: { start, end } };
+}
+
+/**
+ * Build the hover shown for a mood/portrait tag: which character it
+ * belongs to, whether it's their default portrait, what it displays (a
+ * LayeredPortrait/custom scene with its top-level layers, or a single
+ * image), and any non-default mirror/offset/scale - plus every other mood
+ * that character has, for reference.
+ *
+ * @param {string} characterName
+ * @param {string} mood
+ * @returns {vscode.MarkdownString | null} null if the character is unknown
+ */
+function createMoodDocumentation(characterName, mood) {
+  const details = cachedPortraitDetails.get(characterName);
+  if (!details) { return null; }
+  const info = cachedCharacterInfo.get(characterName) || {};
+  const portrait = details.get(mood);
+  const markdown = new vscode.MarkdownString();
+  const displayName = info.displayName || characterName;
+  if (!portrait) {
+    markdown.appendMarkdown(`**${mood}** _(unknown mood of ${displayName})_\n\n`);
+  } else {
+    const isDefault = info.defaultPortrait === mood;
+    const kind = portrait.scene ? (portrait.nodes && portrait.nodes.size > 0 ? 'LayeredPortrait' : 'custom scene portrait') : 'portrait';
+    markdown.appendMarkdown(`**${mood}** _(${kind} of ${displayName}${isDefault ? ', default' : ''})_\n\n`);
+    if (portrait.scene) { markdown.appendMarkdown(`Scene: \`${portrait.scene}\`\n\n`); }
+    if (portrait.image) { markdown.appendMarkdown(`Image: \`${portrait.image}\`\n\n`); }
+    const tweaks = [];
+    if (portrait.mirror) { tweaks.push('mirrored'); }
+    if (portrait.scale && Number(portrait.scale) !== 1) { tweaks.push(`scale ${portrait.scale}`); }
+    if (portrait.offset && !/^Vector2i?\(\s*0(?:\.0)?\s*,\s*0(?:\.0)?\s*\)$/.test(portrait.offset)) { tweaks.push(`offset ${portrait.offset}`); }
+    if (tweaks.length > 0) { markdown.appendMarkdown(`_${tweaks.join(', ')}_\n\n`); }
+    const tree = (cachedCharacterMoods.get(characterName) || new Map()).get(mood);
+    const layers = tree ? tree.get('.') || [] : [];
+    if (layers.length > 0) {
+      markdown.appendMarkdown(`**Layers** (for \`extra_data="set ..."\`): ${layers.map(layer => `\`${layer}\``).join(', ')}\n\n`);
+    }
+  }
+  const otherMoods = [...details.keys()].filter(name => name !== mood);
+  if (otherMoods.length > 0) {
+    markdown.appendMarkdown(`Other moods: ${otherMoods.map(name => `\`${name}\``).join(', ')}`);
+  }
+  return markdown;
+}
+
+/**
+ * Find the LayeredPortrait layer under the cursor inside an
+ * `extra_data="set Head/LeftEye"` value, and document it: its full path,
+ * node type, the `editor_description` written for it in Godot, and its
+ * child layers. Hovering `Head` documents `Head`, hovering `LeftEye`
+ * documents `Head/LeftEye`.
+ *
+ * @param {string} line
+ * @param {number} character - cursor column
+ * @returns {{markdown: vscode.MarkdownString, range: {start: number, end: number}} | null}
+ */
+function findLayerDocumentationAtPosition(line, character) {
+  const valueMatch = line.match(/\bextra_data\s*=\s*"set\s+([^"]*)"/);
+  if (!valueMatch) { return null; }
+  const valueStart = valueMatch.index + valueMatch[0].length - 1 - valueMatch[1].length;
+  const segmentPattern = /[^/]+/g;
+  const segments = [];
+  let segmentMatch;
+  while ((segmentMatch = segmentPattern.exec(valueMatch[1])) !== null) {
+    segments.push(segmentMatch[0]);
+    const start = valueStart + segmentMatch.index;
+    const end = start + segmentMatch[0].length;
+    if (character < start || character > end) { continue; }
+
+    const layeredMood = findLayeredMoodForLine(line);
+    if (!layeredMood) { return null; }
+    const tree = cachedCharacterMoods.get(layeredMood.character).get(layeredMood.mood);
+    const details = cachedPortraitDetails.get(layeredMood.character).get(layeredMood.mood);
+    const path = segments.join('/');
+    const node = details && details.nodes ? details.nodes.get(path) : null;
+    const markdown = new vscode.MarkdownString();
+    if (!node) {
+      markdown.appendMarkdown(`**${path}** _(no such layer in ${layeredMood.character}'s "${layeredMood.mood}" portrait)_`);
+      return { markdown, range: { start, end } };
+    }
+    markdown.appendMarkdown(`**${path}** _(${node.type ? node.type + ' ' : ''}layer of ${layeredMood.character}'s "${layeredMood.mood}" portrait)_\n\n`);
+    markdown.appendMarkdown(node.description ? `${node.description}\n\n` : '_No Editor Description set on this node in Godot._\n\n');
+    const children = tree ? tree.get(path) || [] : [];
+    if (children.length > 0) {
+      markdown.appendMarkdown(`Children: ${children.map(child => `\`${child}\``).join(', ')}`);
+    }
+    return { markdown, range: { start, end } };
   }
   return null;
 }
@@ -3138,9 +3410,138 @@ function findUnclosedBaliseDiagnostics(document) {
 }
 
 /**
+ * Report characters and moods that don't exist in the Godot project:
+ * - `join`/`update`/`leave` naming a character missing from
+ *   project.godot's `directories/dch_directory` (an Error - Dialogic can't
+ *   run that event);
+ * - a dialogue line whose speaker isn't a known character (a Warning -
+ *   Dialogic then shows the whole line, "Name:" included, as narration);
+ * - a `(mood)` that the character's `.dch` file doesn't declare.
+ * Nothing is reported unless project.godot actually declares a character
+ * list, so a timeline opened outside a Godot project stays quiet.
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {vscode.Diagnostic[]}
+ */
+function findUnknownCharacterDiagnostics(document) {
+  if (!projectRootUri || !declaredProjectData.characters) { return []; }
+  const knownCharacters = new Set(cachedCharacterNames);
+  const diagnostics = [];
+  const commandPattern = new RegExp(`^(\\s*(?:join|update|leave)\\s+)(${CHARACTER_NAME_SOURCE})(\\s*\\(([\\p{L}_][\\p{L}0-9_]*)\\))?`, 'u');
+  const speakerPattern = new RegExp(`^(\\s*)(${CHARACTER_NAME_SOURCE})(\\s*\\(([\\p{L}_][\\p{L}0-9_]*)\\))?(?=\\s*:)`, 'u');
+  for (let line = 0; line < document.lineCount; line++) {
+    const text = document.lineAt(line).text;
+    const commandMatch = text.match(commandPattern);
+    const speakerMatch = commandMatch ? null : text.match(speakerPattern);
+    const match = commandMatch || speakerMatch;
+    if (!match) { continue; }
+    const name = stripCharacterNameQuotes(match[2]);
+    if (speakerMatch && RESERVED_LINE_KEYWORDS.has(name)) { continue; }
+    const nameStart = match[1].length;
+    if (!knownCharacters.has(name)) {
+      diagnostics.push(new vscode.Diagnostic(
+        new vscode.Range(line, nameStart, line, nameStart + match[2].length),
+        commandMatch
+          ? `"${name}" is not a Dialogic character of this project (not in project.godot's directories/dch_directory).`
+          : `"${name}" is not a Dialogic character of this project - Dialogic will show this whole line, "${name}:" included, as narration.`,
+        commandMatch ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning
+      ));
+      continue;
+    }
+    const mood = match[4];
+    const moods = cachedCharacterMoods.get(name);
+    if (mood && moods && moods.size > 0 && !moods.has(mood)) {
+      const moodStart = nameStart + match[2].length + match[3].indexOf(mood);
+      diagnostics.push(new vscode.Diagnostic(
+        new vscode.Range(line, moodStart, line, moodStart + mood.length),
+        `"${mood}" is not a portrait of ${name}. Available: ${[...moods.keys()].join(', ')}.`,
+        vscode.DiagnosticSeverity.Error
+      ));
+    }
+  }
+  return diagnostics;
+}
+
+/**
+ * Report `{variable.path}` references that don't exist: neither a Dialogic
+ * variable declared in project.godot's `variables={...}`, nor an autoload
+ * (`{Global.hearts}`, checked member by member when its script is loaded).
+ * Only plain dotted paths are checked - anything else inside braces (a
+ * signal's `{"key": ...}` dictionary, an expression) is left alone - and
+ * nothing is reported unless project.godot declares a variables list.
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {vscode.Diagnostic[]}
+ */
+function findUnknownVariableDiagnostics(document) {
+  if (!projectRootUri || !declaredProjectData.variables) { return []; }
+  const diagnostics = [];
+  const blockPattern = /\{([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\}/g;
+  for (let line = 0; line < document.lineCount; line++) {
+    const text = document.lineAt(line).text;
+    if (/^\s*#/.test(text)) { continue; }
+    blockPattern.lastIndex = 0;
+    let match;
+    while ((match = blockPattern.exec(text)) !== null) {
+      const problem = describeUnknownVariablePath(match[1].split('.'));
+      if (!problem) { continue; }
+      const start = match.index + 1;
+      diagnostics.push(new vscode.Diagnostic(
+        new vscode.Range(line, start, line, start + match[1].length),
+        problem,
+        vscode.DiagnosticSeverity.Error
+      ));
+    }
+  }
+  return diagnostics;
+}
+
+/**
+ * Check one `{a.b.c}` path against the Dialogic variables tree and the
+ * autoloads. Returns an explanation if it doesn't exist, or null if it
+ * does (or can't be checked, e.g. an addon autoload whose script isn't
+ * loaded).
+ *
+ * @param {string[]} segments
+ * @returns {string | null}
+ */
+function describeUnknownVariablePath(segments) {
+  const path = segments.join('.');
+  if (cachedVariablesTree.has(segments[0])) {
+    let level = cachedVariablesTree;
+    for (let i = 0; i < segments.length; i++) {
+      const entry = level && level.get(segments[i]);
+      if (!entry) { return `"{${path}}" is not a Dialogic variable: "${segments.slice(0, i).join('.')}" has no "${segments[i]}".`; }
+      level = entry.children;
+    }
+    return null;
+  }
+  if (cachedAutoloadNames.has(segments[0])) {
+    const symbols = cachedAutoloadSymbols.get(segments[0]);
+    if (!symbols || segments.length < 2) { return null; } // not loaded (addon) - can't check
+    const member = findAutoloadMember(symbols, segments[1]);
+    if (!member) { return `"${segments[1]}" is not a variable, constant or enum of the autoload ${segments[0]}.`; }
+    if (member.kind === 'enum' && segments.length >= 3 && !member.info.values.some(value => value.name === segments[2])) {
+      return `"${segments[2]}" is not a value of ${segments[0]}.${segments[1]}.`;
+    }
+    return null;
+  }
+  return `"{${path}}" is not a Dialogic variable of this project (not in project.godot's variables) nor an autoload.`;
+}
+
+/**
+ * Re-run diagnostics for every open `.dtl` document - after project.godot
+ * (or a character/script) changed, since that changes what's "unknown".
+ */
+function refreshAllDiagnostics() {
+  if (!diagnosticCollection) { return; }
+  vscode.workspace.textDocuments.forEach(updateDiagnostics);
+}
+
+/**
  * Re-scan a `.dtl` document for every diagnostic this extension knows how
- * to produce (unresolved jumps, unclosed balises) and publish the merged
- * result.
+ * to produce (unresolved jumps, unclosed balises, unknown characters,
+ * moods and variables) and publish the merged result.
  *
  * @param {vscode.TextDocument} document
  */
@@ -3151,10 +3552,62 @@ function updateDiagnostics(document) {
 
   const diagnostics = [
     ...findUnresolvedJumpDiagnostics(document),
-    ...findUnclosedBaliseDiagnostics(document)
+    ...findUnclosedBaliseDiagnostics(document),
+    ...findUnknownCharacterDiagnostics(document),
+    ...findUnknownVariableDiagnostics(document)
   ];
 
   diagnosticCollection.set(document.uri, diagnostics);
+}
+
+// =============================================================================
+// SEMANTIC TOKENS (autoload references inside {...})
+// =============================================================================
+
+/**
+ * Token types this extension reports. Mapped back to the same TextMate
+ * scopes the grammar uses for `Global.State.IDLE` outside braces (see
+ * package.json's semanticTokenScopes), so both look the same.
+ *
+ * @type {vscode.SemanticTokensLegend}
+ */
+const SEMANTIC_TOKENS_LEGEND = new vscode.SemanticTokensLegend(['class', 'property', 'enum', 'enumMember', 'function']);
+
+/**
+ * Inside `{...}`, the grammar can't tell `{Global.hearts}` (an autoload
+ * property) from `{chapter.value}` (a Dialogic variable folder) - they
+ * have the same shape. The extension knows the autoload names, so it
+ * marks just those references with semantic tokens: the autoload as a
+ * class, then its member as property/enum/constant, and an enum's value.
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {vscode.SemanticTokens}
+ */
+function provideAutoloadSemanticTokens(document) {
+  const builder = new vscode.SemanticTokensBuilder(SEMANTIC_TOKENS_LEGEND);
+  const blockPattern = /\{([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\}/g;
+  const memberTokenType = { function: 'function', variable: 'property', constant: 'enumMember', enum: 'enum' };
+  for (let line = 0; line < document.lineCount; line++) {
+    const text = document.lineAt(line).text;
+    blockPattern.lastIndex = 0;
+    let match;
+    while ((match = blockPattern.exec(text)) !== null) {
+      const segments = match[1].split('.');
+      if (cachedVariablesTree.has(segments[0]) || !cachedAutoloadNames.has(segments[0])) { continue; }
+      let column = match.index + 1;
+      builder.push(line, column, segments[0].length, 0);
+      const symbols = cachedAutoloadSymbols.get(segments[0]);
+      if (!symbols || segments.length < 2) { continue; }
+      column += segments[0].length + 1;
+      const member = findAutoloadMember(symbols, segments[1]);
+      if (!member) { continue; }
+      builder.push(line, column, segments[1].length, SEMANTIC_TOKENS_LEGEND.tokenTypes.indexOf(memberTokenType[member.kind]));
+      if (member.kind === 'enum' && segments.length >= 3) {
+        builder.push(line, column + segments[1].length + 1, segments[2].length, SEMANTIC_TOKENS_LEGEND.tokenTypes.indexOf('enumMember'));
+      }
+    }
+  }
+  return builder.build();
 }
 
 // =============================================================================
@@ -3381,6 +3834,37 @@ function activate(context) {
             return new vscode.Hover(variableHit.markdown, variableHit.range);
           }
           // -------------------------------------------------------------------
+          // Moods / portraits and LayeredPortrait layers
+          //
+          // join John (happy) left [extra_data="set Head/LeftEye"]
+          //            ^^^^^                         ^^^^ ^^^^^^^ hovering any
+          // -------------------------------------------------------------------
+          const moodHit = findMoodTagAtPosition(line, position.character);
+          if (moodHit) {
+            const markdown = createMoodDocumentation(moodHit.characterName, moodHit.mood);
+            if (markdown) {
+              return new vscode.Hover(markdown, new vscode.Range(position.line, moodHit.range.start, position.line, moodHit.range.end));
+            }
+          }
+          const layerHit = findLayerDocumentationAtPosition(line, position.character);
+          if (layerHit) {
+            return new vscode.Hover(layerHit.markdown, new vscode.Range(position.line, layerHit.range.start, position.line, layerHit.range.end));
+          }
+          // -------------------------------------------------------------------
+          // Labels - on `label NAME` or `jump NAME`
+          // -------------------------------------------------------------------
+          const labelLineMatch = line.match(/^(\s*(?:label|jump)\s+)([A-Za-z_][A-Za-z0-9_]*)/);
+          if (labelLineMatch) {
+            const start = labelLineMatch[1].length;
+            const end = start + labelLineMatch[2].length;
+            if (position.character >= start && position.character <= end) {
+              const labelInfo = collectLabelDocumentation(document).get(labelLineMatch[2]);
+              if (labelInfo) {
+                return new vscode.Hover(createLabelDocumentation(labelLineMatch[2], labelInfo), new vscode.Range(position.line, start, position.line, end));
+              }
+            }
+          }
+          // -------------------------------------------------------------------
           // Normal commands
           //
           // label
@@ -3418,6 +3902,9 @@ function activate(context) {
       }
     );
   context.subscriptions.push(hoverProvider);
+  context.subscriptions.push(
+    vscode.languages.registerDocumentSemanticTokensProvider('dtl', { provideDocumentSemanticTokens: provideAutoloadSemanticTokens }, SEMANTIC_TOKENS_LEGEND)
+  );
   // ===========================================================================
   // DEFINITION PROVIDER (ctrl+click / F12 on a `jump NAME` target)
   // ===========================================================================
@@ -3815,9 +4302,10 @@ function activate(context) {
           const jumpCommandMatch = beforeCursor.match(/^\s*jump\s+(.*)$/);
           if (jumpCommandMatch) {
             const prefix = jumpCommandMatch[1].toLowerCase();
+            const labelDocs = collectLabelDocumentation(document);
             for (const label of collectDocumentLabels(document)) {
               if (!prefix || label.toLowerCase().startsWith(prefix)) {
-                items.push(createLabelCompletion(label));
+                items.push(createLabelCompletion(label, labelDocs.get(label)));
               }
             }
             return items;

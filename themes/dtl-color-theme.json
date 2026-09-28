@@ -96,6 +96,7 @@
     "focusBorder": "#3a5f7d",
     "widget.shadow": "#00000066"
   },
+  "semanticHighlighting": true,
   "tokenColors": [
     {
       "settings": { "foreground": "#d4d4d4" }

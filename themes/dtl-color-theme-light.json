@@ -68,6 +68,7 @@
     "gitDecoration.deletedResourceForeground": "#e45649",
     "gitDecoration.untrackedResourceForeground": "#50a14f"
   },
+  "semanticHighlighting": true,
   "tokenColors": [
     {
       "comment": "-- DTL Light: a clean, Atom-One-Light-inspired palette, mirroring the same scope structure as DTL Dark so every concept keeps the same relative identity, just recolored for a bright background. --"

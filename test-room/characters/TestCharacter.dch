@@ -3,9 +3,13 @@
 &"nicknames": ["X", "John 2"],
 &"description": "This is John, the hero",
 &"color": Color(0.58, 0.39, 0.78, 1),
+&"default_portrait": "Default",
 &"portraits": {
 &"Default": {
-&"mirror": false,
+&"export_overrides": {
+&"image": "\"res://assets/bg.png\""
+},
+&"mirror": true,
 &"offset": Vector2(0, 0),
 &"scale": 1.0
 },

@@ -21,7 +21,7 @@ join "John Smith" right
 leave "John Smith"
 
 update TestCharacter (Default) pos=x0.5 size=y1 [animation="Bounce" extra_data="set Head/RightEye"]
-TestCharacter (Default): My mood just changed, {chapter.value} is the current chapter.
+TestCharacter (Default): My mood just changed, {chapter} is the current chapter.
 
 # Hover over "apply_tint" or "has_achievement" below to see their signature
 # and ## documentation comment, read live from scripts/Global.gd.
@@ -42,7 +42,7 @@ TestCharacter: [color=red]Danger![/color] [wave amp=25 freq=5]Wheee[/wave][br]Ne
 
 set {chapter} = 1
 if {chapter} == 1
-    TestCharacter: This is chapter {chapter.value}.
+    TestCharacter: This is chapter {chapter}.
 elif {chapter} == 2
     TestCharacter: Somehow chapter two.
 else
@@ -64,6 +64,8 @@ audio music "res://assets/theme.ogg"
 [style name="default"]
 [text_input text="Type something" var="{answer}" placeholder="..."]
 
+## Loops back here until the chapter reaches 3.
+## Hover "loop_start" in the jump below to read this.
 label loop_start
 while {chapter} < 3
     set {chapter} += 1

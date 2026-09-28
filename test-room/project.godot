@@ -37,6 +37,8 @@ variables={
 "Floating": 1.0,
 },
 "Mamamya": ":OO",
+"chapter": 1,
+"answer": "",
 }
 
 [autoload]

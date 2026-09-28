@@ -85,6 +85,16 @@ every DTL Reader feature without risking real project data.
   argument should color keys, strings, `false` and numbers differently.
 - **Filtered paths**: `[voice path="` should only offer the `.ogg` files,
   `[background scene="` only `.tscn` files.
+- **Mood / layer hover**: hover `LayeredPortrait` or `Default` in a
+  `(mood)` tag, then `Head` and `LeftEye` in `extra_data="set Head/LeftEye"`
+  (LeftEye has an Editor Description in the .tscn).
+- **Label doc**: hover `loop_start` in `jump loop_start` - the `##` lines
+  above `label loop_start` should show.
+- **Unknown names**: the timeline should have no errors. Type
+  `join Nobody left`, `Ghost: hi`, `join TestCharacter (Angry) left` or
+  `{nope}` - each should get an error or warning.
+- **Autoload colors in `{}`**: `{Global.hearts}` should be colored like
+  `Global.hearts` on an `if` line; `{variable.test}` should not change.
 - **No stray suggestions in dialogue**: typing `.` or a space at the end
   of a dialogue sentence should NOT open a suggestion list.
 - **BBCode**: in dialogue type `[co` - `code` and `color` should appear;

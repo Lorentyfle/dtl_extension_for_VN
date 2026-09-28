@@ -68,6 +68,7 @@
     "gitDecoration.deletedResourceForeground": "#ff5555",
     "gitDecoration.untrackedResourceForeground": "#50fa7b"
   },
+  "semanticHighlighting": true,
   "tokenColors": [
     {
       "comment": "-- DTL Dracula: color values based on the Dracula theme (draculatheme.com), the palette Lorentyfle uses personally day to day - credit to Derek S. (Zeno Rocha & Dracula PRO's design has additional collaborators, but Derek S. is who this palette choice is attributed to here) for the palette. Structure mirrors DTL Dark scope-for-scope. --"
@@ -288,7 +289,7 @@
     {
       "scope": "variable.other.member.dtl",
       "settings": {
-        "foreground": "#f8f8f2"
+        "foreground": "#ffb86c"
       }
     },
     {

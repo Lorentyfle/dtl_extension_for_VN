@@ -68,6 +68,7 @@
     "gitDecoration.deletedResourceForeground": "#ff5f5f",
     "gitDecoration.untrackedResourceForeground": "#83d3c9"
   },
+  "semanticHighlighting": true,
   "tokenColors": [
     {
       "comment": "-- DTL Godot-like: inspired by (not pixel-extracted from) the Godot 4 script editor's default look - navy background, pink/red keywords, soft blue base types, teal engine/bracket accents, warm yellow strings. An approximation for a familiar feel, not a byte-exact port. --"
@@ -288,7 +289,7 @@
     {
       "scope": "variable.other.member.dtl",
       "settings": {
-        "foreground": "#bce0ff"
+        "foreground": "#8fcbff"
       }
     },
     {

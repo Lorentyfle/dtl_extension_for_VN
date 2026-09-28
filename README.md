@@ -49,6 +49,12 @@ DTL Reader understands the relationship between `jump` and `label`.
 - **Ctrl+Click** (or F12) a `jump` target to go to its label.
 - Get a warning when a `jump` points to a label that does not exist in the current timeline.
 - Get a warning when a BBCode tag is not properly closed.
+- Get an error for characters, moods and `{variables}` that don't exist in the Godot project.
+- Document a label with `##` comment lines right above it: the doc shows when hovering a `jump` to it.
+
+### Hover documentation
+
+Hover a command, a BBCode tag, a character, a mood, a LayeredPortrait layer, a `{variable}` or an autoload member to see its documentation. It's read live from your Godot project: `.dch` files, `.tscn` scenes (the nodes' Editor Description), project.godot and `##` comments in scripts.
 
 ![Navigation and diagnostics](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/navigation_and_warnings.gif)
 

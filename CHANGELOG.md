@@ -1,4 +1,16 @@
 # Changelog
+## [1.0.7]
+- Bug: in DTL Dracula, autoload properties (e.g. `VnLibrary.Stat_dict`) had the same color as plain text; they're now orange. In DTL Godot-like they're a more visible blue.
+- Autoload references inside `{}` (e.g. `{VnManager.current_vn_time}`) are now colored like everywhere else (autoload, then property, enum or value). Only real autoloads are colored this way, so Dialogic variable folders like `{chapter.value}` are unaffected. The DTL themes turn on VS Code's semantic highlighting for this.
+- When project.godot is found, errors and warnings for things that don't exist in the project:
+    - `join`/`update`/`leave` with an unknown character.
+    - A dialogue line whose speaker is not a known character (a warning, since Dialogic then shows the whole line as narration).
+    - A `(mood)` the character doesn't have.
+    - A `{variable}` that is neither a Dialogic variable of project.godot nor an autoload, or an autoload member that doesn't exist (`{Global.nope}`).
+    - Nothing is reported if project.godot has no character list / no variables list, and addon autoloads that aren't loaded are never reported.
+- `##` comment lines directly above a `label` are its documentation: shown when hovering the label or a `jump` to it, and in the `jump` suggestions.
+- Hover documentation for moods/portraits: which character it belongs to, whether it's the default portrait, its scene or image, non-default mirror/offset/scale, its LayeredPortrait layers, and the character's other moods.
+- Hover documentation for LayeredPortrait layers in `extra_data="set Head/LeftEye"`: the node's type, its "Editor Description" from Godot, and its child layers.
 ## [1.0.6]
 - Addition of hover documentation for Dialogic variables inside `{}`: shows the variable's default value and type (from project.godot), or the content of a variable group.
 - Autocomplete and hover for autoloads now also work in `set` values and `while` conditions, e.g. `set {VnLibrary.current_vn_time} = VnLibrary.TimeId.CHAP2_R1`.

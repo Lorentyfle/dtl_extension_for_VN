@@ -2,7 +2,7 @@
   "name": "dtl-reader",
   "displayName": "DTL Reader",
   "description": "Syntax highlighting for Dialogic2 TimeLine (.dtl) files",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "publisher": "lorentyfle",
   "icon": "./icons/favicon.png",
   "engines": {
@@ -65,6 +65,18 @@
         "label": "DTL Godot-like",
         "uiTheme": "vs-dark",
         "path": "./themes/dtl-color-theme-godot.json"
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "dtl",
+        "scopes": {
+          "class": ["support.class.global.dtl"],
+          "property": ["variable.other.member.dtl"],
+          "enum": ["entity.name.type.enum.dtl"],
+          "enumMember": ["constant.other.enum-member.dtl"],
+          "function": ["support.function.dtl"]
+        }
       }
     ],
     "configuration": {
