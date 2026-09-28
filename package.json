@@ -16,7 +16,7 @@
     "Programming Languages",
     "Themes"
   ],
-  "main": "./extension.js",
+  "main": "./src/extension.js",
   "contributes": {
     "languages": [
       {

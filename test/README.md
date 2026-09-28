@@ -50,4 +50,4 @@ exports.run = suite(async () => {
 });
 ```
 
-`check(name, condition, found)` records a result - `found` is shown when it fails. `start()` waits until the project has been read. `ext.exports.forTests` gives a few internal functions to test directly (see the end of `activate` in `extension.js`).
+`check(name, condition, found)` records a result - `found` is shown when it fails. `start()` waits until the project has been read. `ext.exports.forTests` gives a few internal functions to test directly (see the end of `activate` in `src/extension.js`).
