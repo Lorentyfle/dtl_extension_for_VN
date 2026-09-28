@@ -19,11 +19,17 @@ every DTL Reader feature without risking real project data.
   (`TestCharacter`, `John Smith`), two audio channels (`music`, `sound`),
   and a `variables={...}` dictionary (`variable.test`/`Ttttt`/`Floating`,
   `Mamamya`) for `{variable.path}` autocomplete - plus an `[autoload]`
-  section declaring one global script, `Global`.
+  section declaring a global script, `Global`, and an autoload node
+  (scene), `SoundManager`.
 - `scripts/Global.gd` - a fake autoload script with a handful of `##`-
-  documented functions (and one deliberately undocumented, and one
-  `_`-prefixed to confirm it's excluded), for `do`/`if`/`elif`
-  `Global.function_name(...)` autocomplete and hover.
+  documented functions (one deliberately undocumented, one `_`-prefixed to
+  confirm it's excluded, one with a multi-line signature), plus variables,
+  constants, a named enum (`State`) and an unnamed one, for `do`/`if`/
+  `elif` `Global.member` and `{Global.property}` autocomplete and hover.
+- `scripts/SoundManager.tscn` + `scripts/SoundManager.gd` - an autoload
+  that points at a scene: its members come from the root node's script.
+- `scripts/Global.gd.uid`, `assets/bg.png.import` - Godot metadata files,
+  which must NOT show up in `res://` path autocomplete.
 - `characters/TestCharacter.dch` - one plain portrait (`Default`, no scene)
   and one scene-backed portrait (`LayeredPortrait`), plus `display_name`,
   `nicknames`, `description`, and `color` for the character hover.
@@ -34,13 +40,22 @@ every DTL Reader feature without risking real project data.
   contains a space - for testing the quoted-character-name feature.
 - `assets/theme.ogg`, `assets/voice_line.ogg`, `assets/bg.png` - empty
   placeholder files so `res://` path autocomplete has real files to offer.
+- `translations/dialogic_timeline_translations.csv` - a Dialogic
+  translation CSV (en + partial fr) for translation mode.
+- `glossaries/world_glossary.tres` - a Dialogic glossary (Mana/MP, Test
+  Room) listed in project.godot, for the glossary colors and hovers.
+- `translations/dialogic_character_translations.csv`,
+  `dialogic_glossary_translations.csv` - translated character names and
+  glossary entries.
+- `timelines/chapter2.dtl` - a second timeline (registered in
+  `directories/dtl_directory`) for cross-timeline `jump chapter2/label`.
 - `timelines/test_timeline.dtl` - one file touching every language
   construct: comments, translation ids, `join`/`update`/`leave --All--`,
   transforms (`pos`/`size`), mood tags, `extra_data`, dialogue, narration,
   choices with conditions, `{variables}`, all four BBCode balises plus a
   custom one, every bracket command (`wait`, `wait_input`, `signal`,
   `voice`, `audio`, `clear`, `background`, `style`, `text_input`,
-  `end_timeline`), flow control (`set`/`if`/`elif`/`else`/`while`),
+  `end_timeline`), flow control (`set`/`if`/`elif`/`else`, and a loop made of a condition jumping back to a label),
   `label`/`jump`, a quoted character name (`"John Smith"`), and a
   single-quoted attribute value (`[wait time='1.5']`).
 
@@ -65,6 +80,96 @@ every DTL Reader feature without risking real project data.
 - **`res://` path autocomplete**: inside `[voice path="`,
   `[background arg="`, or after `audio music "` - the placeholder files
   under `assets/` should be suggested.
+- **Autoload autocomplete**: type `do ` - `Global` and `SoundManager`
+  should appear; `do Global.` lists only functions, `if Global.` lists
+  functions, variables, constants and `State`, `if Global.State.` lists
+  its values, and `TestCharacter: {Global.` lists variables/constants.
+  Inside `do Global.has_achievement("` nothing should be suggested.
+- **`set` values**: after `set {Global.state} = `, `Global` should be
+  suggested, and `Global.State.` should list the enum's values. The
+  right-hand side should show 3 different colors (autoload, enum, value).
+- **Variable hover**: hover `test` in `{variable.test}` - it should show
+  `Default value: 1` (int); hovering `variable` lists the whole group.
+- **Signal dictionary colors**: both `[signal ...]` lines with a `{...}`
+  argument should color keys, strings, `false` and numbers differently.
+- **Filtered paths**: `[voice path="` should only offer the `.ogg` files,
+  `[background scene="` only `.tscn` files.
+- **Mood / layer hover**: hover `LayeredPortrait` or `Default` in a
+  `(mood)` tag, then `Head` and `LeftEye` in `extra_data="set Head/LeftEye"`
+  (LeftEye has an Editor Description in the .tscn).
+- **Label doc**: hover `loop_start` in `jump loop_start` - the `##` lines
+  above `label loop_start` should show.
+- **Unknown names**: the timeline should have no errors. Type
+  `join Nobody left`, `Ghost: hi`, `join TestCharacter (Angry) left` or
+  `{nope}` - each should get an error or warning.
+- **Autoload colors in `{}`**: `{Global.hearts}` should be colored like
+  `Global.hearts` on an `if` line; `{variable.test}` should not change.
+- **Outline**: open the Outline view - `loop_start` should list the
+  `if` block and both choices with their jumps, `jump loop_start`
+  saying "back to line 69". Set `DTL Reader > Outline: Style` to
+  `indentation` (no jumps, labels not grouping) or `dialogic` (labels
+  only), then edit the file or reopen it to refresh the Outline view.
+- **Cross-timeline jumps**: Ctrl+click `chapter2` or `intro` in
+  `jump chapter2/intro` - it should open `chapter2.dtl`. Type
+  `jump chapter2/` - `intro` and `Ending With Spaces` should be suggested.
+  Change it to `jump chapter2/nope` or `jump chapter9/intro` - error.
+- **Translation ids**: in `chapter2.dtl`, `label choice A1 (First choice)
+  #id:cc3` - type `jump chapter2/` in test_timeline and `choice A1` should
+  be suggested without the `#id`. Adding ` #id:x` after a jump is an error.
+- **.dch files**: open `characters/TestCharacter.dch` - it should be
+  highlighted. Inside a portrait, type `&"` for the portrait keys; after
+  `&"default_portrait": ` the portraits are suggested; hover any key.
+  Setting `default_portrait` to a missing portrait gives an error.
+- **Translation mode**: run "DTL: Select Translation Language" and pick
+  `fr`. The greeting and "Ask about the weather" lines show their French
+  text at the end; "Say goodbye" shows "not translated yet" and a hint.
+  Use the lightbulb on it (or right-click > Translate Line) - the text is
+  written into `translations/dialogic_timeline_translations.csv`. Hover
+  `#id:greeting` to see both languages.
+- **Translation View**: with `test_timeline.dtl` open, click the globe
+  button (top right) and pick `fr` (and "Other language..." > `ja` to try
+  several) - a "test_timeline (fr, ja)" tab opens beside it with the 3
+  translatable lines, one line per language. The globe button of that tab
+  changes its languages. Fill in "Say goodbye",
+  press Ctrl+S, and check `translations/dialogic_timeline_translations.csv`.
+  Click a line in either editor - the other scrolls to it.
+- **BBCode preview**: the line with "All at once" should show a bold
+  italic rainbow, a yellow outlined word, text fading out, a dotted
+  "hint" (hover it) and a heart after `[char=2665]`. Turn it off with
+  `DTL Reader > Preview: Bbcode Effects`.
+- **Settings**: set `DTL Reader > Diagnostics: Unknown Speaker` to `off`
+  and `Ghost: hi` no longer gets a warning.
+- **.dch autocomplete (more)**: in `TestCharacter.dch`, rename the
+  `Default` portrait to anything else, then type `&"` inside `portraits` -
+  `Default` is suggested as a whole portrait, since the timeline uses it.
+  In an empty new `.dch` file, a complete character is suggested. The
+  `color` value gets a color swatch - click it for the color picker.
+- **Text effects**: in the "Welcome to the Test Room" line, hover
+  `[pause`, `[portrait` and `[aa]`. Type `[portrait=` in a TestCharacter line
+  - its portraits are suggested; `[portrait=Nope]` is an error.
+  `<Oh well./Too bad./Never mind.>` is colored as a random selection.
+- **Label references**: put the cursor on `loop_start` and press Shift+F12 -
+  both jumps are listed (one is in chapter2.dtl); F2 renames all of them.
+  "2 jumps here" is shown above `label loop_start`.
+- **Glossary**: "Test Room", "mana" and "MP" in the same line are colored
+  and underlined (from `glossaries/world_glossary.tres`); hover them. With
+  the translation language set to `fr`, "mana" shows its French text.
+  Hover `TestCharacter` to see "Super Jean", its French name. Ctrl+click
+  "mana" - `world_glossary.tres` opens at the Mana entry.
+- **Character / glossary translation**: open `characters/TestCharacter.dch`
+  (or `glossaries/world_glossary.tres`) and click the globe button, pick
+  `fr` - the characters' names and nicknames (or the glossary entries)
+  are listed. Fill one in, Ctrl+S, and check
+  `translations/dialogic_character_translations.csv` (or `_glossary_`).
+  In `fr` mode, "PM" (the French "MP") is recognized as a glossary word.
+- **Expressions**: type `set ` (variables), `set {chapter} ` (operators),
+  `set {variable.Ttttt} = ` (true/false), `if {chapter} ` (comparisons),
+  `if {chapter} == ` (values).
+- **No stray suggestions in dialogue**: typing `.` or a space at the end
+  of a dialogue sentence should NOT open a suggestion list.
+- **BBCode**: in dialogue type `[co` - `code` and `color` should appear;
+  after `[b][i]Hi [/`, `/i` then `/b` should be suggested. Hover
+  `[wave` or `[/b]` for their Godot documentation.
 - **Hover documentation**: hover over `join`, `[wait]`, `time=` inside
   `[wait ...]`, `pos=` on the `update` line, and `left`/`center`-style
   position keywords.

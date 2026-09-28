@@ -68,6 +68,7 @@
     "gitDecoration.deletedResourceForeground": "#ff5f5f",
     "gitDecoration.untrackedResourceForeground": "#83d3c9"
   },
+  "semanticHighlighting": true,
   "tokenColors": [
     {
       "comment": "-- DTL Godot-like: inspired by (not pixel-extracted from) the Godot 4 script editor's default look - navy background, pink/red keywords, soft blue base types, teal engine/bracket accents, warm yellow strings. An approximation for a familiar feel, not a byte-exact port. --"
@@ -154,6 +155,13 @@
       "scope": "markup.list.choice.dtl",
       "settings": {
         "foreground": "#66e6ec"
+      }
+    },
+    {
+      "scope": "entity.name.type.timeline.dtl",
+      "settings": {
+        "foreground": "#ff8ccc",
+        "fontStyle": "italic"
       }
     },
     {
@@ -283,6 +291,42 @@
       "scope": "support.type.audio-kind.dtl",
       "settings": {
         "foreground": "#83d3c9"
+      }
+    },
+    {
+      "scope": "variable.other.member.dtl",
+      "settings": {
+        "foreground": "#8fcbff"
+      }
+    },
+    {
+      "scope": "entity.name.type.enum.dtl",
+      "settings": {
+        "foreground": "#c7ffed"
+      }
+    },
+    {
+      "scope": "constant.other.enum-member.dtl",
+      "settings": {
+        "foreground": "#a1ffe0"
+      }
+    },
+    {
+      "scope": "support.type.property-name.signal.dtl",
+      "settings": {
+        "foreground": "#a9d3ff"
+      }
+    },
+    {
+      "scope": "punctuation.definition.dictionary.signal.dtl",
+      "settings": {
+        "foreground": "#ffb373"
+      }
+    },
+    {
+      "scope": "punctuation.separator.dictionary.signal.dtl",
+      "settings": {
+        "foreground": "#b6bdc7"
       }
     },
     {

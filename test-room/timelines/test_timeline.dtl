@@ -12,6 +12,7 @@ TestCharacter (LayeredPortrait): Hello! [b]Welcome[/b] to the [i]test[/i] room. 
 
 set {variable.test} = 2
 TestCharacter: The test variable is {variable.test}, and Mamamya says {Mamamya}.
+TestCharacter: Welcome to the Test Room! I'm out of mana, 0 MP left.[pause=0.5] [portrait=LayeredPortrait]<Oh well./Too bad./Never mind.>[aa]
 
 Bare narration line with no character prefix, still gets [u]styled[/u] and [Shake]custom[/Shake] text.
 
@@ -21,7 +22,7 @@ join "John Smith" right
 leave "John Smith"
 
 update TestCharacter (Default) pos=x0.5 size=y1 [animation="Bounce" extra_data="set Head/RightEye"]
-TestCharacter (Default): My mood just changed, {chapter.value} is the current chapter.
+TestCharacter (Default): My mood just changed, {chapter} is the current chapter.
 
 # Hover over "apply_tint" or "has_achievement" below to see their signature
 # and ## documentation comment, read live from scripts/Global.gd.
@@ -31,9 +32,19 @@ if Global.has_achievement("intro_complete")
 elif not Global.has_achievement("intro_complete")
     TestCharacter: First time here, huh?
 
+# Autoload members beyond functions: variables, constants and enums, plus an
+# autoload NODE (SoundManager points at a .tscn - its root script is used).
+do SoundManager.play_sfx("door_open")
+set {Global.state} = Global.State.TALKING
+if Global.state == Global.State.TALKING and Global.hearts < Global.MAX_HEARTS
+    TestCharacter: You look hurt. You have {Global.hearts} hearts left.
+
+TestCharacter: [color=red]Danger![/color] [wave amp=25 freq=5]Wheee[/wave][br]New line, [rainbow]fabulous[/rainbow].
+TestCharacter: [b][i][rainbow freq=2]All at once[/rainbow][/i][/b], [outline_size=4][outline_color=black][color=yellow]outlined[/color][/outline_color][/outline_size], [fade start=2 length=8]fading away...[/fade] [hint="Hover me"]hint[/hint] [char=2665]
+
 set {chapter} = 1
 if {chapter} == 1
-    TestCharacter: This is chapter {chapter.value}.
+    TestCharacter: This is chapter {chapter}.
 elif {chapter} == 2
     TestCharacter: Somehow chapter two.
 else
@@ -47,6 +58,7 @@ TestCharacter2:
 [wait time="1.0" skippable="true"]
 [wait_input]
 [signal arg_type="dict" arg="{\"Effect\":\"Rain\"}"]
+[signal arg_type="dict" arg="{"type":"dice","c":"Laripo","s":false,"n":2}"]
 [voice path="res://assets/voice_line.ogg"]
 audio music "res://assets/theme.ogg"
 [clear text="true"]
@@ -54,10 +66,19 @@ audio music "res://assets/theme.ogg"
 [style name="default"]
 [text_input text="Type something" var="{answer}" placeholder="..."]
 
+## Loops back here until the chapter reaches 3 (Dialogic has no while:
+## a loop is a condition jumping back to a label).
+## Hover "loop_start" in the jump below to read this.
 label loop_start
-while {chapter} < 3
+if {chapter} < 3:
     set {chapter} += 1
     jump loop_start
+
+# Cross-timeline jumps: Ctrl+click either part to open chapter2.dtl.
+- Go to chapter two
+    jump chapter2/intro
+- Go to its ending
+    jump chapter2/Ending With Spaces
 
 leave --All--
 [end_timeline]

@@ -7,5 +7,6 @@
 [node name="Head" type="Sprite2D" parent="."]
 
 [node name="LeftEye" type="Sprite2D" parent="Head"]
+editor_description = "The left eye. Swap its texture for blinking."
 
 [node name="RightEye" type="Sprite2D" parent="Head"]

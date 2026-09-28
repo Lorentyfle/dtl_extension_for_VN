@@ -1,0 +1,30 @@
+[gd_resource type="Resource" script_class="DialogicGlossary" load_steps=2 format=3 uid="uid://dtlglossarytest"]
+
+[ext_resource type="Script" path="res://addons/dialogic/Modules/Glossary/glossary_resource.gd" id="1_gloss"]
+
+[resource]
+script = ExtResource("1_gloss")
+entries = {
+"Mana": {
+"_translation_id": "e1",
+"alternatives": ["MP"],
+"case_sensitive": false,
+"color": Color(0.4, 0.6, 1, 1),
+"extra": "Regenerates slowly over time.",
+"name": "Mana",
+"text": "The magical energy every spell consumes.",
+"title": "Mana"
+},
+"MP": "Mana",
+"Test Room": {
+"_translation_id": "e2",
+"alternatives": [],
+"extra": "",
+"name": "Test Room",
+"text": "The fake Godot project DTL Reader is tested in.",
+"title": "The Test Room"
+}
+}
+enabled = true
+_translation_id = "g1"
+_translation_keys = {}

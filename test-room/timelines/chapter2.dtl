@@ -1,0 +1,15 @@
+# Second test timeline - target of the cross-timeline jumps in
+# test_timeline.dtl ("jump chapter2/intro").
+
+## Start of chapter two, jumped to from test_timeline.dtl.
+label intro (Chapter Two)
+TestCharacter: Welcome to chapter two.
+
+label Ending With Spaces
+TestCharacter: Labels can contain spaces.
+jump test_timeline/loop_start
+
+## A label with a display name and a translation id (as Dialogic writes
+## it once translations are enabled) - the #id is not part of its name.
+label choice A1 (First choice) #id:cc3
+TestCharacter: Jump here with "jump chapter2/choice A1".
