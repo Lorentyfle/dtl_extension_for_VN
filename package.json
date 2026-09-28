@@ -1,10 +1,15 @@
 {
   "name": "dtl-reader",
   "displayName": "DTL Reader",
-  "description": "Dialogic 2 timeline (.dtl) and character (.dch) support: highlighting, autocomplete, documentation, error checking, outline, BBCode preview and translation tools.",
+  "description": "Dialogic 2 timeline (.dtl) and character (.dch) support for Godot: highlighting, autocomplete, documentation, error checking with quick fixes, navigation, BBCode preview, translation tools and Play in Godot.",
   "version": "1.7.0",
   "publisher": "lorentyfle",
+  "license": "MIT",
   "icon": "./icons/favicon.png",
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -12,9 +17,29 @@
     "type": "git",
     "url": "https://github.com/Lorentyfle/dtl_extension_for_VN"
   },
+  "bugs": {
+    "url": "https://github.com/Lorentyfle/dtl_extension_for_VN/issues"
+  },
+  "homepage": "https://github.com/Lorentyfle/dtl_extension_for_VN#readme",
   "categories": [
     "Programming Languages",
+    "Linters",
+    "Snippets",
     "Themes"
+  ],
+  "keywords": [
+    "dialogic",
+    "dialogic 2",
+    "godot",
+    "godot 4",
+    "visual novel",
+    "dialogue",
+    "timeline",
+    "dtl",
+    "dch",
+    "bbcode",
+    "translation",
+    "gamedev"
   ],
   "main": "./src/extension.js",
   "contributes": {

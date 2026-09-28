@@ -179,6 +179,7 @@ function describeTranslatableLine(text, key) {
 /** Line breaks inside a translation are shown as a literal "\n", so each translation stays on one line. */
 const escapeViewText = text => text.replace(/\r?\n/g, '\\n');
 
+/** The reverse of escapeViewText: a typed "\n" is a line break of the translation. */
 const unescapeViewText = text => text.replace(/\\n/g, '\n');
 
 /**

@@ -2,9 +2,13 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Run Extension",
+            "name": "Run Extension (test-room)",
             "type": "extensionHost",
-            "request": "launch"
+            "request": "launch",
+            "args": [
+                "--extensionDevelopmentPath=${workspaceFolder}",
+                "${workspaceFolder}/test-room"
+            ]
         }
     ]
 }

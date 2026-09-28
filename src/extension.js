@@ -27,10 +27,13 @@ const glossaryFeature = require('./features/glossary');
 const customEvents = require('./features/custom-events');
 const play = require('./features/play');
 
-// =============================================================================
-// ACTIVATE
-// =============================================================================
-
+/**
+ * Called by VS Code when a .dtl or .dch file is opened: registers every
+ * provider and command, watches the project's files, and reads the project.
+ *
+ * @param {vscode.ExtensionContext} context
+ * @returns {{forTests: object}} internals for the test suites (not an API)
+ */
 function activate(context) {
   state.bbcodeCharDecorationType = vscode.window.createTextEditorDecorationType({});
   context.subscriptions.push(state.bbcodeCharDecorationType, { dispose: () => bbcodePreview.bbcodeDecorationTypes.forEach(type => type.dispose()) });
@@ -208,10 +211,7 @@ function activate(context) {
   return { forTests: { rankCharacterFolders: addToProject.rankCharacterFolders, godotUserDataDir: play.godotUserDataDir, setConfigFileValues: resources.setConfigFileValues, parseCustomEventScript: customEvents.parseCustomEventScript, findGodotExecutable: play.findGodotExecutable, computeDialogicEventIndices: syntax.computeDialogicEventIndices, translationViewUri: translationView.translationViewUri, scriptStrings: () => state.cachedScriptStrings, resourcePaths: () => state.cachedResourcePaths } };
 }
 
-// =============================================================================
-// DEACTIVATE
-// =============================================================================
-
+/** Nothing to clean up by hand: everything registered is in context.subscriptions. */
 function deactivate() {}
 
 Object.assign(module.exports, {

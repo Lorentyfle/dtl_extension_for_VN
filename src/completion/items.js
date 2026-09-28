@@ -200,11 +200,17 @@ function createCommandCompletion(entry) {
   return item;
 }
 
+/**
+ * Completion item for a character position (`left`, `center`...), after
+ * join/update.
+ *
+ * @param {{name: string, description: string}} position - one of DTL_POSITIONS
+ * @returns {vscode.CompletionItem}
+ */
 function createPositionCompletion(position) {
-  const item = new vscode.CompletionItem(position.name,vscode.CompletionItemKind.EnumMember);
+  const item = new vscode.CompletionItem(position.name, vscode.CompletionItemKind.EnumMember);
   item.detail = 'DTL character position';
-  item.documentation =
-    new vscode.MarkdownString(position.description);
+  item.documentation = new vscode.MarkdownString(position.description);
   return item;
 }
 
@@ -373,12 +379,24 @@ function createTimelineCompletion(identifier, range) {
 // AUDIO HELPERS
 // =============================================================================
 
+/**
+ * Completion item for an audio channel, after `audio`.
+ *
+ * @param {string} name
+ * @returns {vscode.CompletionItem}
+ */
 function createAudioKindCompletion(name) {
   const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.EnumMember);
   item.detail = 'Dialogic audio channel (from project.godot)';
   return item;
 }
 
+/**
+ * Completion item for an empty audio path (`""`, the cursor inside), after
+ * `audio channel`.
+ *
+ * @returns {vscode.CompletionItem}
+ */
 function createAudioPathCompletion() {
   const item = new vscode.CompletionItem('""', vscode.CompletionItemKind.Snippet);
   item.detail = 'Audio file path';

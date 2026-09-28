@@ -226,6 +226,10 @@ function updateTranslationDecorations(editor) {
   editor.setDecorations(state.translationDecorationType, decorations);
 }
 
+/**
+ * Show the translations at the end of the lines in every visible editor
+ * (see updateTranslationDecorations).
+ */
 function updateAllTranslationDecorations() {
   if (!state.translationDecorationType) { return; }
   vscode.window.visibleTextEditors.forEach(updateTranslationDecorations);

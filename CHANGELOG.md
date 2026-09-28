@@ -1,4 +1,8 @@
 # Changelog
+## [Unreleased] (2.0.0)
+- Faster while typing in a big project: re-checking the open timelines and characters reads the project's timelines once per round instead of once per document, saving a script only re-reads that script (unless it's an autoload's or a custom event's), and Go to Symbol in Workspace (Ctrl+T) no longer re-reads every timeline on each key typed.
+- A custom event's hover example uses its first parameter's default value.
+- For contributors: the code is split into modules by feature (`src/`), with automated tests run in VS Code on copies of `test-room/` (`npm test`, 146 checks), CI on Linux and Windows, and a [CONTRIBUTING.md](CONTRIBUTING.md) guide.
 ## [1.7.0]
 - Bug: the `[` of `[wait]`, `[wait_input]`, `[text_input]`, `[audio]`, `[voice]`, `[clear]`, `[background]`, `[style]` and `[end_timeline]` was colored like the event's name, while its `]` had the bracket color. Both brackets now look the same, in every theme.
 - Themes: `true`/`false` had nearly (DTL Godot-like) or exactly (DTL Light) the color of the parameter names beside them (`hide_text=true`). They now have the keyword color, as in Godot's own editor.
