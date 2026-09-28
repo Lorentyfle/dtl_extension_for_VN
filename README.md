@@ -7,6 +7,7 @@ Write your Dialogic timelines outside the Godot editor with syntax highlighting,
 ![A short screen recording scrolling through a highlighted `.dtl` file, showing the DTL Dark theme in action.](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/what_dtl_looks_like.gif)
 
 - [Features at a glance](#features-at-a-glance)
+- [With or without a Godot project](#with-or-without-a-godot-project)
 - [Writing timelines](#writing-timelines)
 - [Characters, moods and portraits](#characters-moods-and-portraits)
 - [Variables and autoloads](#variables-and-autoloads)
@@ -36,6 +37,24 @@ Write your Dialogic timelines outside the Godot editor with syntax highlighting,
 | **Character files** | `.dch` highlighting, autocomplete of every key and value Dialogic uses, color picker, portraits suggested from your timelines |
 
 Everything is read live from your Godot project (`project.godot`, `.dch`, `.tscn`, `.gd` and the translation CSVs), and updates as soon as those files change.
+
+## With or without a Godot project
+
+DTL Reader works in two ways, depending on whether it finds your Godot project's `project.godot` in the opened folder:
+
+| | With `project.godot` | Without - each file on its own |
+|---|---|---|
+| Highlighting, themes, BBCode preview, outline | yes | yes |
+| Events, parameters, BBCode, text effects: autocomplete and documentation | yes | yes |
+| Characters, moods, `{variables}`, audio channels, `res://` paths | the project's (with their documentation) | the ones the timeline already uses |
+| Labels: jumps, Ctrl+Click, references, rename | every timeline, including `jump Timeline/label` | inside the timeline |
+| Autoloads (`do Global.foo()`...) | yes | - |
+| Glossary colors and hovers | yes | - |
+| Error checking | everything | missing labels and unclosed BBCode (nothing to check the rest against) |
+| Translation (mode, Translation View, hovers) | yes | - (it needs the project's CSV files) |
+| `.dch` files | everything | keys, values and documentation of the file itself |
+
+Open the folder containing `project.godot` (or a parent folder of it) to get everything.
 
 ## Writing timelines
 
@@ -109,11 +128,11 @@ Tags can be nested and combined in any way (`[b][i][rainbow][wave]...`). Hex col
 
 ## Glossary
 
-The words of your Dialogic glossaries (listed in Dialogic's Glossary settings) are recognized in dialogue, narration and choices, the way Dialogic finds them in the game: whole words, the entry's name and alternatives, with its case sensitivity - and their translated forms in translation mode. They get their glossary color with a dotted underline, and hovering one shows its title, text and extra info - translated in translation mode. Glossary words are also suggested first while writing dialogue.
+The words of your Dialogic glossaries (listed in Dialogic's Glossary settings) are recognized in dialogue, narration and choices, the way Dialogic finds them in the game: whole words, the entry's name and alternatives, with its case sensitivity - and their translated forms in translation mode. They get their glossary color with a dotted underline, hovering one shows its title, text and extra info - translated in translation mode - and Ctrl+click opens its entry in the glossary file. Glossary words are also suggested first while writing dialogue.
 
 ## Navigation and outline
 
-- **Ctrl+Click** (or F12) a `jump` target to go to its label - `jump OtherTimeline/label` opens the other timeline.
+- **Ctrl+Click** (or F12) a `jump` target to go to its label - `jump OtherTimeline/label` opens the other timeline. Ctrl+Click a glossary word to open its glossary entry.
 - **Find All References** (Shift+F12) on a label or a jump lists every jump to it, in every timeline. **Rename** (F2) renames a label and every jump to it at once.
 - Above each label, **"N jumps here"** (click to list them) - or "no jump here" for the labels nothing leads to.
 - **Document a label** with `##` comment lines right above it: the documentation shows when hovering the label or a `jump` to it, and in the `jump` suggestions.
@@ -144,10 +163,10 @@ Nothing is reported about characters, variables or timelines when your project d
 
 ## Translation
 
-DTL Reader works with the translation CSV files Dialogic generates (**Update CSV files** in Dialogic's Translation settings). After adding a new language, open Godot and click **Collect translation** so the game can use it.
+DTL Reader works with the translation CSV files Dialogic generates (**Update CSV files** in Dialogic's Translation settings), so translation needs the Godot project. After adding a new language, open Godot and click **Collect translation** so the game can use it.
 
 - **Hover a line's `#id:`** to see it in every language. Hover a character to see their translated names, and a glossary word in translation mode to see its translated entry.
-- **Translation View** - **DTL: Open Translation View**, or the globe button at the top right of a timeline, a character (`.dch`) or a glossary (`.tres`): for a timeline, the whole timeline as a translation sheet beside it, with each line's original text and an editable line for each language you pick (one or several, to translate or to compare). Type freely, then save with **Ctrl+S** to write every change into the CSV. Both editors scroll together; the view's own globe button changes its languages. From a `.dch` file it lists every character's name and nicknames, from a glossary every entry's name, alternatives, text and extra.
+- **Translation View** - **DTL: Open Translation View**, or the globe button at the top right of a timeline, a character (`.dch`) or a glossary (`.tres`): for a timeline, the whole timeline as a translation sheet beside it, with each line's original text and an editable line for each language you pick (one or several, to translate or to compare). Type freely, then save with **Ctrl+S** to write every change into the CSV. Both editors scroll together; the view's own globe button changes its languages. From a `.dch` file it lists every character's name and nicknames, from a glossary every entry's name, alternatives, text and extra; from anywhere else, it asks what to translate - the characters, a glossary or any timeline.
 - **Translation mode** - set `dtlReader.translation.language` (or run **DTL: Select Translation Language**): each translatable line shows its translation at its end, untranslated lines are marked, **DTL: Translate Line** (lightbulb or right-click) translates the current line, and **DTL: Go to Next Untranslated Line** finds the next one.
 
 ## Character files (.dch)
@@ -187,6 +206,7 @@ Four themes made for DTL (they also color the rest of VS Code):
 | `dtlReader.diagnostics.*` | see [Error checking](#error-checking) | Severity of each check, or `off` |
 | `dtlReader.translation.language` | empty | Translation mode language (e.g. `fr`) |
 | `dtlReader.translation.showInline` | on | In translation mode, show translations at the end of the lines |
+| `dtlReader.translation.globeButton` | `dialogic` | Where the translation globe button shows: `dialogic` files, `everywhere` or `off` |
 
 ## Commands
 
@@ -202,7 +222,7 @@ From the Command Palette (Ctrl+Shift+P):
 
 ## Getting started
 
-Install the extension and open the folder of your Godot project (the one containing `project.godot`). Open any `.dtl` file - the extension activates automatically. A minimal timeline looks like this:
+Install the extension and open the folder of your Godot project (the one containing `project.godot`) - or any folder, see [With or without a Godot project](#with-or-without-a-godot-project). Open any `.dtl` file - the extension activates automatically. A minimal timeline looks like this:
 
 ```dtl
 join Laripo left

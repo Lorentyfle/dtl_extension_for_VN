@@ -154,7 +154,8 @@ every DTL Reader feature without risking real project data.
 - **Glossary**: "Test Room", "mana" and "MP" in the same line are colored
   and underlined (from `glossaries/world_glossary.tres`); hover them. With
   the translation language set to `fr`, "mana" shows its French text.
-  Hover `TestCharacter` to see "Super Jean", its French name.
+  Hover `TestCharacter` to see "Super Jean", its French name. Ctrl+click
+  "mana" - `world_glossary.tres` opens at the Mana entry.
 - **Character / glossary translation**: open `characters/TestCharacter.dch`
   (or `glossaries/world_glossary.tres`) and click the globe button, pick
   `fr` - the characters' names and nicknames (or the glossary entries)

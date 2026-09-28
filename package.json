@@ -2,7 +2,7 @@
   "name": "dtl-reader",
   "displayName": "DTL Reader",
   "description": "Dialogic 2 timeline (.dtl) and character (.dch) support: highlighting, autocomplete, documentation, error checking, outline, BBCode preview and translation tools.",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "publisher": "lorentyfle",
   "icon": "./icons/favicon.png",
   "engines": {
@@ -193,7 +193,7 @@
       "editor/title": [
         {
           "command": "dtlReader.openTranslationView",
-          "when": "editorLangId == dtl || editorLangId == dch || resourceExtname == .tres",
+          "when": "dtlReader.showTranslationGlobe",
           "group": "navigation"
         },
         {
@@ -499,13 +499,29 @@
             "type": "string",
             "default": "",
             "order": 1,
-            "markdownDescription": "Language you are translating the timelines to, as a locale code of Dialogic's translation CSV files (e.g. `fr`, `ja`, `pt_BR`). When set, each translatable line (with a `#id:`) shows its translation next to the original text, and **DTL: Translate Line** writes translations into the CSV. Leave empty to turn translation mode off. Also settable with **DTL: Select Translation Language**."
+            "markdownDescription": "Language you are translating the timelines to, as a locale code of Dialogic's translation CSV files (e.g. `fr`, `ja`, `pt_BR`). When set, each translatable line (with a `#id:`) shows its translation next to the original text, and **DTL: Translate Line** writes translations into the CSV. Leave empty to turn translation mode off. Needs the Godot project (`project.godot`) and Dialogic's translation CSVs. Also settable with **DTL: Select Translation Language**."
           },
           "dtlReader.translation.showInline": {
             "type": "boolean",
             "default": true,
             "order": 2,
             "description": "In translation mode, show each line's translation (or 'not translated yet') at the end of the line."
+          },
+          "dtlReader.translation.globeButton": {
+            "type": "string",
+            "enum": [
+              "dialogic",
+              "everywhere",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Only on files with something to translate: timelines, characters (.dch), the glossaries listed in project.godot and Dialogic's translation CSVs.",
+              "On every file - it asks what to translate (the characters, a glossary or a timeline).",
+              "Never - the Open Translation View command stays in the Command Palette."
+            ],
+            "default": "dialogic",
+            "order": 3,
+            "markdownDescription": "Where the globe button (**Open Translation View**) shows at the top right of an editor. Translation needs the Godot project (`project.godot`), so without it the button never shows."
           }
         }
       }

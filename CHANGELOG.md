@@ -1,4 +1,16 @@
 # Changelog
+## [1.5.1]
+- Ctrl+click (Go to Definition) on a glossary word in a timeline opens its glossary `.tres` file at that entry.
+- New setting `dtlReader.translation.globeButton` for where the translation globe button shows:
+    - `dialogic` (default): only on files with something to translate - timelines, characters (`.dch`), the glossaries listed in project.godot and Dialogic's translation CSVs.
+    - `everywhere`: on every file (it asks what to translate).
+    - `off`: never (the command stays in the Command Palette).
+- Bug: the globe button showed on every `.tres` file, not only glossaries.
+- Clear behavior with and without a Godot project (see the README's "With or without a Godot project"):
+    - Without `project.godot`, translation is off entirely: no globe button, no translations at the end of the lines, no quick fix, no `#id:` hover, and the translation commands say the project is needed. (Before, translation mode could mark every line "not translated yet".)
+    - Without `project.godot`, a timeline is on its own and autocomplete uses what it already contains instead of suggesting nothing: its speakers and joined characters, their `(mood)` tags, its `{variables}`, its audio channels and its `res://` paths.
+    - Without `project.godot`, Find All References, Rename and the "N jumps here" link stay in the current timeline instead of reading every `.dtl` file of the folder.
+- Bug: choosing to translate a timeline from the "What to translate" list did nothing. The list now shows every timeline of the project (with the characters and the glossaries), and picking one opens its Translation View.
 ## [1.5.0]
 - Removed `while`: Dialogic has no `while` (nor `for`) - its condition event only knows `if`, `elif` and `else`, and a loop is a condition jumping back to a label. `while` is no longer highlighted as a keyword, indented as a block, listed in the outline or given suggestions; a `while` line is now shown as what Dialogic makes of it, text.
 - Translation View for characters and glossaries, not only timelines:
