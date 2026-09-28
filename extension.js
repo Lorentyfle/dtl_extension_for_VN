@@ -8825,6 +8825,766 @@ async function provideWorkspaceSymbols(query) {
 }
 
 // =============================================================================
+// HOVER (timelines)
+// =============================================================================
+
+/**
+ * Hover documentation in a timeline: bracket events and their parameters,
+ * text effects and BBCode tags, commands, characters, moods and portrait
+ * layers, variables, autoload members, labels and positions. Glossary and
+ * translation hovers have their own providers.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Position} position
+ * @returns {vscode.Hover | undefined}
+ */
+function provideTimelineHover(document, position) {
+  const line = document.lineAt(position.line).text;
+  // -------------------------------------------------------------------
+  // Bracket commands
+  //
+  // [wait]
+  // [audio]
+  // [voice]
+  // [b] ... [/b]   <- Godot BBCode tags, opening or closing
+  // -------------------------------------------------------------------
+  const isCharacterCommandLine = /^\s*(?:join|update|leave)\b/.test(line);
+  const bracketRegex =
+    /\[\/?([A-Za-z_][A-Za-z0-9_]*\+?)/g;
+  let match;
+  while (
+    (match = bracketRegex.exec(line)) !== null
+  ) {
+    const start = match.index;
+    const end =
+      start + match[0].length;
+    if (
+      position.character >= start &&
+      position.character <= end
+    ) {
+      const commandName = match[1];
+      // In text, "[signal=..." is the text effect, not the [signal ...] event.
+      const inText = !isCharacterCommandLine && (isPlayerFacingTextLine(line) || /^\s*-\s/.test(line) || bbcodePreviewStart(document, line) !== -1);
+      const effectEntry = inText && /^[=\]]/.test(line.slice(end)) ? DTL_TEXT_EFFECTS.find(candidate => candidate.name === commandName) : undefined;
+      // join/update/leave's own [options] bracket holds attribute
+      // names (e.g. "[fade=..."), never BBCode, so a same-named
+      // BBCode tag (like [fade]) mustn't shadow them there.
+      const entry = effectEntry ||
+        DTL_ENTRIES.find(
+          entry =>
+            entry.name === commandName
+        ) || (isCharacterCommandLine ? undefined
+          : (isPlayerFacingTextLine(line) || /^\s*-\s/.test(line) ? DTL_TEXT_EFFECTS.find(entry => entry.name === commandName) : undefined)
+            || DTL_BBCODES.find(entry => entry.name === commandName));
+      if (!entry) {
+        // Not a real bracket command - this is just an attribute
+        // name that happens to sit directly against '[' (e.g.
+        // join/update/leave's first inline option, "[fade=...]").
+        // Stop scanning and let the parameter-hover logic below
+        // handle it instead of giving up on hover entirely.
+        break;
+      }
+      const range =
+        new vscode.Range(
+          position.line,
+          start,
+          position.line,
+          end
+        );
+      return new vscode.Hover(
+        createDocumentation(entry),
+        range
+      );
+    }
+  }
+  // -------------------------------------------------------------------
+  // Bracket command PARAMETERS
+  //
+  // [wait time=1.5]
+  //        ^^^^ hovering this
+  // -------------------------------------------------------------------
+  const paramWordRange = document.getWordRangeAtPosition(position, /[A-Za-z_][A-Za-z0-9_]*/);
+  if (paramWordRange) {
+    const paramName = document.getText(paramWordRange);
+    const afterParam = line.substring(paramWordRange.end.character);
+    if (/^\s*=/.test(afterParam)) {
+      const beforeParam = line.substring(0, paramWordRange.start.character);
+      const enclosingBracketMatch = beforeParam.match(/\[([A-Za-z_][A-Za-z0-9_]*)\s+[^\]]*$/);
+      if (enclosingBracketMatch) {
+        const enclosingEntry = findBracketOrBbcodeEntry(enclosingBracketMatch[1]);
+        if (enclosingEntry && enclosingEntry.variables && enclosingEntry.variables[paramName]) {
+          const markdown = new vscode.MarkdownString();
+          markdown.appendMarkdown(`**${paramName}** _(parameter of \`[${enclosingEntry.name}]\`)_\n\n`);
+          markdown.appendMarkdown(enclosingEntry.variables[paramName]);
+          return new vscode.Hover(markdown, paramWordRange);
+        }
+      } else {
+        // join/update/leave's own trailing [options] bracket has no
+        // command name inside it (e.g. "join Laripo center
+        // [extra_data=...]"), so it needs its own lookup against the
+        // enclosing command's `variables` instead.
+        const trailingBracketMatch = beforeParam.match(/^\s*(join|update|leave)\b[^[]*\[[^\]]*$/);
+        if (trailingBracketMatch) {
+          const commandEntry = DTL_ENTRIES.find(
+            candidate => candidate.name === trailingBracketMatch[1] && candidate.type === 'command'
+          );
+          if (commandEntry && commandEntry.variables && commandEntry.variables[paramName]) {
+            const markdown = new vscode.MarkdownString();
+            markdown.appendMarkdown(`**${paramName}** _(parameter of \`${commandEntry.name}\`)_\n\n`);
+            markdown.appendMarkdown(commandEntry.variables[paramName]);
+            return new vscode.Hover(markdown, paramWordRange);
+          }
+        } else {
+          // pos=/size=/rot= transform tokens sit between the
+          // character/position slot and the bracket, e.g.
+          // "join Laripo pos=x0.3 size=y1 [...]".
+          const transformMatch = beforeParam.match(
+            /^\s*(join|update)\b\s+\S+(?:\s+[A-Za-z_][A-Za-z0-9_]*=\S*)*\s*$/
+          );
+          if (transformMatch) {
+            const commandEntry = DTL_ENTRIES.find(
+              candidate => candidate.name === transformMatch[1] && candidate.type === 'command'
+            );
+            if (commandEntry && commandEntry.transform_command && commandEntry.transform_command[paramName]) {
+              const markdown = new vscode.MarkdownString();
+              markdown.appendMarkdown(`**${paramName}** _(transform parameter of \`${commandEntry.name}\`)_\n\n`);
+              markdown.appendMarkdown(commandEntry.transform_command[paramName]);
+              return new vscode.Hover(markdown, paramWordRange);
+            }
+          }
+        }
+      }
+    }
+  }
+  // -------------------------------------------------------------------
+  // Position keywords
+  //
+  // join Laripo center|
+  //             ^^^^^^ hovering this
+  // -------------------------------------------------------------------
+  const positionWordRange = document.getWordRangeAtPosition(position, /[A-Za-z_][A-Za-z0-9_]*/);
+  if (positionWordRange) {
+    const positionWord = document.getText(positionWordRange);
+    const positionEntry = DTL_POSITIONS.find(position => position.name === positionWord);
+    if (positionEntry) {
+      const beforePosition = line.substring(0, positionWordRange.start.character);
+      // Only the first token after "join <character>" / "update
+      // <character>" is really this position argument, so this
+      // stays scoped to that slot rather than any stray word that
+      // happens to match a position name (e.g. inside dialogue text).
+      if (/^\s*(join|update)\b\s+\S+\s*$/.test(beforePosition)) {
+        const markdown = new vscode.MarkdownString();
+        markdown.appendMarkdown(`**${positionEntry.name}** _(DTL character position)_\n\n`);
+        markdown.appendMarkdown(positionEntry.description);
+        return new vscode.Hover(markdown, positionWordRange);
+      }
+    }
+  }
+  // -------------------------------------------------------------------
+  // Character names
+  //
+  // join John left       "John Smith": Hello
+  //      ^^^^                ^^^^^^^^^^^^ hovering either
+  // -------------------------------------------------------------------
+  const characterHit = findCharacterNameAtPosition(document, position);
+  if (characterHit) {
+    const info = cachedCharacterInfo.get(characterHit.name);
+    if (info && (info.displayName || info.nicknames.length > 0 || info.description || info.color || info.translationId)) {
+      return new vscode.Hover(createCharacterDocumentation(characterHit.name, info), characterHit.range);
+    }
+  }
+  // -------------------------------------------------------------------
+  // Autoload scripts / nodes and their members
+  //
+  // do Global.apply_tint()      if Global.state == Global.State.IDLE
+  //    ^^^^^^ ^^^^^^^^^^           {Global.max_hp}       ^^^^ hovering any part
+  // -------------------------------------------------------------------
+  const autoloadHit = findAutoloadReferenceAtPosition(document, position);
+  if (autoloadHit) {
+    return new vscode.Hover(autoloadHit.markdown, autoloadHit.range);
+  }
+  // -------------------------------------------------------------------
+  // Dialogic variables
+  //
+  // {variable.test}      set {chapter} = 1
+  //           ^^^^            ^^^^^^^ hovering either
+  // -------------------------------------------------------------------
+  const variableHit = findVariableAtPosition(document, position);
+  if (variableHit) {
+    return new vscode.Hover(variableHit.markdown, variableHit.range);
+  }
+  // -------------------------------------------------------------------
+  // Moods / portraits and LayeredPortrait layers
+  //
+  // join John (happy) left [extra_data="set Head/LeftEye"]
+  //            ^^^^^                         ^^^^ ^^^^^^^ hovering any
+  // -------------------------------------------------------------------
+  const moodHit = findMoodTagAtPosition(line, position.character);
+  if (moodHit) {
+    const markdown = createMoodDocumentation(moodHit.characterName, moodHit.mood);
+    if (markdown) {
+      return new vscode.Hover(markdown, new vscode.Range(position.line, moodHit.range.start, position.line, moodHit.range.end));
+    }
+  }
+  const layerHit = findLayerDocumentationAtPosition(line, position.character);
+  if (layerHit) {
+    return new vscode.Hover(layerHit.markdown, new vscode.Range(position.line, layerHit.range.start, position.line, layerHit.range.end));
+  }
+  // -------------------------------------------------------------------
+  // Labels - on `label NAME` or `jump NAME`
+  // -------------------------------------------------------------------
+  const labelLine = parseLabelLine(line);
+  if (labelLine && position.character >= labelLine.nameStart && position.character <= labelLine.nameStart + labelLine.name.length) {
+    const labelInfo = collectDocumentLabels(document).get(labelLine.name);
+    if (labelInfo) {
+      return new vscode.Hover(createLabelDocumentation(labelLine.name, labelInfo), new vscode.Range(position.line, labelLine.nameStart, position.line, labelLine.nameStart + labelLine.name.length));
+    }
+  }
+  const jump = parseJumpLine(line);
+  if (jump && !jump.target.includes('{')) {
+    const labelEnd = jump.labelStart + jump.label.length;
+    if (jump.timeline !== null && position.character >= jump.targetStart && position.character < jump.labelStart) {
+      const labels = getTimelineLabels(jump.timeline);
+      if (labels) {
+        const markdown = new vscode.MarkdownString();
+        markdown.appendMarkdown(`**${jump.timeline}** _(Dialogic timeline)_\n\n\`${cachedTimelinePaths.get(jump.timeline)}\`\n\n`);
+        markdown.appendMarkdown(labels.size > 0 ? `Labels: ${[...labels.keys()].map(name => `\`${name}\``).join(', ')}` : '_No labels._');
+        return new vscode.Hover(markdown, new vscode.Range(position.line, jump.targetStart, position.line, jump.labelStart - 1));
+      }
+    } else if (jump.label && position.character >= jump.labelStart && position.character <= labelEnd) {
+      const target = resolveJumpTarget(document, jump);
+      const labelInfo = target && target.labels.get(jump.label);
+      if (labelInfo) {
+        return new vscode.Hover(createLabelDocumentation(jump.label, labelInfo, target.timeline), new vscode.Range(position.line, jump.labelStart, position.line, labelEnd));
+      }
+    }
+  }
+  // -------------------------------------------------------------------
+  // Normal commands
+  //
+  // label
+  // jump
+  // join
+  // update
+  // leave
+  // -------------------------------------------------------------------
+  const wordRange =
+    document.getWordRangeAtPosition(
+      position
+    );
+
+  if (!wordRange) {
+    return undefined;
+  }
+
+  const word =
+    document.getText(wordRange);
+
+  const entry =
+    DTL_ENTRIES.find(
+      entry => entry.name === word
+    );
+
+  if (!entry) {
+    return undefined;
+  }
+
+  return new vscode.Hover(
+    createDocumentation(entry),
+    wordRange
+  );
+}
+
+// =============================================================================
+// COMPLETION (timelines)
+// =============================================================================
+
+/**
+ * Suggestions in a timeline, depending on where the cursor is: events and
+ * characters at the start of a line, their parameters and values inside
+ * brackets, moods, labels and timelines after `jump`, variables, autoloads
+ * and operators in expressions, text effects and BBCode in text, words
+ * already used while writing dialogue... Each context returns as soon as it
+ * recognizes the cursor's position, so nothing unrelated is suggested.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Position} position
+ * @param {vscode.CancellationToken} token
+ * @param {vscode.CompletionContext} context
+ * @returns {vscode.CompletionItem[] | vscode.CompletionList}
+ */
+function provideTimelineCompletions(document, position, token, context) {
+  isolatedDocumentData = projectRootUri ? null : collectIsolatedDocumentData(document, position.line);
+  const line = document.lineAt(position.line).text;
+  const beforeCursor = line.substring(0,position.character);
+  const items = [];
+  // The character that auto-opened the suggest widget (one of the
+  // trigger characters registered below), or null when the person
+  // is typing a word or asked explicitly with Ctrl+Space. Contexts
+  // that only make sense for a specific trigger (e.g. '.' after an
+  // autoload name) check this, so e.g. a '.' ending a dialogue
+  // sentence doesn't pop up a list of every word in the file.
+  const triggerCharacter = context && context.triggerKind === vscode.CompletionTriggerKind.TriggerCharacter
+    ? context.triggerCharacter
+    : null;
+  // ===================================================================
+  // VARIABLE PATH: "{variable.te" anywhere - dialogue text, a
+  // bracket option's value, or a bare "set {...}" line. Checked
+  // first since it can appear inside any of those other contexts,
+  // and its own "{" would otherwise just be stray text to them.
+  // ===================================================================
+  const openBraceIndex = beforeCursor.lastIndexOf('{');
+  const closeBraceIndex = beforeCursor.lastIndexOf('}');
+  if (openBraceIndex > closeBraceIndex) {
+    return createVariableSuggestions(beforeCursor.slice(openBraceIndex + 1));
+  }
+  // ===================================================================
+  // AUTOLOADS: "do Global." / "if Global." / "elif Global." -
+  // either the autoload name itself, or a member once "Name." has
+  // been typed. Usable anywhere in the expression (not just right
+  // after the keyword), since if/elif conditions can combine an
+  // autoload reference with variables/operators. Always returns
+  // here (even an empty list) - nothing else below applies to an
+  // expression line, and falling through used to dump every
+  // character name and dialogue word into the list instead.
+  // ===================================================================
+  const setTargetItems = createSetTargetSuggestions(beforeCursor, position);
+  if (setTargetItems) {
+    return setTargetItems;
+  }
+  if (isGlobalScriptExpressionLine(beforeCursor)) {
+    return createGlobalScriptSuggestions(beforeCursor, triggerCharacter).map(item => {
+      // Ranges are built on line 0 inside the helper - move them to this line.
+      if (item.range && item.range.start.line === 0 && position.line !== 0) {
+        item.range = new vscode.Range(position.line, item.range.start.character, position.line, item.range.end.character);
+      }
+      return item;
+    });
+  }
+  // ===================================================================
+  // MOOD TAG: "John (happy" or "join John (happy" - checked first
+  // since the JOIN/LEAVE/UPDATE block below would otherwise treat
+  // the '(' as a stray token and return an empty list before this
+  // ever gets a chance to run.
+  // ===================================================================
+  const moodContext = detectMoodContext(beforeCursor);
+  if (moodContext) {
+    return createMoodSuggestions(moodContext.character, moodContext.typedMood);
+  }
+  // ===================================================================
+  // JOIN / LEAVE / UPDATE
+  // ===================================================================
+  const characterCommandMatch = beforeCursor.match(/^\s*(join|leave|update)(?:\s+(.*))?$/);
+  if (characterCommandMatch) {
+    const command = characterCommandMatch[1];
+    const argumentsText = characterCommandMatch[2] || '';
+    // Once a '[' has been typed, we are past the character/position
+    // slot entirely and inside the trailing options bracket instead -
+    // that case is handled below by the dedicated bracket handler, so
+    // this block does nothing (and, importantly, does NOT return).
+    // A '[' inside an already-closed quoted character name (rare,
+    // but names can contain almost anything) doesn't count, so
+    // completed quoted spans are stripped before checking.
+    const hasOpenBracket = argumentsText.replace(/"[^"\r\n]*"|'[^'\r\n]*'/g, '').includes('[');
+    if (!hasOpenBracket) {
+      // ---------------------------------------------------------------
+      // No argument yet
+      //
+      // join |
+      // leave |
+      // update |
+      // ---------------------------------------------------------------
+      if (argumentsText === '') {
+        for (const name of completionCharacterNames()) {
+          items.push(createCharacterCompletion(name));
+        }
+        return items;
+      }
+      // ---------------------------------------------------------------
+      // Split arguments - quote-aware, so a name like "John Smith"
+      // stays one token instead of being split on its inner space.
+      // ---------------------------------------------------------------
+      const argumentsParts = splitCommandArguments(argumentsText);
+      // ---------------------------------------------------------------
+      // Character is currently being typed
+      //
+      // join Lar|
+      // leave Lar|
+      // update Lar|
+      // join "John |                     <- quoted name in progress
+      // ---------------------------------------------------------------
+      if (argumentsParts.length === 1) {
+        const currentToken = argumentsParts[0];
+        const prefix = extractCharacterNamePrefix(currentToken).toLowerCase();
+        // Replace the whole typed token (quote included) rather than
+        // just appending, since a quote or an internal space isn't
+        // part of VS Code's default "word" and wouldn't otherwise be
+        // covered by the edit.
+        const tokenStartChar = beforeCursor.length - currentToken.length;
+        const range = new vscode.Range(position.line, tokenStartChar, position.line, position.character);
+        for (const name of completionCharacterNames()) {
+          if (!name.toLowerCase().startsWith(prefix)) {
+            continue;
+          }
+          items.push(createCharacterCompletion(name, range));
+        }
+        return items;
+      }
+      // ---------------------------------------------------------------
+      // Position / transform arguments (join & update only; leave
+      // does NOT have a position).
+      //
+      // join Laripo |                    <- plain position keyword
+      // join Laripo pos=x0.3 size=y1 |    <- transform_command keys
+      //
+      // A plain position keyword (center, left, ...) can only be the
+      // first token; transform_command keys (pos/size/rot, defined
+      // per-entry in DTL_ENTRIES) can instead be used, one or more,
+      // as an alternative. Once a plain position keyword has been
+      // used, this slot is considered complete.
+      // ---------------------------------------------------------------
+      if (command === 'join' || command === 'update') {
+        const typedTokens = argumentsParts.slice(1, -1);
+        const currentToken = argumentsParts[argumentsParts.length - 1];
+        const usedPlainPosition = typedTokens.some(
+          token => DTL_POSITIONS.some(position => position.name === token)
+        );
+        if (!usedPlainPosition && !currentToken.includes('=')) {
+          const prefix = currentToken.toLowerCase();
+          if (argumentsParts.length === 2) {
+            for (const position of DTL_POSITIONS) {
+              if (position.name.toLowerCase().startsWith(prefix)) {
+                items.push(createPositionCompletion(position));
+              }
+            }
+          }
+          const commandEntry = DTL_ENTRIES.find(
+            entry => entry.name === command && entry.type === 'command'
+          );
+          if (commandEntry && commandEntry.transform_command) {
+            const usedTransformKeys = new Set(typedTokens.map(token => token.split('=')[0]));
+            for (const [key, doc] of Object.entries(commandEntry.transform_command)) {
+              if (usedTransformKeys.has(key)) {
+                continue; // already set once on this line
+              }
+              if (!key.toLowerCase().startsWith(prefix)) {
+                continue;
+              }
+              items.push(createAttributeCompletion(key, doc));
+            }
+          }
+          return items;
+        }
+      }
+    }
+  }
+  // =========================================================================
+  // JOIN / LEAVE / UPDATE - trailing [options] bracket
+  //
+  // join Laripo center [extra_data="..." |
+  // leave Laripo [an|
+  //
+  // Reuses each command's own `variables` documentation (already
+  // written in DTL_ENTRIES) instead of leaving this bracket
+  // unsupported, the way the generic "[wait ...]"-style bracket
+  // commands already are below.
+  // =========================================================================
+  const trailingOptionsMatch = beforeCursor.match(/^\s*(join|update|leave)\b[^[]*\[([^\]]*)$/);
+  if (trailingOptionsMatch) {
+    const commandEntry = DTL_ENTRIES.find(
+      entry => entry.name === trailingOptionsMatch[1] && entry.type === 'command'
+    );
+    if (commandEntry && commandEntry.variables) {
+      const bracketArgumentsText = trailingOptionsMatch[2];
+      const currentToken = getCurrentBracketToken(bracketArgumentsText);
+      // Only suggest a parameter NAME while not already mid-value.
+      if (!currentToken.includes('=')) {
+        const prefix = currentToken.toLowerCase();
+        const usedAttributes = new Set(bracketArgumentsText.match(/[A-Za-z_][A-Za-z0-9_]*(?==)/g) || []);
+        for (const attributeName of Object.keys(commandEntry.variables)) {
+          if (usedAttributes.has(attributeName)) {
+            continue; // already set once on this line
+          }
+          if (!attributeName.toLowerCase().startsWith(prefix)) {
+            continue;
+          }
+          items.push(createAttributeCompletion(attributeName, commandEntry.variables[attributeName]));
+        }
+      } else {
+        // Mid-value, e.g. "animation=Bou|" - offer known values for
+        // this attribute (animation, move_trans, move_ease, ...) if
+        // any. extra_data gets its own LayeredPortrait node-path
+        // logic instead, since its values aren't a fixed enum.
+        const equalsIndex = currentToken.indexOf('=');
+        const attributeName = currentToken.slice(0, equalsIndex);
+        const typedValue = currentToken.slice(equalsIndex + 1);
+        if (attributeName === 'extra_data') {
+          items.push(...createEmotionPathSuggestions(line, typedValue));
+        } else {
+          items.push(...createAttributeValueSuggestions(commandEntry.name, attributeName, typedValue, position));
+        }
+      }
+      return items;
+    }
+  }
+  // =========================================================================
+  // BRACKET COMMANDS
+  // Inside dialogue/narration text and choices, Godot BBCode tags are
+  // offered after Dialogic's own commands. To keep the list short, a
+  // bare "[" only offers the common tags
+  // (COMMON_BBCODE_NAMES); the rest show up once a letter of their
+  // name is typed - the list is marked incomplete so VS Code asks
+  // again on every keystroke instead of only filtering the first one.
+  // =========================================================================
+  const imagePathMatch = beforeCursor.match(/\[img\b[^\]]*\]([^\[\]]*)$/);
+  if (imagePathMatch) {
+    return createPathSuggestions(imagePathMatch[1], position, RESOURCE_EXTENSIONS.image, { quote: false });
+  }
+  const fontPathMatch = beforeCursor.match(/\[font(?:\s[^\]]*?\bname)?=("?[^\s\]"]*)$/);
+  if (fontPathMatch) {
+    return createPathSuggestions(fontPathMatch[1], position, RESOURCE_EXTENSIONS.font, { quote: false });
+  }
+  // Values of Dialogic text effects: [portrait=... [mood=... [extra_data=...
+  const effectValueMatch = beforeCursor.match(/\[(portrait|mood|extra_data)=([^\]]*)$/);
+  if (effectValueMatch && isInPlayerFacingText(beforeCursor.slice(0, effectValueMatch.index))) {
+    return createTextEffectValueSuggestions(line, effectValueMatch[1], effectValueMatch[2]);
+  }
+  const closingTagMatch = beforeCursor.match(/\[\/([A-Za-z_][A-Za-z0-9_]*)?$/);
+  if (closingTagMatch) {
+    return createClosingTagSuggestions(beforeCursor.slice(0, closingTagMatch.index), closingTagMatch[1] || '', line, position);
+  }
+  const bracketMatch = beforeCursor.match(/\[([A-Za-z_][A-Za-z0-9_]*)?$/);
+  if (bracketMatch) {
+    const prefix = bracketMatch[1] || '';
+    for ( const entry of DTL_ENTRIES ) {
+      if (entry.type !== 'bracket') {
+        continue;
+      }
+      if (
+        !entry.name.startsWith(prefix)
+      ) {
+        continue;
+      }
+      const item = createCommandCompletion(entry);
+      item.sortText = `0_${entry.name}`;
+      items.push(item);
+    }
+    // BBCode only makes sense inside dialogue/narration text and
+    // choices - a standalone "[" line is a Dialogic event.
+    const bbcodeMode = vscode.workspace.getConfiguration('dtlReader').get('completion.bbcode', 'common');
+    if (!isInPlayerFacingText(beforeCursor.slice(0, bracketMatch.index))) {
+      return items;
+    }
+    if (bbcodeMode === 'off') {
+      const effectRange = new vscode.Range(position.line, bracketMatch.index + 1, position.line, line[position.character] === ']' ? position.character + 1 : position.character);
+      for (const entry of DTL_TEXT_EFFECTS) {
+        if (entry.name.startsWith(prefix)) { items.push(createTextEffectCompletion(entry, effectRange)); }
+      }
+      return items;
+    }
+    const showAllBbcodes = prefix !== '' || bbcodeMode === 'all';
+    // Replace an auto-closed "]" right after the cursor, since
+    // the BBCode snippet brings its own.
+    const nameStart = bracketMatch.index + 1;
+    const replaceEnd = line[position.character] === ']' ? position.character + 1 : position.character;
+    const range = new vscode.Range(position.line, nameStart, position.line, replaceEnd);
+    // Dialogic's own text effects come right after its commands.
+    for (const entry of DTL_TEXT_EFFECTS) {
+      if (entry.name.startsWith(prefix)) { items.push(createTextEffectCompletion(entry, range)); }
+    }
+    for (const entry of DTL_BBCODES) {
+      if (!showAllBbcodes && !COMMON_BBCODE_NAMES.has(entry.name)) { continue; }
+      if (entry.name.startsWith(prefix)) {
+        items.push(createBbcodeCompletion(entry, range));
+      }
+    }
+    return new vscode.CompletionList(items, !showAllBbcodes);
+  }
+  // =========================================================================
+  // BRACKET COMMAND PARAMETERS (e.g. inside `[wait time=1.5 |`)
+  // =========================================================================
+  const openBracketIndex = beforeCursor.lastIndexOf('[');
+  if (openBracketIndex !== -1 && !beforeCursor.slice(openBracketIndex).includes(']')) {
+    const bracketContent = beforeCursor.slice(openBracketIndex + 1);
+    const commandNameMatch = bracketContent.match(/^([A-Za-z_][A-Za-z0-9_]*)\s/);
+    if (commandNameMatch) {
+      const bracketEntry = findBracketOrBbcodeEntry(commandNameMatch[1]);
+      if (bracketEntry && bracketEntry.variables) {
+        const afterCommandName = bracketContent.slice(commandNameMatch[0].length);
+        const currentToken = getCurrentBracketToken(afterCommandName);
+        // Only suggest a parameter NAME while not already mid-value
+        // (i.e. the token being typed has no '=' in it yet).
+        if (!currentToken.includes('=')) {
+          const prefix = currentToken.toLowerCase();
+          const usedAttributes = new Set(afterCommandName.match(/[A-Za-z_][A-Za-z0-9_]*(?==)/g) || []);
+          for (const attributeName of Object.keys(bracketEntry.variables)) {
+            if (usedAttributes.has(attributeName)) {
+              continue; // already set once on this line
+            }
+            if (!attributeName.toLowerCase().startsWith(prefix)) {
+              continue;
+            }
+            items.push(createAttributeCompletion(attributeName, bracketEntry.variables[attributeName]));
+          }
+          return items;
+        }
+        // Mid-value, e.g. "[background transition=Push|" - offer
+        // known values for this attribute (transition, ...) if any.
+        const equalsIndex = currentToken.indexOf('=');
+        const attributeName = currentToken.slice(0, equalsIndex);
+        const typedValue = currentToken.slice(equalsIndex + 1);
+        const valueSuggestions = createAttributeValueSuggestions(bracketEntry.name, attributeName, typedValue, position);
+        if (valueSuggestions.length > 0) {
+          items.push(...valueSuggestions);
+          return items;
+        }
+      }
+    }
+  }
+  // ===================================================================
+  // AUDIO
+  // ===================================================================
+  const audioCommandMatch = beforeCursor.match(/^\s*audio(?:\s+(.*))?$/);
+  if (audioCommandMatch) {
+    const argumentsText = audioCommandMatch[1] || '';
+    if (argumentsText === '') {
+      for (const kind of completionAudioChannels()) { items.push(createAudioKindCompletion(kind)); }
+      return items;
+    }
+    const argumentsParts = argumentsText.split(/\s+/);
+    // Kind is being typed: "audio mu|"
+    if (argumentsParts.length === 1) {
+      const prefix = argumentsParts[0].toLowerCase();
+      for (const kind of completionAudioChannels()) {
+        if (kind.toLowerCase().startsWith(prefix)) { items.push(createAudioKindCompletion(kind)); }
+      }
+      return items;
+    }
+    // Kind fully typed, waiting for or typing the path:
+    // "audio music |" or "audio music "res:/|" - only audio files
+    // are offered. The typed value is everything after the kind
+    // (not just the next whitespace-separated token), so a path
+    // containing spaces still filters correctly.
+    if (argumentsParts.length >= 2) {
+      const typedValue = argumentsText.replace(/^\S+\s+/, '');
+      if (/^"[^"]*"/.test(typedValue)) {
+        return items; // path already written and closed
+      }
+      items.push(...createPathSuggestions(typedValue, position, RESOURCE_EXTENSIONS.audio));
+      if (typedValue === '' && items.length === 0) {
+        items.push(createAudioPathCompletion()); // no audio file in the project yet
+      }
+      return items;
+    }
+  }
+  // ===================================================================
+  // JUMP
+  // ===================================================================
+  // "jump |" offers this timeline's labels and the other timelines
+  // ("Name/"); "jump Name/|" offers that timeline's labels.
+  const jumpCommandMatch = beforeCursor.match(/^\s*jump\s+([^#]*)$/);
+  if (jumpCommandMatch) {
+    const typed = jumpCommandMatch[1];
+    const lastSlash = typed.lastIndexOf('/');
+    if (lastSlash !== -1) {
+      const timeline = typed.slice(0, lastSlash);
+      const labelPrefix = typed.slice(lastSlash + 1);
+      const labels = getTimelineLabels(timeline);
+      if (!labels) { return items; }
+      const range = new vscode.Range(position.line, position.character - labelPrefix.length, position.line, position.character);
+      for (const [label, info] of labels) {
+        if (label.toLowerCase().startsWith(labelPrefix.toLowerCase())) {
+          items.push(createLabelCompletion(label, info, range, timeline));
+        }
+      }
+      return items;
+    }
+    const range = new vscode.Range(position.line, position.character - typed.length, position.line, position.character);
+    const prefix = typed.toLowerCase();
+    for (const [label, info] of collectDocumentLabels(document)) {
+      if (label.toLowerCase().startsWith(prefix)) {
+        const item = createLabelCompletion(label, info, range, null);
+        item.sortText = `0_${label}`;
+        items.push(item);
+      }
+    }
+    const currentTimeline = findTimelineIdentifier(document);
+    for (const identifier of cachedTimelinePaths.keys()) {
+      if (identifier !== currentTimeline && identifier.toLowerCase().startsWith(prefix)) {
+        items.push(createTimelineCompletion(identifier, range));
+      }
+    }
+    return items;
+  }
+  // =========================================================================
+  // QUOTED SPEAKER NAME IN PROGRESS - "Joh or 'Joh at the start of a
+  // line. Handled separately from the bare-identifier case below
+  // since a quote isn't a "word" character and, left unhandled here,
+  // isBareNarrationLine() would otherwise treat this as dialogue
+  // text being typed rather than a still-open speaker name.
+  // =========================================================================
+  const quotedSpeakerMatch = beforeCursor.match(/^\s*("[^"\r\n]*|'[^'\r\n]*)$/);
+  if (quotedSpeakerMatch) {
+    const token = quotedSpeakerMatch[1];
+    const prefix = extractCharacterNamePrefix(token).toLowerCase();
+    const tokenStartChar = beforeCursor.length - token.length;
+    const range = new vscode.Range(position.line, tokenStartChar, position.line, position.character);
+    for (const name of completionCharacterNames()) {
+      if (name.toLowerCase().startsWith(prefix)) {
+        items.push(createCharacterCompletion(name, range));
+      }
+    }
+    return items;
+  }
+  // =========================================================================
+  // NORMAL COMMANDS + Dialogue characters.
+  // =========================================================================
+  if (/^\s*[\p{L}_][\p{L}0-9_]*$/u.test(beforeCursor)) {
+    const prefix = beforeCursor.trim().toLowerCase();
+    // Characters
+    for (const name of completionCharacterNames()) {
+      if (name.toLowerCase().startsWith(prefix)) {
+        items.push(createCharacterCompletion(name));
+      }
+    }
+    // Commands
+    for (const entry of DTL_ENTRIES) {
+      if (entry.type !== 'command') {continue;}
+      if (entry.name.toLowerCase().startsWith(prefix)) {
+        items.push(createCommandCompletion(entry));
+      }
+    }
+    // Whole blocks (choice, condition, loop...), only on an empty line
+    // being started - not in front of existing text.
+    if (line.slice(position.character).trim() === '') {
+      items.push(...createBlockSnippets().filter(item => item.label.label.startsWith(prefix)));
+    }
+    return items;
+  }
+  // =========================================================================
+  // DIALOGUE TEXT (word-based suggestions, VS Code "txt" style)
+  // Only while a word is being typed: a trigger character here
+  // (a '.' or ' ' ending a sentence, a "'" in "don't", ...) isn't
+  // the start of anything worth suggesting.
+  // =========================================================================
+  if (isInsideDialogueText(beforeCursor)) {
+    const wordsEnabled = vscode.workspace.getConfiguration('dtlReader').get('completion.dialogueWords', true);
+    return triggerCharacter || !wordsEnabled ? [] : createWordSuggestions(document, beforeCursor);
+  }
+  /// Fall back
+  if (triggerCharacter) {
+    return [];
+  }
+  for (const name of completionCharacterNames()) {
+    items.push(createCharacterCompletion(name));
+  }
+  if (vscode.workspace.getConfiguration('dtlReader').get('completion.dialogueWords', true)) {
+    items.push(...createWordSuggestions(document, beforeCursor));
+  }
+  return items;
+}
+
+// =============================================================================
 // ACTIVATE
 // =============================================================================
 function activate(context) {
@@ -8940,272 +9700,7 @@ function activate(context) {
       vscode.window.visibleTextEditors.filter(editor => editor.document === event.document).forEach(updateTranslationDecorations);
     })
   );
-  // ===========================================================================
-  // HOVER PROVIDER
-  // ===========================================================================
-  const hoverProvider =
-    vscode.languages.registerHoverProvider(
-      'dtl',
-      {
-        provideHover(document, position) {
-          const line = document.lineAt(position.line).text;
-          // -------------------------------------------------------------------
-          // Bracket commands
-          //
-          // [wait]
-          // [audio]
-          // [voice]
-          // [b] ... [/b]   <- Godot BBCode tags, opening or closing
-          // -------------------------------------------------------------------
-          const isCharacterCommandLine = /^\s*(?:join|update|leave)\b/.test(line);
-          const bracketRegex =
-            /\[\/?([A-Za-z_][A-Za-z0-9_]*\+?)/g;
-          let match;
-          while (
-            (match = bracketRegex.exec(line)) !== null
-          ) {
-            const start = match.index;
-            const end =
-              start + match[0].length;
-            if (
-              position.character >= start &&
-              position.character <= end
-            ) {
-              const commandName = match[1];
-              // In text, "[signal=..." is the text effect, not the [signal ...] event.
-              const inText = !isCharacterCommandLine && (isPlayerFacingTextLine(line) || /^\s*-\s/.test(line) || bbcodePreviewStart(document, line) !== -1);
-              const effectEntry = inText && /^[=\]]/.test(line.slice(end)) ? DTL_TEXT_EFFECTS.find(candidate => candidate.name === commandName) : undefined;
-              // join/update/leave's own [options] bracket holds attribute
-              // names (e.g. "[fade=..."), never BBCode, so a same-named
-              // BBCode tag (like [fade]) mustn't shadow them there.
-              const entry = effectEntry ||
-                DTL_ENTRIES.find(
-                  entry =>
-                    entry.name === commandName
-                ) || (isCharacterCommandLine ? undefined
-                  : (isPlayerFacingTextLine(line) || /^\s*-\s/.test(line) ? DTL_TEXT_EFFECTS.find(entry => entry.name === commandName) : undefined)
-                    || DTL_BBCODES.find(entry => entry.name === commandName));
-              if (!entry) {
-                // Not a real bracket command - this is just an attribute
-                // name that happens to sit directly against '[' (e.g.
-                // join/update/leave's first inline option, "[fade=...]").
-                // Stop scanning and let the parameter-hover logic below
-                // handle it instead of giving up on hover entirely.
-                break;
-              }
-              const range =
-                new vscode.Range(
-                  position.line,
-                  start,
-                  position.line,
-                  end
-                );
-              return new vscode.Hover(
-                createDocumentation(entry),
-                range
-              );
-            }
-          }
-          // -------------------------------------------------------------------
-          // Bracket command PARAMETERS
-          //
-          // [wait time=1.5]
-          //        ^^^^ hovering this
-          // -------------------------------------------------------------------
-          const paramWordRange = document.getWordRangeAtPosition(position, /[A-Za-z_][A-Za-z0-9_]*/);
-          if (paramWordRange) {
-            const paramName = document.getText(paramWordRange);
-            const afterParam = line.substring(paramWordRange.end.character);
-            if (/^\s*=/.test(afterParam)) {
-              const beforeParam = line.substring(0, paramWordRange.start.character);
-              const enclosingBracketMatch = beforeParam.match(/\[([A-Za-z_][A-Za-z0-9_]*)\s+[^\]]*$/);
-              if (enclosingBracketMatch) {
-                const enclosingEntry = findBracketOrBbcodeEntry(enclosingBracketMatch[1]);
-                if (enclosingEntry && enclosingEntry.variables && enclosingEntry.variables[paramName]) {
-                  const markdown = new vscode.MarkdownString();
-                  markdown.appendMarkdown(`**${paramName}** _(parameter of \`[${enclosingEntry.name}]\`)_\n\n`);
-                  markdown.appendMarkdown(enclosingEntry.variables[paramName]);
-                  return new vscode.Hover(markdown, paramWordRange);
-                }
-              } else {
-                // join/update/leave's own trailing [options] bracket has no
-                // command name inside it (e.g. "join Laripo center
-                // [extra_data=...]"), so it needs its own lookup against the
-                // enclosing command's `variables` instead.
-                const trailingBracketMatch = beforeParam.match(/^\s*(join|update|leave)\b[^[]*\[[^\]]*$/);
-                if (trailingBracketMatch) {
-                  const commandEntry = DTL_ENTRIES.find(
-                    candidate => candidate.name === trailingBracketMatch[1] && candidate.type === 'command'
-                  );
-                  if (commandEntry && commandEntry.variables && commandEntry.variables[paramName]) {
-                    const markdown = new vscode.MarkdownString();
-                    markdown.appendMarkdown(`**${paramName}** _(parameter of \`${commandEntry.name}\`)_\n\n`);
-                    markdown.appendMarkdown(commandEntry.variables[paramName]);
-                    return new vscode.Hover(markdown, paramWordRange);
-                  }
-                } else {
-                  // pos=/size=/rot= transform tokens sit between the
-                  // character/position slot and the bracket, e.g.
-                  // "join Laripo pos=x0.3 size=y1 [...]".
-                  const transformMatch = beforeParam.match(
-                    /^\s*(join|update)\b\s+\S+(?:\s+[A-Za-z_][A-Za-z0-9_]*=\S*)*\s*$/
-                  );
-                  if (transformMatch) {
-                    const commandEntry = DTL_ENTRIES.find(
-                      candidate => candidate.name === transformMatch[1] && candidate.type === 'command'
-                    );
-                    if (commandEntry && commandEntry.transform_command && commandEntry.transform_command[paramName]) {
-                      const markdown = new vscode.MarkdownString();
-                      markdown.appendMarkdown(`**${paramName}** _(transform parameter of \`${commandEntry.name}\`)_\n\n`);
-                      markdown.appendMarkdown(commandEntry.transform_command[paramName]);
-                      return new vscode.Hover(markdown, paramWordRange);
-                    }
-                  }
-                }
-              }
-            }
-          }
-          // -------------------------------------------------------------------
-          // Position keywords
-          //
-          // join Laripo center|
-          //             ^^^^^^ hovering this
-          // -------------------------------------------------------------------
-          const positionWordRange = document.getWordRangeAtPosition(position, /[A-Za-z_][A-Za-z0-9_]*/);
-          if (positionWordRange) {
-            const positionWord = document.getText(positionWordRange);
-            const positionEntry = DTL_POSITIONS.find(position => position.name === positionWord);
-            if (positionEntry) {
-              const beforePosition = line.substring(0, positionWordRange.start.character);
-              // Only the first token after "join <character>" / "update
-              // <character>" is really this position argument, so this
-              // stays scoped to that slot rather than any stray word that
-              // happens to match a position name (e.g. inside dialogue text).
-              if (/^\s*(join|update)\b\s+\S+\s*$/.test(beforePosition)) {
-                const markdown = new vscode.MarkdownString();
-                markdown.appendMarkdown(`**${positionEntry.name}** _(DTL character position)_\n\n`);
-                markdown.appendMarkdown(positionEntry.description);
-                return new vscode.Hover(markdown, positionWordRange);
-              }
-            }
-          }
-          // -------------------------------------------------------------------
-          // Character names
-          //
-          // join John left       "John Smith": Hello
-          //      ^^^^                ^^^^^^^^^^^^ hovering either
-          // -------------------------------------------------------------------
-          const characterHit = findCharacterNameAtPosition(document, position);
-          if (characterHit) {
-            const info = cachedCharacterInfo.get(characterHit.name);
-            if (info && (info.displayName || info.nicknames.length > 0 || info.description || info.color || info.translationId)) {
-              return new vscode.Hover(createCharacterDocumentation(characterHit.name, info), characterHit.range);
-            }
-          }
-          // -------------------------------------------------------------------
-          // Autoload scripts / nodes and their members
-          //
-          // do Global.apply_tint()      if Global.state == Global.State.IDLE
-          //    ^^^^^^ ^^^^^^^^^^           {Global.max_hp}       ^^^^ hovering any part
-          // -------------------------------------------------------------------
-          const autoloadHit = findAutoloadReferenceAtPosition(document, position);
-          if (autoloadHit) {
-            return new vscode.Hover(autoloadHit.markdown, autoloadHit.range);
-          }
-          // -------------------------------------------------------------------
-          // Dialogic variables
-          //
-          // {variable.test}      set {chapter} = 1
-          //           ^^^^            ^^^^^^^ hovering either
-          // -------------------------------------------------------------------
-          const variableHit = findVariableAtPosition(document, position);
-          if (variableHit) {
-            return new vscode.Hover(variableHit.markdown, variableHit.range);
-          }
-          // -------------------------------------------------------------------
-          // Moods / portraits and LayeredPortrait layers
-          //
-          // join John (happy) left [extra_data="set Head/LeftEye"]
-          //            ^^^^^                         ^^^^ ^^^^^^^ hovering any
-          // -------------------------------------------------------------------
-          const moodHit = findMoodTagAtPosition(line, position.character);
-          if (moodHit) {
-            const markdown = createMoodDocumentation(moodHit.characterName, moodHit.mood);
-            if (markdown) {
-              return new vscode.Hover(markdown, new vscode.Range(position.line, moodHit.range.start, position.line, moodHit.range.end));
-            }
-          }
-          const layerHit = findLayerDocumentationAtPosition(line, position.character);
-          if (layerHit) {
-            return new vscode.Hover(layerHit.markdown, new vscode.Range(position.line, layerHit.range.start, position.line, layerHit.range.end));
-          }
-          // -------------------------------------------------------------------
-          // Labels - on `label NAME` or `jump NAME`
-          // -------------------------------------------------------------------
-          const labelLine = parseLabelLine(line);
-          if (labelLine && position.character >= labelLine.nameStart && position.character <= labelLine.nameStart + labelLine.name.length) {
-            const labelInfo = collectDocumentLabels(document).get(labelLine.name);
-            if (labelInfo) {
-              return new vscode.Hover(createLabelDocumentation(labelLine.name, labelInfo), new vscode.Range(position.line, labelLine.nameStart, position.line, labelLine.nameStart + labelLine.name.length));
-            }
-          }
-          const jump = parseJumpLine(line);
-          if (jump && !jump.target.includes('{')) {
-            const labelEnd = jump.labelStart + jump.label.length;
-            if (jump.timeline !== null && position.character >= jump.targetStart && position.character < jump.labelStart) {
-              const labels = getTimelineLabels(jump.timeline);
-              if (labels) {
-                const markdown = new vscode.MarkdownString();
-                markdown.appendMarkdown(`**${jump.timeline}** _(Dialogic timeline)_\n\n\`${cachedTimelinePaths.get(jump.timeline)}\`\n\n`);
-                markdown.appendMarkdown(labels.size > 0 ? `Labels: ${[...labels.keys()].map(name => `\`${name}\``).join(', ')}` : '_No labels._');
-                return new vscode.Hover(markdown, new vscode.Range(position.line, jump.targetStart, position.line, jump.labelStart - 1));
-              }
-            } else if (jump.label && position.character >= jump.labelStart && position.character <= labelEnd) {
-              const target = resolveJumpTarget(document, jump);
-              const labelInfo = target && target.labels.get(jump.label);
-              if (labelInfo) {
-                return new vscode.Hover(createLabelDocumentation(jump.label, labelInfo, target.timeline), new vscode.Range(position.line, jump.labelStart, position.line, labelEnd));
-              }
-            }
-          }
-          // -------------------------------------------------------------------
-          // Normal commands
-          //
-          // label
-          // jump
-          // join
-          // update
-          // leave
-          // -------------------------------------------------------------------
-          const wordRange =
-            document.getWordRangeAtPosition(
-              position
-            );
-
-          if (!wordRange) {
-            return undefined;
-          }
-
-          const word =
-            document.getText(wordRange);
-
-          const entry =
-            DTL_ENTRIES.find(
-              entry => entry.name === word
-            );
-
-          if (!entry) {
-            return undefined;
-          }
-
-          return new vscode.Hover(
-            createDocumentation(entry),
-            wordRange
-          );
-        }
-      }
-    );
-  context.subscriptions.push(hoverProvider);
+  context.subscriptions.push(vscode.languages.registerHoverProvider('dtl', { provideHover: provideTimelineHover }));
   context.subscriptions.push(
     vscode.languages.registerCompletionItemProvider('dch', { provideCompletionItems: provideDchCompletions }, '"', ':', ' ', '/', '&'),
     vscode.languages.registerHoverProvider('dch', { provideHover: provideDchHover }),
@@ -9262,485 +9757,8 @@ function activate(context) {
       diagnosticCollection.delete(document.uri); // after: the re-check mustn't bring it back
     })
   );
-  // ===========================================================================
-  // COMPLETION PROVIDER
-  // ===========================================================================
-  const completionProvider =
-    vscode.languages.registerCompletionItemProvider('dtl',
-      {
-        provideCompletionItems(document, position, token, context) {
-          isolatedDocumentData = projectRootUri ? null : collectIsolatedDocumentData(document, position.line);
-          const line = document.lineAt(position.line).text;
-          const beforeCursor = line.substring(0,position.character);
-          const items = [];
-          // The character that auto-opened the suggest widget (one of the
-          // trigger characters registered below), or null when the person
-          // is typing a word or asked explicitly with Ctrl+Space. Contexts
-          // that only make sense for a specific trigger (e.g. '.' after an
-          // autoload name) check this, so e.g. a '.' ending a dialogue
-          // sentence doesn't pop up a list of every word in the file.
-          const triggerCharacter = context && context.triggerKind === vscode.CompletionTriggerKind.TriggerCharacter
-            ? context.triggerCharacter
-            : null;
-          // ===================================================================
-          // VARIABLE PATH: "{variable.te" anywhere - dialogue text, a
-          // bracket option's value, or a bare "set {...}" line. Checked
-          // first since it can appear inside any of those other contexts,
-          // and its own "{" would otherwise just be stray text to them.
-          // ===================================================================
-          const openBraceIndex = beforeCursor.lastIndexOf('{');
-          const closeBraceIndex = beforeCursor.lastIndexOf('}');
-          if (openBraceIndex > closeBraceIndex) {
-            return createVariableSuggestions(beforeCursor.slice(openBraceIndex + 1));
-          }
-          // ===================================================================
-          // AUTOLOADS: "do Global." / "if Global." / "elif Global." -
-          // either the autoload name itself, or a member once "Name." has
-          // been typed. Usable anywhere in the expression (not just right
-          // after the keyword), since if/elif conditions can combine an
-          // autoload reference with variables/operators. Always returns
-          // here (even an empty list) - nothing else below applies to an
-          // expression line, and falling through used to dump every
-          // character name and dialogue word into the list instead.
-          // ===================================================================
-          const setTargetItems = createSetTargetSuggestions(beforeCursor, position);
-          if (setTargetItems) {
-            return setTargetItems;
-          }
-          if (isGlobalScriptExpressionLine(beforeCursor)) {
-            return createGlobalScriptSuggestions(beforeCursor, triggerCharacter).map(item => {
-              // Ranges are built on line 0 inside the helper - move them to this line.
-              if (item.range && item.range.start.line === 0 && position.line !== 0) {
-                item.range = new vscode.Range(position.line, item.range.start.character, position.line, item.range.end.character);
-              }
-              return item;
-            });
-          }
-          // ===================================================================
-          // MOOD TAG: "John (happy" or "join John (happy" - checked first
-          // since the JOIN/LEAVE/UPDATE block below would otherwise treat
-          // the '(' as a stray token and return an empty list before this
-          // ever gets a chance to run.
-          // ===================================================================
-          const moodContext = detectMoodContext(beforeCursor);
-          if (moodContext) {
-            return createMoodSuggestions(moodContext.character, moodContext.typedMood);
-          }
-          // ===================================================================
-          // JOIN / LEAVE / UPDATE
-          // ===================================================================
-          const characterCommandMatch = beforeCursor.match(/^\s*(join|leave|update)(?:\s+(.*))?$/);
-          if (characterCommandMatch) {
-            const command = characterCommandMatch[1];
-            const argumentsText = characterCommandMatch[2] || '';
-            // Once a '[' has been typed, we are past the character/position
-            // slot entirely and inside the trailing options bracket instead -
-            // that case is handled below by the dedicated bracket handler, so
-            // this block does nothing (and, importantly, does NOT return).
-            // A '[' inside an already-closed quoted character name (rare,
-            // but names can contain almost anything) doesn't count, so
-            // completed quoted spans are stripped before checking.
-            const hasOpenBracket = argumentsText.replace(/"[^"\r\n]*"|'[^'\r\n]*'/g, '').includes('[');
-            if (!hasOpenBracket) {
-              // ---------------------------------------------------------------
-              // No argument yet
-              //
-              // join |
-              // leave |
-              // update |
-              // ---------------------------------------------------------------
-              if (argumentsText === '') {
-                for (const name of completionCharacterNames()) {
-                  items.push(createCharacterCompletion(name));
-                }
-                return items;
-              }
-              // ---------------------------------------------------------------
-              // Split arguments - quote-aware, so a name like "John Smith"
-              // stays one token instead of being split on its inner space.
-              // ---------------------------------------------------------------
-              const argumentsParts = splitCommandArguments(argumentsText);
-              // ---------------------------------------------------------------
-              // Character is currently being typed
-              //
-              // join Lar|
-              // leave Lar|
-              // update Lar|
-              // join "John |                     <- quoted name in progress
-              // ---------------------------------------------------------------
-              if (argumentsParts.length === 1) {
-                const currentToken = argumentsParts[0];
-                const prefix = extractCharacterNamePrefix(currentToken).toLowerCase();
-                // Replace the whole typed token (quote included) rather than
-                // just appending, since a quote or an internal space isn't
-                // part of VS Code's default "word" and wouldn't otherwise be
-                // covered by the edit.
-                const tokenStartChar = beforeCursor.length - currentToken.length;
-                const range = new vscode.Range(position.line, tokenStartChar, position.line, position.character);
-                for (const name of completionCharacterNames()) {
-                  if (!name.toLowerCase().startsWith(prefix)) {
-                    continue;
-                  }
-                  items.push(createCharacterCompletion(name, range));
-                }
-                return items;
-              }
-              // ---------------------------------------------------------------
-              // Position / transform arguments (join & update only; leave
-              // does NOT have a position).
-              //
-              // join Laripo |                    <- plain position keyword
-              // join Laripo pos=x0.3 size=y1 |    <- transform_command keys
-              //
-              // A plain position keyword (center, left, ...) can only be the
-              // first token; transform_command keys (pos/size/rot, defined
-              // per-entry in DTL_ENTRIES) can instead be used, one or more,
-              // as an alternative. Once a plain position keyword has been
-              // used, this slot is considered complete.
-              // ---------------------------------------------------------------
-              if (command === 'join' || command === 'update') {
-                const typedTokens = argumentsParts.slice(1, -1);
-                const currentToken = argumentsParts[argumentsParts.length - 1];
-                const usedPlainPosition = typedTokens.some(
-                  token => DTL_POSITIONS.some(position => position.name === token)
-                );
-                if (!usedPlainPosition && !currentToken.includes('=')) {
-                  const prefix = currentToken.toLowerCase();
-                  if (argumentsParts.length === 2) {
-                    for (const position of DTL_POSITIONS) {
-                      if (position.name.toLowerCase().startsWith(prefix)) {
-                        items.push(createPositionCompletion(position));
-                      }
-                    }
-                  }
-                  const commandEntry = DTL_ENTRIES.find(
-                    entry => entry.name === command && entry.type === 'command'
-                  );
-                  if (commandEntry && commandEntry.transform_command) {
-                    const usedTransformKeys = new Set(typedTokens.map(token => token.split('=')[0]));
-                    for (const [key, doc] of Object.entries(commandEntry.transform_command)) {
-                      if (usedTransformKeys.has(key)) {
-                        continue; // already set once on this line
-                      }
-                      if (!key.toLowerCase().startsWith(prefix)) {
-                        continue;
-                      }
-                      items.push(createAttributeCompletion(key, doc));
-                    }
-                  }
-                  return items;
-                }
-              }
-            }
-          }
-          // =========================================================================
-          // JOIN / LEAVE / UPDATE - trailing [options] bracket
-          //
-          // join Laripo center [extra_data="..." |
-          // leave Laripo [an|
-          //
-          // Reuses each command's own `variables` documentation (already
-          // written in DTL_ENTRIES) instead of leaving this bracket
-          // unsupported, the way the generic "[wait ...]"-style bracket
-          // commands already are below.
-          // =========================================================================
-          const trailingOptionsMatch = beforeCursor.match(/^\s*(join|update|leave)\b[^[]*\[([^\]]*)$/);
-          if (trailingOptionsMatch) {
-            const commandEntry = DTL_ENTRIES.find(
-              entry => entry.name === trailingOptionsMatch[1] && entry.type === 'command'
-            );
-            if (commandEntry && commandEntry.variables) {
-              const bracketArgumentsText = trailingOptionsMatch[2];
-              const currentToken = getCurrentBracketToken(bracketArgumentsText);
-              // Only suggest a parameter NAME while not already mid-value.
-              if (!currentToken.includes('=')) {
-                const prefix = currentToken.toLowerCase();
-                const usedAttributes = new Set(bracketArgumentsText.match(/[A-Za-z_][A-Za-z0-9_]*(?==)/g) || []);
-                for (const attributeName of Object.keys(commandEntry.variables)) {
-                  if (usedAttributes.has(attributeName)) {
-                    continue; // already set once on this line
-                  }
-                  if (!attributeName.toLowerCase().startsWith(prefix)) {
-                    continue;
-                  }
-                  items.push(createAttributeCompletion(attributeName, commandEntry.variables[attributeName]));
-                }
-              } else {
-                // Mid-value, e.g. "animation=Bou|" - offer known values for
-                // this attribute (animation, move_trans, move_ease, ...) if
-                // any. extra_data gets its own LayeredPortrait node-path
-                // logic instead, since its values aren't a fixed enum.
-                const equalsIndex = currentToken.indexOf('=');
-                const attributeName = currentToken.slice(0, equalsIndex);
-                const typedValue = currentToken.slice(equalsIndex + 1);
-                if (attributeName === 'extra_data') {
-                  items.push(...createEmotionPathSuggestions(line, typedValue));
-                } else {
-                  items.push(...createAttributeValueSuggestions(commandEntry.name, attributeName, typedValue, position));
-                }
-              }
-              return items;
-            }
-          }
-          // =========================================================================
-          // BRACKET COMMANDS
-          // Inside dialogue/narration text and choices, Godot BBCode tags are
-          // offered after Dialogic's own commands. To keep the list short, a
-          // bare "[" only offers the common tags
-          // (COMMON_BBCODE_NAMES); the rest show up once a letter of their
-          // name is typed - the list is marked incomplete so VS Code asks
-          // again on every keystroke instead of only filtering the first one.
-          // =========================================================================
-          const imagePathMatch = beforeCursor.match(/\[img\b[^\]]*\]([^\[\]]*)$/);
-          if (imagePathMatch) {
-            return createPathSuggestions(imagePathMatch[1], position, RESOURCE_EXTENSIONS.image, { quote: false });
-          }
-          const fontPathMatch = beforeCursor.match(/\[font(?:\s[^\]]*?\bname)?=("?[^\s\]"]*)$/);
-          if (fontPathMatch) {
-            return createPathSuggestions(fontPathMatch[1], position, RESOURCE_EXTENSIONS.font, { quote: false });
-          }
-          // Values of Dialogic text effects: [portrait=... [mood=... [extra_data=...
-          const effectValueMatch = beforeCursor.match(/\[(portrait|mood|extra_data)=([^\]]*)$/);
-          if (effectValueMatch && isInPlayerFacingText(beforeCursor.slice(0, effectValueMatch.index))) {
-            return createTextEffectValueSuggestions(line, effectValueMatch[1], effectValueMatch[2]);
-          }
-          const closingTagMatch = beforeCursor.match(/\[\/([A-Za-z_][A-Za-z0-9_]*)?$/);
-          if (closingTagMatch) {
-            return createClosingTagSuggestions(beforeCursor.slice(0, closingTagMatch.index), closingTagMatch[1] || '', line, position);
-          }
-          const bracketMatch = beforeCursor.match(/\[([A-Za-z_][A-Za-z0-9_]*)?$/);
-          if (bracketMatch) {
-            const prefix = bracketMatch[1] || '';
-            for ( const entry of DTL_ENTRIES ) {
-              if (entry.type !== 'bracket') {
-                continue;
-              }
-              if (
-                !entry.name.startsWith(prefix)
-              ) {
-                continue;
-              }
-              const item = createCommandCompletion(entry);
-              item.sortText = `0_${entry.name}`;
-              items.push(item);
-            }
-            // BBCode only makes sense inside dialogue/narration text and
-            // choices - a standalone "[" line is a Dialogic event.
-            const bbcodeMode = vscode.workspace.getConfiguration('dtlReader').get('completion.bbcode', 'common');
-            if (!isInPlayerFacingText(beforeCursor.slice(0, bracketMatch.index))) {
-              return items;
-            }
-            if (bbcodeMode === 'off') {
-              const effectRange = new vscode.Range(position.line, bracketMatch.index + 1, position.line, line[position.character] === ']' ? position.character + 1 : position.character);
-              for (const entry of DTL_TEXT_EFFECTS) {
-                if (entry.name.startsWith(prefix)) { items.push(createTextEffectCompletion(entry, effectRange)); }
-              }
-              return items;
-            }
-            const showAllBbcodes = prefix !== '' || bbcodeMode === 'all';
-            // Replace an auto-closed "]" right after the cursor, since
-            // the BBCode snippet brings its own.
-            const nameStart = bracketMatch.index + 1;
-            const replaceEnd = line[position.character] === ']' ? position.character + 1 : position.character;
-            const range = new vscode.Range(position.line, nameStart, position.line, replaceEnd);
-            // Dialogic's own text effects come right after its commands.
-            for (const entry of DTL_TEXT_EFFECTS) {
-              if (entry.name.startsWith(prefix)) { items.push(createTextEffectCompletion(entry, range)); }
-            }
-            for (const entry of DTL_BBCODES) {
-              if (!showAllBbcodes && !COMMON_BBCODE_NAMES.has(entry.name)) { continue; }
-              if (entry.name.startsWith(prefix)) {
-                items.push(createBbcodeCompletion(entry, range));
-              }
-            }
-            return new vscode.CompletionList(items, !showAllBbcodes);
-          }
-          // =========================================================================
-          // BRACKET COMMAND PARAMETERS (e.g. inside `[wait time=1.5 |`)
-          // =========================================================================
-          const openBracketIndex = beforeCursor.lastIndexOf('[');
-          if (openBracketIndex !== -1 && !beforeCursor.slice(openBracketIndex).includes(']')) {
-            const bracketContent = beforeCursor.slice(openBracketIndex + 1);
-            const commandNameMatch = bracketContent.match(/^([A-Za-z_][A-Za-z0-9_]*)\s/);
-            if (commandNameMatch) {
-              const bracketEntry = findBracketOrBbcodeEntry(commandNameMatch[1]);
-              if (bracketEntry && bracketEntry.variables) {
-                const afterCommandName = bracketContent.slice(commandNameMatch[0].length);
-                const currentToken = getCurrentBracketToken(afterCommandName);
-                // Only suggest a parameter NAME while not already mid-value
-                // (i.e. the token being typed has no '=' in it yet).
-                if (!currentToken.includes('=')) {
-                  const prefix = currentToken.toLowerCase();
-                  const usedAttributes = new Set(afterCommandName.match(/[A-Za-z_][A-Za-z0-9_]*(?==)/g) || []);
-                  for (const attributeName of Object.keys(bracketEntry.variables)) {
-                    if (usedAttributes.has(attributeName)) {
-                      continue; // already set once on this line
-                    }
-                    if (!attributeName.toLowerCase().startsWith(prefix)) {
-                      continue;
-                    }
-                    items.push(createAttributeCompletion(attributeName, bracketEntry.variables[attributeName]));
-                  }
-                  return items;
-                }
-                // Mid-value, e.g. "[background transition=Push|" - offer
-                // known values for this attribute (transition, ...) if any.
-                const equalsIndex = currentToken.indexOf('=');
-                const attributeName = currentToken.slice(0, equalsIndex);
-                const typedValue = currentToken.slice(equalsIndex + 1);
-                const valueSuggestions = createAttributeValueSuggestions(bracketEntry.name, attributeName, typedValue, position);
-                if (valueSuggestions.length > 0) {
-                  items.push(...valueSuggestions);
-                  return items;
-                }
-              }
-            }
-          }
-          // ===================================================================
-          // AUDIO
-          // ===================================================================
-          const audioCommandMatch = beforeCursor.match(/^\s*audio(?:\s+(.*))?$/);
-          if (audioCommandMatch) {
-            const argumentsText = audioCommandMatch[1] || '';
-            if (argumentsText === '') {
-              for (const kind of completionAudioChannels()) { items.push(createAudioKindCompletion(kind)); }
-              return items;
-            }
-            const argumentsParts = argumentsText.split(/\s+/);
-            // Kind is being typed: "audio mu|"
-            if (argumentsParts.length === 1) {
-              const prefix = argumentsParts[0].toLowerCase();
-              for (const kind of completionAudioChannels()) {
-                if (kind.toLowerCase().startsWith(prefix)) { items.push(createAudioKindCompletion(kind)); }
-              }
-              return items;
-            }
-            // Kind fully typed, waiting for or typing the path:
-            // "audio music |" or "audio music "res:/|" - only audio files
-            // are offered. The typed value is everything after the kind
-            // (not just the next whitespace-separated token), so a path
-            // containing spaces still filters correctly.
-            if (argumentsParts.length >= 2) {
-              const typedValue = argumentsText.replace(/^\S+\s+/, '');
-              if (/^"[^"]*"/.test(typedValue)) {
-                return items; // path already written and closed
-              }
-              items.push(...createPathSuggestions(typedValue, position, RESOURCE_EXTENSIONS.audio));
-              if (typedValue === '' && items.length === 0) {
-                items.push(createAudioPathCompletion()); // no audio file in the project yet
-              }
-              return items;
-            }
-          }
-          // ===================================================================
-          // JUMP
-          // ===================================================================
-          // "jump |" offers this timeline's labels and the other timelines
-          // ("Name/"); "jump Name/|" offers that timeline's labels.
-          const jumpCommandMatch = beforeCursor.match(/^\s*jump\s+([^#]*)$/);
-          if (jumpCommandMatch) {
-            const typed = jumpCommandMatch[1];
-            const lastSlash = typed.lastIndexOf('/');
-            if (lastSlash !== -1) {
-              const timeline = typed.slice(0, lastSlash);
-              const labelPrefix = typed.slice(lastSlash + 1);
-              const labels = getTimelineLabels(timeline);
-              if (!labels) { return items; }
-              const range = new vscode.Range(position.line, position.character - labelPrefix.length, position.line, position.character);
-              for (const [label, info] of labels) {
-                if (label.toLowerCase().startsWith(labelPrefix.toLowerCase())) {
-                  items.push(createLabelCompletion(label, info, range, timeline));
-                }
-              }
-              return items;
-            }
-            const range = new vscode.Range(position.line, position.character - typed.length, position.line, position.character);
-            const prefix = typed.toLowerCase();
-            for (const [label, info] of collectDocumentLabels(document)) {
-              if (label.toLowerCase().startsWith(prefix)) {
-                const item = createLabelCompletion(label, info, range, null);
-                item.sortText = `0_${label}`;
-                items.push(item);
-              }
-            }
-            const currentTimeline = findTimelineIdentifier(document);
-            for (const identifier of cachedTimelinePaths.keys()) {
-              if (identifier !== currentTimeline && identifier.toLowerCase().startsWith(prefix)) {
-                items.push(createTimelineCompletion(identifier, range));
-              }
-            }
-            return items;
-          }
-          // =========================================================================
-          // QUOTED SPEAKER NAME IN PROGRESS - "Joh or 'Joh at the start of a
-          // line. Handled separately from the bare-identifier case below
-          // since a quote isn't a "word" character and, left unhandled here,
-          // isBareNarrationLine() would otherwise treat this as dialogue
-          // text being typed rather than a still-open speaker name.
-          // =========================================================================
-          const quotedSpeakerMatch = beforeCursor.match(/^\s*("[^"\r\n]*|'[^'\r\n]*)$/);
-          if (quotedSpeakerMatch) {
-            const token = quotedSpeakerMatch[1];
-            const prefix = extractCharacterNamePrefix(token).toLowerCase();
-            const tokenStartChar = beforeCursor.length - token.length;
-            const range = new vscode.Range(position.line, tokenStartChar, position.line, position.character);
-            for (const name of completionCharacterNames()) {
-              if (name.toLowerCase().startsWith(prefix)) {
-                items.push(createCharacterCompletion(name, range));
-              }
-            }
-            return items;
-          }
-          // =========================================================================
-          // NORMAL COMMANDS + Dialogue characters.
-          // =========================================================================
-          if (/^\s*[\p{L}_][\p{L}0-9_]*$/u.test(beforeCursor)) {
-            const prefix = beforeCursor.trim().toLowerCase();
-            // Characters
-            for (const name of completionCharacterNames()) {
-              if (name.toLowerCase().startsWith(prefix)) {
-                items.push(createCharacterCompletion(name));
-              }
-            }
-            // Commands
-            for (const entry of DTL_ENTRIES) {
-              if (entry.type !== 'command') {continue;}
-              if (entry.name.toLowerCase().startsWith(prefix)) {
-                items.push(createCommandCompletion(entry));
-              }
-            }
-            // Whole blocks (choice, condition, loop...), only on an empty line
-            // being started - not in front of existing text.
-            if (line.slice(position.character).trim() === '') {
-              items.push(...createBlockSnippets().filter(item => item.label.label.startsWith(prefix)));
-            }
-            return items;
-          }
-          // =========================================================================
-          // DIALOGUE TEXT (word-based suggestions, VS Code "txt" style)
-          // Only while a word is being typed: a trigger character here
-          // (a '.' or ' ' ending a sentence, a "'" in "don't", ...) isn't
-          // the start of anything worth suggesting.
-          // =========================================================================
-          if (isInsideDialogueText(beforeCursor)) {
-            const wordsEnabled = vscode.workspace.getConfiguration('dtlReader').get('completion.dialogueWords', true);
-            return triggerCharacter || !wordsEnabled ? [] : createWordSuggestions(document, beforeCursor);
-          }
-          /// Fall back
-          if (triggerCharacter) {
-            return [];
-          }
-          for (const name of completionCharacterNames()) {
-            items.push(createCharacterCompletion(name));
-          }
-          if (vscode.workspace.getConfiguration('dtlReader').get('completion.dialogueWords', true)) {
-            items.push(...createWordSuggestions(document, beforeCursor));
-          }
-          return items;
-          }
-        }
-    , ' ', '[', '=', '(', '/', '"', "'", '{', '.');
-  context.subscriptions.push(completionProvider);
+  context.subscriptions.push(vscode.languages.registerCompletionItemProvider('dtl', { provideCompletionItems: provideTimelineCompletions },
+    ' ', '[', '=', '(', '/', '"', "'", '{', '.'));
   // Internals the test suite checks directly (`extension.exports`) - not an
   // API for other extensions.
   return { forTests: { rankCharacterFolders, godotUserDataDir, setConfigFileValues, parseCustomEventScript, findGodotExecutable, computeDialogicEventIndices, translationViewUri, scriptStrings: () => cachedScriptStrings, resourcePaths: () => cachedResourcePaths } };
