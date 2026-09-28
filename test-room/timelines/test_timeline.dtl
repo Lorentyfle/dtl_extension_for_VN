@@ -34,6 +34,7 @@ elif not Global.has_achievement("intro_complete")
 # Autoload members beyond functions: variables, constants and enums, plus an
 # autoload NODE (SoundManager points at a .tscn - its root script is used).
 do SoundManager.play_sfx("door_open")
+set {Global.state} = Global.State.TALKING
 if Global.state == Global.State.TALKING and Global.hearts < Global.MAX_HEARTS
     TestCharacter: You look hurt. You have {Global.hearts} hearts left.
 
@@ -55,6 +56,7 @@ TestCharacter2:
 [wait time="1.0" skippable="true"]
 [wait_input]
 [signal arg_type="dict" arg="{\"Effect\":\"Rain\"}"]
+[signal arg_type="dict" arg="{"type":"dice","c":"Laripo","s":false,"n":2}"]
 [voice path="res://assets/voice_line.ogg"]
 audio music "res://assets/theme.ogg"
 [clear text="true"]

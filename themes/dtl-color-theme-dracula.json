@@ -286,6 +286,43 @@
       }
     },
     {
+      "scope": "variable.other.member.dtl",
+      "settings": {
+        "foreground": "#f8f8f2"
+      }
+    },
+    {
+      "scope": "entity.name.type.enum.dtl",
+      "settings": {
+        "foreground": "#8be9fd",
+        "fontStyle": "italic"
+      }
+    },
+    {
+      "scope": "constant.other.enum-member.dtl",
+      "settings": {
+        "foreground": "#bd93f9"
+      }
+    },
+    {
+      "scope": "support.type.property-name.signal.dtl",
+      "settings": {
+        "foreground": "#8be9fd"
+      }
+    },
+    {
+      "scope": "punctuation.definition.dictionary.signal.dtl",
+      "settings": {
+        "foreground": "#ff79c6"
+      }
+    },
+    {
+      "scope": "punctuation.separator.dictionary.signal.dtl",
+      "settings": {
+        "foreground": "#6272a4"
+      }
+    },
+    {
       "comment": "The 'Name' part of a Name.function() global reference after do/if/elif, e.g. 'Global' in 'do Global.apply_tint()' - can be an autoload singleton or a class_name-declared script. The function part itself already picks up support.function.dtl's color from the generic identifier-before-'(' rule.",
       "scope": "support.class.global.dtl",
       "settings": {

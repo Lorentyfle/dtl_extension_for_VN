@@ -76,7 +76,7 @@
           "comment": "Was previously '^\\s*leave\\s+(--All--)', which required the match to start at the very beginning of the line - but keyword.control.command.dtl (listed above) always wins that tie and consumes just 'leave', so the '^' anchor could never fire again afterward and --All-- silently lost its color. A lookbehind sidesteps the anchor entirely.",
           "match": "(?<=\\bleave\\s+)--All--"
         },
-        { "name": "variable.parameter.transform.dtl", "match": "(?<=^\\s*(?:join|update)[^\\r\\n]*)\\b(pos|size|rot)\\b(?=\\s*=)"}
+        { "name": "variable.parameter.transform.dtl", "match": "(?<=^\\s*(?:join|update)[^\\r\\n]*)\\b(pos|size|rot)\\b(?=\\s*=(?!=))"}
       ]
     },
 
@@ -109,7 +109,12 @@
     "global_references": {
       "comment": "A bare identifier immediately followed by '.' and another identifier - the shape of a global reference, e.g. 'Global.apply_tint()' inside do/if/elif/while (Global can be an autoload singleton or a class_name-declared script; DTL/Dialogic doesn't distinguish syntactically, so neither does this). Purely structural, matching regardless of whether the name is a real declared global - the same spirit as support.function.dtl below already coloring ANY identifier-before-'(' the same way. Placed after #dialogue/#narration in the top-level patterns list so ordinary prose containing a stray 'word.word' (e.g. 'Mr.Smith') is still claimed by them first - narration's begin pattern matches at column 0 for any qualifying line, which always wins over a match starting later, and ties are broken by list order in narration's favor.",
       "patterns": [
-        { "name": "support.class.global.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\.[A-Za-z_])" }
+        { "name": "support.class.global.dtl", "match": "(?<![.\\w])[A-Za-z_][A-Za-z0-9_]*(?=\\.[A-Za-z_])" },
+        { "name": "punctuation.accessor.dtl", "match": "(?<=[A-Za-z0-9_])\\.(?=[A-Za-z_])" },
+        { "comment": "A member followed by '(' is a function call: Global.apply_tint()", "name": "support.function.dtl", "match": "(?<=\\.)[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()" },
+        { "comment": "A member itself followed by '.member' is a nested type - in practice a named enum: Global.TimeId.CHAP2_R1", "name": "entity.name.type.enum.dtl", "match": "(?<=\\.)[A-Za-z_][A-Za-z0-9_]*(?=\\.[A-Za-z_])" },
+        { "comment": "An ALL_CAPS member is a constant or an enum value, following GDScript's naming convention: Global.MAX_HEARTS, Global.TimeId.CHAP2_R1", "name": "constant.other.enum-member.dtl", "match": "(?<=\\.)[A-Z][A-Z0-9_]*\\b" },
+        { "comment": "Anything else after the '.' is a property: Global.hearts", "name": "variable.other.member.dtl", "match": "(?<=\\.)[A-Za-z_][A-Za-z0-9_]*" }
       ]
     },
 
@@ -255,9 +260,31 @@
           "end": "\\]",
           "endCaptures": { "0": { "name": "punctuation.definition.tag.end.signal.dtl" } },
           "patterns": [
-            { "name": "variable.parameter.signal.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=)" },
+            { "name": "variable.parameter.signal.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=(?!=))" },
             { "include": "#operator" },
+            { "include": "#signal_dictionary" },
             { "include": "#strings" }
+          ]
+        }
+      ]
+    },
+
+    "signal_dictionary": {
+      "comment": "A dictionary signal argument, arg=\"{\"Effect\":\"Rain\",\"Amount\":100}\" - colored like JSON (keys, string/number/boolean values, punctuation) instead of one long string. Works whether the inner quotes are escaped (\\\") or not (Dialogic's editor writes them unescaped). Only a value starting with '{' gets this treatment; any other arg stays a plain #strings string.",
+      "patterns": [
+        {
+          "name": "meta.structure.dictionary.signal.dtl",
+          "begin": "\"(?=\\{)",
+          "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.dtl" } },
+          "end": "(?<=\\})\"",
+          "endCaptures": { "0": { "name": "punctuation.definition.string.end.dtl" } },
+          "patterns": [
+            { "name": "support.type.property-name.signal.dtl", "match": "\\\\?\"[^\"\\\\]*\\\\?\"(?=\\s*:)" },
+            { "name": "string.quoted.double.dtl", "match": "\\\\?\"[^\"\\\\]*\\\\?\"" },
+            { "name": "constant.language.dtl", "match": "\\b(?:true|false|null)\\b" },
+            { "include": "#numbers" },
+            { "name": "punctuation.definition.dictionary.signal.dtl", "match": "[{}\\[\\]]" },
+            { "name": "punctuation.separator.dictionary.signal.dtl", "match": "[:,]" }
           ]
         }
       ]
@@ -283,7 +310,7 @@
           "endCaptures": { "0": { "name": "punctuation.definition.tag.end.dtl" } },
           "patterns": [
             { "name": "keyword.control.choice.dtl", "match": "\\b(if|elif|else)\\b" },
-            { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=)" },
+            { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=(?!=))" },
             { "include": "#operator" },
             { "include": "#strings" },
             { "include": "#numbers" },
@@ -305,7 +332,7 @@
           "endCaptures": { "0": { "name": "punctuation.definition.tag.end.dtl" } },
           "patterns": [
             { "name": "keyword.control.choice.dtl", "match": "\\b(if|elif|else)\\b" },
-            { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=)" },
+            { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=(?!=))" },
             { "include": "#operator" },
             { "include": "#strings" },
             { "include": "#numbers" },
@@ -327,7 +354,7 @@
           "endCaptures": { "0": { "name": "punctuation.definition.tag.end.dtl" } },
           "patterns": [
             { "name": "keyword.control.choice.dtl", "match": "\\b(if|elif|else)\\b" },
-            { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=)" },
+            { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=(?!=))" },
             { "include": "#operator" },
             { "include": "#strings" },
             { "include": "#numbers" },
@@ -349,7 +376,7 @@
           "endCaptures": { "0": { "name": "punctuation.definition.tag.end.dtl" } },
           "patterns": [
             { "name": "keyword.control.choice.dtl", "match": "\\b(if|elif|else)\\b" },
-            { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=)" },
+            { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=(?!=))" },
             { "include": "#operator" },
             { "include": "#strings" },
             { "include": "#numbers" },
@@ -371,7 +398,7 @@
           "endCaptures": { "0": { "name": "punctuation.definition.tag.end.dtl" } },
           "patterns": [
             { "name": "keyword.control.choice.dtl", "match": "\\b(if|elif|else)\\b" },
-            { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=)" },
+            { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=(?!=))" },
             { "include": "#operator" },
             { "include": "#strings" },
             { "include": "#numbers" },
@@ -393,7 +420,7 @@
           "endCaptures": { "0": { "name": "punctuation.definition.tag.end.dtl" } },
           "patterns": [
             { "name": "keyword.control.choice.dtl", "match": "\\b(if|elif|else)\\b" },
-            { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=)" },
+            { "name": "entity.other.attribute-name.dtl", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*=(?!=))" },
             {
               "comment": "extra_data=\"set Emotion/Happy\" - only the 'set ...' shape gets the emotion scope on its payload, so a theme can make Emotion/Happy read the same way as a mood tag like 'John (happy):'. Anything not starting with 'set ' stays a plain string.",
               "match": "(?<=extra_data\\s*=)(\")(set\\s+)([^\"]*)(\")",
@@ -406,6 +433,7 @@
             { "include": "#operator" },
             { "include": "#strings" },
             { "include": "#numbers" },
+            { "include": "#global_references" },
             { "include": "#constants" },
             { "include": "#variables" }
           ]

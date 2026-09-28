@@ -187,6 +187,97 @@ function findAutoloadReferenceAtPosition(document, position) {
 }
 
 /**
+ * Find the Dialogic variable (from project.godot's `variables={...}`)
+ * under the cursor inside a `{...}` block, e.g. hovering `test` in
+ * `{variable.test}`. The hovered segment decides how much of the path is
+ * shown - hovering `variable` describes the whole group instead. Autoload
+ * references like `{Global.hearts}` are handled by
+ * findAutoloadReferenceAtPosition instead.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Position} position
+ * @returns {{markdown: vscode.MarkdownString, range: vscode.Range} | null}
+ */
+function findVariableAtPosition(document, position) {
+  const line = document.lineAt(position.line).text;
+  const blockPattern = /\{([^{}]*)\}/g;
+  let blockMatch;
+  while ((blockMatch = blockPattern.exec(line)) !== null) {
+    const innerStart = blockMatch.index + 1;
+    const innerEnd = innerStart + blockMatch[1].length;
+    if (position.character < innerStart || position.character > innerEnd) { continue; }
+
+    const segmentPattern = /[^.\s]+/g;
+    const pathSegments = [];
+    let segmentMatch;
+    while ((segmentMatch = segmentPattern.exec(blockMatch[1])) !== null) {
+      pathSegments.push(segmentMatch[0]);
+      const segmentStart = innerStart + segmentMatch.index;
+      const segmentEnd = segmentStart + segmentMatch[0].length;
+      if (position.character < segmentStart || position.character > segmentEnd) { continue; }
+
+      let level = cachedVariablesTree;
+      let entry = null;
+      for (const segment of pathSegments) {
+        entry = level && level.get(segment);
+        if (!entry) { return null; }
+        level = entry.children;
+      }
+      return {
+        markdown: createVariableDocumentation(pathSegments.join('.'), entry),
+        range: new vscode.Range(position.line, segmentStart, position.line, segmentEnd),
+      };
+    }
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Best-effort GDScript type name for a raw default value from
+ * project.godot, e.g. `1` -> int, `1.0` -> float, `"x"` -> String.
+ *
+ * @param {string} rawValue
+ * @returns {string | null}
+ */
+function inferGdValueType(rawValue) {
+  if (/^-?\d+$/.test(rawValue)) { return 'int'; }
+  if (/^-?(?:\d+\.\d*|\.\d+)(?:e-?\d+)?$/i.test(rawValue)) { return 'float'; }
+  if (rawValue === 'true' || rawValue === 'false') { return 'bool'; }
+  if (/^&?"/.test(rawValue)) { return 'String'; }
+  if (rawValue.startsWith('[')) { return 'Array'; }
+  if (rawValue.startsWith('{')) { return 'Dictionary'; }
+  const constructorMatch = rawValue.match(/^([A-Z][A-Za-z0-9]*)\(/);
+  return constructorMatch ? constructorMatch[1] : null;
+}
+
+/**
+ * Build the hover shown for a Dialogic variable: its full path, its
+ * default value and type (as declared in project.godot) - or, for a
+ * variable group, the list of what it contains.
+ *
+ * @param {string} path - e.g. "variable.test"
+ * @param {{value: string|null, children: Map|null}} entry
+ * @returns {vscode.MarkdownString}
+ */
+function createVariableDocumentation(path, entry) {
+  const markdown = new vscode.MarkdownString();
+  if (entry.children) {
+    markdown.appendMarkdown(`**{${path}}** _(Dialogic variable group)_\n\n`);
+    for (const [name, child] of entry.children) {
+      markdown.appendMarkdown(child.children
+        ? `- \`${name}\` _(group, ${child.children.size} entries)_\n`
+        : `- \`${name}\` = \`${child.value}\`\n`);
+    }
+    return markdown;
+  }
+  const type = inferGdValueType(entry.value);
+  markdown.appendMarkdown(`**{${path}}** _(Dialogic variable${type ? ', ' + type : ''})_\n\n`);
+  markdown.appendMarkdown(`Default value: \`${entry.value}\``);
+  return markdown;
+}
+
+/**
  * True when `index` on `line` sits inside an open `{...}` variable block.
  *
  * @param {string} line
@@ -790,6 +881,20 @@ const DTL_BBCODES = [
 ].map(entry => ({ ...entry, type: 'bbcode', docsUrl: GODOT_BBCODE_DOCS_URL }));
 
 /**
+ * The BBCode tags offered right after a bare `[` - the ones used most in
+ * dialogue. Every other tag (alignment, lists, tables, BiDi control
+ * characters...) is still suggested, but only once a letter of its name
+ * has been typed, so a bare `[` doesn't bury Dialogic's own commands
+ * under ~50 BBCode tags.
+ *
+ * @type {Set<string>}
+ */
+const COMMON_BBCODE_NAMES = new Set([
+  'b', 'i', 'u', 's', 'color', 'font_size', 'center', 'url', 'img',
+  'wave', 'shake', 'rainbow', 'pulse', 'tornado', 'fade', 'br',
+]);
+
+/**
  * BBCode tags that have no `[/name]` closer, so they're never flagged as
  * unclosed balises by findUnclosedBaliseDiagnostics.
  *
@@ -915,17 +1020,34 @@ const DTL_ATTRIBUTE_VALUE_SUGGESTIONS = {
 };
 
 /**
- * Bracket-command attributes whose value is a Godot `res://` resource path,
- * e.g. `[voice path="res://..."]`. Keyed the same way as
- * DTL_ATTRIBUTE_VALUE_SUGGESTIONS (entry name -> list of attribute names),
- * so createAttributeValueSuggestions can fall back to path suggestions
- * when no fixed enum of values applies.
+ * File extensions (lowercase, no dot) Godot can load for each kind of
+ * resource a timeline can point at, used to only suggest `res://` paths
+ * that actually make sense for the command being written - e.g. audio
+ * files for `[voice path="`, never a `.gd` script or a `.dch` character.
  *
  * @type {Record<string, string[]>}
  */
+const RESOURCE_EXTENSIONS = {
+  audio: ['ogg', 'wav', 'mp3'],
+  image: ['png', 'jpg', 'jpeg', 'webp', 'svg', 'bmp', 'tga', 'exr', 'hdr', 'dds', 'ktx'],
+  video: ['ogv'],
+  scene: ['tscn', 'scn'],
+  font: ['ttf', 'otf', 'woff', 'woff2', 'fnt', 'font', 'pfb', 'pfm'],
+};
+
+/**
+ * Bracket-command attributes whose value is a Godot `res://` resource path,
+ * e.g. `[voice path="res://..."]`, mapped to the file extensions that make
+ * sense there. Keyed the same way as DTL_ATTRIBUTE_VALUE_SUGGESTIONS
+ * (entry name -> attribute name -> ...), so createAttributeValueSuggestions
+ * can fall back to path suggestions when no fixed enum of values applies.
+ *
+ * @type {Record<string, Record<string, string[]>>}
+ */
 const DTL_PATH_ATTRIBUTES = {
-  voice: ['path'],
-  background: ['arg', 'scene'],
+  voice: { path: RESOURCE_EXTENSIONS.audio },
+  // The default background scene displays `arg` as an image or a video.
+  background: { arg: [...RESOURCE_EXTENSIONS.image, ...RESOURCE_EXTENSIONS.video], scene: RESOURCE_EXTENSIONS.scene },
 };
 
 /**
@@ -953,9 +1075,10 @@ function createValueCompletion(value, alreadyQuoted) {
  * @param {string} entryName - DTL_ENTRIES name the attribute belongs to (e.g. "join")
  * @param {string} attributeName - e.g. "animation"
  * @param {string} typedValue - raw text typed so far after '=' (quote included, if any)
+ * @param {vscode.Position} position - cursor position, for path suggestions' replace range
  * @returns {vscode.CompletionItem[]}
  */
-function createAttributeValueSuggestions(entryName, attributeName, typedValue) {
+function createAttributeValueSuggestions(entryName, attributeName, typedValue, position) {
   const values = DTL_ATTRIBUTE_VALUE_SUGGESTIONS[entryName] && DTL_ATTRIBUTE_VALUE_SUGGESTIONS[entryName][attributeName];
   if (values) {
     const alreadyQuoted = typedValue.startsWith('"');
@@ -964,9 +1087,9 @@ function createAttributeValueSuggestions(entryName, attributeName, typedValue) {
       .filter(value => value.toLowerCase().startsWith(prefix))
       .map(value => createValueCompletion(value, alreadyQuoted));
   }
-  const pathAttributes = DTL_PATH_ATTRIBUTES[entryName];
-  if (pathAttributes && pathAttributes.includes(attributeName)) {
-    return createPathSuggestions(typedValue);
+  const pathExtensions = DTL_PATH_ATTRIBUTES[entryName] && DTL_PATH_ATTRIBUTES[entryName][attributeName];
+  if (pathExtensions) {
+    return createPathSuggestions(typedValue, position, pathExtensions);
   }
   return [];
 }
@@ -975,30 +1098,45 @@ function createAttributeValueSuggestions(entryName, attributeName, typedValue) {
  * Completion item for a Godot `res://` resource path.
  *
  * @param {string} path - e.g. "res://assets/ost/my_music.mp3"
- * @param {boolean} alreadyQuoted
+ * @param {boolean} quote - wrap the inserted path in quotes (none typed yet)
+ * @param {vscode.Range} range - the whole path typed so far, so accepting
+ *   replaces it instead of only its last "word" (VS Code's default word
+ *   stops at '/' and ':', which duplicated the "res://" part)
  * @returns {vscode.CompletionItem}
  */
-function createPathCompletion(path, alreadyQuoted) {
+function createPathCompletion(path, quote, range) {
   const item = new vscode.CompletionItem(path, vscode.CompletionItemKind.File);
   item.detail = 'Godot resource path';
-  item.insertText = alreadyQuoted ? path : `"${path}"`;
+  item.insertText = quote ? `"${path}"` : path;
+  item.filterText = quote ? `"${path}"` : path;
+  item.range = range;
   return item;
 }
 
 /**
- * Build completion items for a `res://` path attribute, filtered by
- * whatever has been typed so far after the opening quote (if any).
- * Backed by cachedResourcePaths, refreshed alongside project.godot.
+ * Build completion items for a `res://` path value, filtered by whatever
+ * has been typed so far after the opening quote (if any), and - when
+ * `extensions` is given - to only the files a command can actually use
+ * (see RESOURCE_EXTENSIONS). Backed by cachedResourcePaths, refreshed
+ * alongside project.godot.
  *
- * @param {string} typedValue - raw text typed so far after '=' (quote included, if any)
+ * @param {string} typedValue - raw text typed so far for the value (opening quote included, if any)
+ * @param {vscode.Position} position - cursor position (the end of typedValue)
+ * @param {string[]} [extensions] - allowed file extensions, lowercase, no dot
+ * @param {{quote?: boolean}} [options] - `quote: false` never wraps the
+ *   path in quotes, for values that aren't quoted (e.g. `[img]path[/img]`)
  * @returns {vscode.CompletionItem[]}
  */
-function createPathSuggestions(typedValue) {
+function createPathSuggestions(typedValue, position, extensions, options = {}) {
   const alreadyQuoted = typedValue.startsWith('"');
-  const prefix = (alreadyQuoted ? typedValue.slice(1) : typedValue).toLowerCase();
+  const typedPath = alreadyQuoted ? typedValue.slice(1) : typedValue;
+  const prefix = typedPath.toLowerCase();
+  const quote = options.quote !== false && !alreadyQuoted;
+  const range = new vscode.Range(position.line, position.character - typedPath.length,position.line, position.character);
   return cachedResourcePaths
     .filter(path => path.toLowerCase().startsWith(prefix))
-    .map(path => createPathCompletion(path, alreadyQuoted));
+    .filter(path => !extensions || extensions.includes(path.slice(path.lastIndexOf('.') + 1).toLowerCase()))
+    .map(path => createPathCompletion(path, quote, range));
 }
 
 // =============================================================================
@@ -2038,8 +2176,35 @@ function createDocumentation(entry) {
 // =============================================================================
 // COMPLETION ITEM HELPERS
 // =============================================================================
+
+/**
+ * Shorten an entry's description to its first sentence (at most ~60
+ * characters, Markdown backticks and {placeholders} stripped), for use as
+ * a completion label's `description`. VS Code shows that on the same row
+ * as the suggestion itself, so what a command or BBCode tag does is
+ * visible while scrolling the list - without having to open the details
+ * side panel (Ctrl+Space), which still shows the full documentation.
+ *
+ * @param {string} description
+ * @returns {string}
+ */
+function summarizeDescription(description) {
+  const plain = description.replace(/`/g, '').replace(/\{(\w+)\}/g, '$1');
+  const firstSentence = plain.match(/^.*?[.!?](?=\s|$)/);
+  const summary = firstSentence ? firstSentence[0] : plain;
+  return summary.length > 60 ? summary.slice(0, 57).trimEnd() + '...' : summary;
+}
+/**
+ * Completion item for a Dialogic command/event (`join`, `[wait]`, ...).
+ * Uses the Event kind (lightning-bolt icon) - Dialogic calls these
+ * "events" itself - so in a `[` list they're told apart at a glance from
+ * Godot BBCode tags, which keep the Keyword icon.
+ *
+ * @param {object} entry - one of DTL_ENTRIES
+ * @returns {vscode.CompletionItem}
+ */
 function createCommandCompletion(entry) {
-  const item = new vscode.CompletionItem(entry.name,vscode.CompletionItemKind.Keyword);
+  const item = new vscode.CompletionItem({ label: entry.name, description: summarizeDescription(entry.description) }, vscode.CompletionItemKind.Event);
   item.detail = entry.syntax;
   item.documentation = createDocumentation(entry);
   return item;
@@ -2623,18 +2788,29 @@ function createVariableSuggestions(typedPath) {
 // =============================================================================
 
 /**
- * True when `text` - either what's been typed so far on a line, or a full
- * line - starts a `do`/`if`/`elif` expression, i.e. is where a
- * `Global.function_name(...)` call could meaningfully appear. Requires the
- * keyword to already be followed by whitespace, not just present, so
+ * Matches the start of a line up to where a GDScript-style expression
+ * begins - i.e. where an autoload reference like `Global.foo()` or
+ * `Global.State.IDLE` could meaningfully appear:
+ * - after `do`, `if`, `elif` or `while` (group 1 is the keyword);
+ * - after the assignment operator of `set {variable} = ` (also `+=`,
+ *   `-=`, `*=`, `/=`), where group 1 is undefined.
+ * Requires whitespace after the keyword (or the `=`, for set) so
  * still-typing the keyword itself (e.g. text ending in exactly "do") isn't
  * mistaken for an already-complete keyword with an empty expression.
+ *
+ * @type {RegExp}
+ */
+const EXPRESSION_START_PATTERN = /^\s*(?:(do|if|elif|while)\s+|set\s+\{[^}]*\}\s*[-+*/]?=\s*)/;
+
+/**
+ * True when `text` - either what's been typed so far on a line, or a full
+ * line - has reached an expression (see EXPRESSION_START_PATTERN).
  *
  * @param {string} text
  * @returns {boolean}
  */
 function isGlobalScriptExpressionLine(text) {
-  return /^\s*(?:do|if|elif)\s/.test(text);
+  return EXPRESSION_START_PATTERN.test(text);
 }
 
 /**
@@ -2767,18 +2943,21 @@ function createEnumValueSuggestions(symbols, enumName, prefix) {
 }
 
 /**
- * Build completions for a `do`/`if`/`elif` expression: either autoload
- * names, a specific autoload's members (once `Name.` has been typed), or a
- * named enum's values (once `Name.Enum.` has been typed).
+ * Build completions for an expression - after `do`/`if`/`elif`/`while`,
+ * or on the right-hand side of `set {variable} = ...` (see
+ * EXPRESSION_START_PATTERN): either autoload names, a specific autoload's
+ * members (once `Name.` has been typed), or a named enum's values (once
+ * `Name.Enum.` has been typed), e.g.
+ * `set {VnLibrary.current_vn_time} = VnLibrary.TimeId.CHAP2_R1`.
  *
  * Kept deliberately narrow, so the list only opens where an autoload
  * reference can actually go:
  * - never inside a string literal, e.g. `Global.foo("intro`;
  * - `do` only runs a method, so it offers autoload names only as its
  *   first token, and only functions as members;
- * - `if`/`elif` conditions can compare anything, so they offer every
- *   member - but a bare name list is only popped open by a trigger
- *   character (space, `(`, ...) right after the keyword or after
+ * - `if`/`elif`/`while` conditions and `set` values can use anything, so
+ *   they offer every member - but a bare name list is only popped open by
+ *   a trigger character (space, `=`, ...) right after the keyword/`=` or after
  *   `and`/`or`/`not`, not after every space in the expression; typing a
  *   letter still suggests matching names anywhere.
  *
@@ -2789,7 +2968,7 @@ function createEnumValueSuggestions(symbols, enumName, prefix) {
  * @returns {vscode.CompletionItem[]}
  */
 function createGlobalScriptSuggestions(beforeCursor, triggerCharacter) {
-  const keywordMatch = beforeCursor.match(/^\s*(do|if|elif)\s+/);
+  const keywordMatch = beforeCursor.match(EXPRESSION_START_PATTERN);
   if (!keywordMatch) { return []; }
   const isDo = keywordMatch[1] === 'do';
   const expression = beforeCursor.slice(keywordMatch[0].length);
@@ -2853,7 +3032,7 @@ function isInPlayerFacingText(textBeforeBracket) {
  * @returns {vscode.CompletionItem}
  */
 function createBbcodeCompletion(entry, range) {
-  const item = new vscode.CompletionItem(entry.name, vscode.CompletionItemKind.Keyword);
+  const item = new vscode.CompletionItem({ label: entry.name, description: summarizeDescription(entry.description) }, vscode.CompletionItemKind.Keyword);
   item.detail = `Godot BBCode - ${entry.syntax}`;
   item.documentation = createDocumentation(entry);
   item.sortText = `1_${entry.name}`;
@@ -3192,6 +3371,16 @@ function activate(context) {
             return new vscode.Hover(autoloadHit.markdown, autoloadHit.range);
           }
           // -------------------------------------------------------------------
+          // Dialogic variables
+          //
+          // {variable.test}      set {chapter} = 1
+          //           ^^^^            ^^^^^^^ hovering either
+          // -------------------------------------------------------------------
+          const variableHit = findVariableAtPosition(document, position);
+          if (variableHit) {
+            return new vscode.Hover(variableHit.markdown, variableHit.range);
+          }
+          // -------------------------------------------------------------------
           // Normal commands
           //
           // label
@@ -3481,7 +3670,7 @@ function activate(context) {
                 if (attributeName === 'extra_data') {
                   items.push(...createEmotionPathSuggestions(line, typedValue));
                 } else {
-                  items.push(...createAttributeValueSuggestions(commandEntry.name, attributeName, typedValue));
+                  items.push(...createAttributeValueSuggestions(commandEntry.name, attributeName, typedValue, position));
                 }
               }
               return items;
@@ -3489,10 +3678,21 @@ function activate(context) {
           }
           // =========================================================================
           // BRACKET COMMANDS
-          // Godot BBCode tags are offered too, but only inside player-facing
-          // text (dialogue, narration, choices) - on a standalone "[" line
-          // it can only be a DTL command.
+          // Inside dialogue/narration text and choices, Godot BBCode tags are
+          // offered after Dialogic's own commands. To keep the list short, a
+          // bare "[" only offers the common tags
+          // (COMMON_BBCODE_NAMES); the rest show up once a letter of their
+          // name is typed - the list is marked incomplete so VS Code asks
+          // again on every keystroke instead of only filtering the first one.
           // =========================================================================
+          const imagePathMatch = beforeCursor.match(/\[img\b[^\]]*\]([^\[\]]*)$/);
+          if (imagePathMatch) {
+            return createPathSuggestions(imagePathMatch[1], position, RESOURCE_EXTENSIONS.image, { quote: false });
+          }
+          const fontPathMatch = beforeCursor.match(/\[font(?:\s[^\]]*?\bname)?=("?[^\s\]"]*)$/);
+          if (fontPathMatch) {
+            return createPathSuggestions(fontPathMatch[1], position, RESOURCE_EXTENSIONS.font, { quote: false });
+          }
           const closingTagMatch = beforeCursor.match(/\[\/([A-Za-z_][A-Za-z0-9_]*)?$/);
           if (closingTagMatch) {
             return createClosingTagSuggestions(beforeCursor.slice(0, closingTagMatch.index), closingTagMatch[1] || '', line, position);
@@ -3513,19 +3713,24 @@ function activate(context) {
               item.sortText = `0_${entry.name}`;
               items.push(item);
             }
-            if (isInPlayerFacingText(beforeCursor.slice(0, bracketMatch.index))) {
-              // Replace an auto-closed "]" right after the cursor, since
-              // the BBCode snippet brings its own.
-              const nameStart = bracketMatch.index + 1;
-              const replaceEnd = line[position.character] === ']' ? position.character + 1 : position.character;
-              const range = new vscode.Range(position.line, nameStart, position.line, replaceEnd);
-              for (const entry of DTL_BBCODES) {
-                if (entry.name.startsWith(prefix)) {
-                  items.push(createBbcodeCompletion(entry, range));
-                }
+            // BBCode only makes sense inside dialogue/narration text and
+            // choices - a standalone "[" line is a Dialogic event.
+            if (!isInPlayerFacingText(beforeCursor.slice(0, bracketMatch.index))) {
+              return items;
+            }
+            const showAllBbcodes = prefix !== '';
+            // Replace an auto-closed "]" right after the cursor, since
+            // the BBCode snippet brings its own.
+            const nameStart = bracketMatch.index + 1;
+            const replaceEnd = line[position.character] === ']' ? position.character + 1 : position.character;
+            const range = new vscode.Range(position.line, nameStart, position.line, replaceEnd);
+            for (const entry of DTL_BBCODES) {
+              if (!showAllBbcodes && !COMMON_BBCODE_NAMES.has(entry.name)) { continue; }
+              if (entry.name.startsWith(prefix)) {
+                items.push(createBbcodeCompletion(entry, range));
               }
             }
-            return items;
+            return new vscode.CompletionList(items, !showAllBbcodes);
           }
           // =========================================================================
           // BRACKET COMMAND PARAMETERS (e.g. inside `[wait time=1.5 |`)
@@ -3560,7 +3765,7 @@ function activate(context) {
                 const equalsIndex = currentToken.indexOf('=');
                 const attributeName = currentToken.slice(0, equalsIndex);
                 const typedValue = currentToken.slice(equalsIndex + 1);
-                const valueSuggestions = createAttributeValueSuggestions(bracketEntry.name, attributeName, typedValue);
+                const valueSuggestions = createAttributeValueSuggestions(bracketEntry.name, attributeName, typedValue, position);
                 if (valueSuggestions.length > 0) {
                   items.push(...valueSuggestions);
                   return items;
@@ -3588,13 +3793,18 @@ function activate(context) {
               return items;
             }
             // Kind fully typed, waiting for or typing the path:
-            // "audio music |" or "audio music "res:/|"
-            if (argumentsParts.length === 2) {
-              const typedValue = argumentsParts[1];
-              if (typedValue === '') {
-                items.push(createAudioPathCompletion());
-              } else {
-                items.push(...createPathSuggestions(typedValue));
+            // "audio music |" or "audio music "res:/|" - only audio files
+            // are offered. The typed value is everything after the kind
+            // (not just the next whitespace-separated token), so a path
+            // containing spaces still filters correctly.
+            if (argumentsParts.length >= 2) {
+              const typedValue = argumentsText.replace(/^\S+\s+/, '');
+              if (/^"[^"]*"/.test(typedValue)) {
+                return items; // path already written and closed
+              }
+              items.push(...createPathSuggestions(typedValue, position, RESOURCE_EXTENSIONS.audio));
+              if (typedValue === '' && items.length === 0) {
+                items.push(createAudioPathCompletion()); // no audio file in the project yet
               }
               return items;
             }

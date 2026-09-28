@@ -1,4 +1,15 @@
 # Changelog
+## [1.0.6]
+- Addition of hover documentation for Dialogic variables inside `{}`: shows the variable's default value and type (from project.godot), or the content of a variable group.
+- Autocomplete and hover for autoloads now also work in `set` values and `while` conditions, e.g. `set {VnLibrary.current_vn_time} = VnLibrary.TimeId.CHAP2_R1`.
+- Better colors for autoload references: the autoload, a nested enum (`TimeId`), a constant or enum value (`CHAP2_R1`), a property and a function all get their own color. `[if ...]` conditions of choices use them too.
+- Bug: `==` inside `[if ...]` made the word before it colored as an attribute name.
+- Path suggestions only show files that fit the command: audio files for `[voice path=""]` and `audio KIND ""`, images/videos for `[background arg=""]`, scenes for `[background scene=""]`, images for `[img]...[/img]` and fonts for `[font=...]`. `audio KIND ` now directly suggests the audio files instead of an empty `""`.
+- Bug: accepting a path after typing part of it (e.g. `"res://ass`) duplicated the `res://` part.
+- BBCode suggestions (still only inside dialogue, narration and choices): a bare `[` now shows Dialogic's commands first, then only the most common BBCode tags. The rest appear once a letter of their name is typed.
+- Suggestions for Dialogic commands and BBCode tags now show a short description on the same row, so what each one does is visible directly in the list. The full documentation is still in the details panel (Ctrl+Space).
+- Dialogic commands and BBCode tags now have different icons in the suggestion list (a lightning bolt for Dialogic events, the keyword icon for BBCode), so they can be told apart at a glance after `[`.
+- Signal dictionary arguments (`arg="{"type":"dice","s":false}"`) are colored like JSON: keys, strings, numbers, booleans and punctuation, whether the inner quotes are escaped or not.
 ## [1.0.5]
 - Addition of suggestion and documentation for autoload nodes: an autoload pointing at a `.tscn` scene now uses its root node's script.
 - Addition of Godot variables (`var`, including `@export`/`@onready`), enums and constants to suggestion and documentation, for both autoload nodes and autoload scripts. `Global.State.` suggests the enum's values, and `{Global.property}` is suggested inside `{}` too. Multi-line function signatures are now supported.

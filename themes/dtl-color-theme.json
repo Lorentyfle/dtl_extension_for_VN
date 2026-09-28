@@ -206,6 +206,30 @@
       "settings": { "foreground": "#c44fff", "fontStyle": "bold" }
     },
     {
+      "scope": "variable.other.member.dtl",
+      "settings": { "foreground": "#9cdcfe" }
+    },
+    {
+      "scope": "entity.name.type.enum.dtl",
+      "settings": { "foreground": "#4ec9b0" }
+    },
+    {
+      "scope": "constant.other.enum-member.dtl",
+      "settings": { "foreground": "#4fc1ff" }
+    },
+    {
+      "scope": "support.type.property-name.signal.dtl",
+      "settings": { "foreground": "#9cdcfe" }
+    },
+    {
+      "scope": "punctuation.definition.dictionary.signal.dtl",
+      "settings": { "foreground": "#ffd700" }
+    },
+    {
+      "scope": "punctuation.separator.dictionary.signal.dtl",
+      "settings": { "foreground": "#808080" }
+    },
+    {
       "scope": "variable.other.emotion.dtl",
       "settings": { "foreground": "#f5a623", "fontStyle": "bold" }
     },

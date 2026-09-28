@@ -76,6 +76,15 @@ every DTL Reader feature without risking real project data.
   functions, variables, constants and `State`, `if Global.State.` lists
   its values, and `TestCharacter: {Global.` lists variables/constants.
   Inside `do Global.has_achievement("` nothing should be suggested.
+- **`set` values**: after `set {Global.state} = `, `Global` should be
+  suggested, and `Global.State.` should list the enum's values. The
+  right-hand side should show 3 different colors (autoload, enum, value).
+- **Variable hover**: hover `test` in `{variable.test}` - it should show
+  `Default value: 1` (int); hovering `variable` lists the whole group.
+- **Signal dictionary colors**: both `[signal ...]` lines with a `{...}`
+  argument should color keys, strings, `false` and numbers differently.
+- **Filtered paths**: `[voice path="` should only offer the `.ogg` files,
+  `[background scene="` only `.tscn` files.
 - **No stray suggestions in dialogue**: typing `.` or a space at the end
   of a dialogue sentence should NOT open a suggestion list.
 - **BBCode**: in dialogue type `[co` - `code` and `color` should appear;

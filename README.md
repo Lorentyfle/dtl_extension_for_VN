@@ -25,11 +25,11 @@ Suggestions are available where they are useful, including:
 - Position and transform values such as `pos=`, `size=` and `rot=`
 - Animation names and animation parameters
 - Audio resources and audio settings
-- Godot `res://` and `user://` paths
+- Godot `res://` paths, filtered to the files each command can use (audio, images, scenes, fonts)
 - Layered Portrait `extra_data`
 - Labels and jump targets
-- Dialogic variables inside `{}`
-- Autoload scripts and autoload nodes (scenes) after `do`, `if` and `elif`, and inside `{}`: their functions, variables, constants and enums, with their `##` documentation comments
+- Dialogic variables inside `{}`, with their default value on hover
+- Autoload scripts and autoload nodes (scenes) after `do`, `if`, `elif` and `while`, in `set` values, and inside `{}`: their functions, variables, constants and enums, with their `##` documentation comments
 - Every Godot BBCode tag (`[b]`, `[color=...]`, `[wave]`, `[br]`...) inside dialogue, narration and choices, plus the matching closing tag after `[/`
 
 Autoloads declared by addons (under `res://addons/`, like Dialogic's own `Dialogic` singleton) are hidden by default. Turn on the `dtlReader.includeAddonAutoloads` setting to show them.
