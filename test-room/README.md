@@ -128,6 +128,10 @@ every DTL Reader feature without risking real project data.
   changes its languages. Fill in "Say goodbye",
   press Ctrl+S, and check `translations/dialogic_timeline_translations.csv`.
   Click a line in either editor - the other scrolls to it.
+- **BBCode preview**: the line with "All at once" should show a bold
+  italic rainbow, a yellow outlined word, text fading out, a dotted
+  "hint" (hover it) and a heart after `[char=2665]`. Turn it off with
+  `DTL Reader > Preview: Bbcode Effects`.
 - **Settings**: set `DTL Reader > Diagnostics: Unknown Speaker` to `off`
   and `Ghost: hi` no longer gets a warning.
 - **No stray suggestions in dialogue**: typing `.` or a space at the end

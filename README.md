@@ -53,6 +53,10 @@ DTL Reader understands the relationship between `jump` and `label`.
 - Get an error for characters, moods and `{variables}` that don't exist in the Godot project.
 - Document a label with `##` comment lines right above it: the doc shows when hovering a `jump` to it.
 
+### BBCode preview
+
+The text inside Godot BBCode tags shows its effect right in the editor: `[color]` is colored, `[rainbow]` is a rainbow, `[fade]` fades out, `[b][i]` is bold italic, `[outline_size]` gets an outline, and animated effects get a stand-in (`[wave]` wavy underline, `[shake]` dotted, `[tornado]` dashed, `[pulse]` dimmed). `[hint]` and `[img]` show their text or image on hover. Tags can be combined and nested in any way.
+
 ### Translation mode
 
 Translate your timelines without leaving them. Set **DTL Reader > Translation: Language** (e.g. `fr`), or run **DTL: Select Translation Language**:

@@ -2,7 +2,7 @@
   "name": "dtl-reader",
   "displayName": "DTL Reader",
   "description": "Syntax highlighting for Dialogic2 TimeLine (.dtl) files",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "publisher": "lorentyfle",
   "icon": "./icons/favicon.png",
   "engines": {
@@ -237,6 +237,12 @@
             "description": "In the Outline view, list each label's flow (if/elif/else/while blocks, choices, jump/return/end_timeline), nested by indentation. When off, the outline only lists the labels.",
             "order": 99,
             "markdownDeprecationMessage": "Replaced by `#dtlReader.outline.style#` (`dialogic` = labels only)."
+          },
+          "dtlReader.preview.bbcodeEffects": {
+            "type": "boolean",
+            "default": true,
+            "order": 3,
+            "markdownDescription": "Show what Godot BBCode tags do, right in the editor: `[color]`, `[bgcolor]`, `[rainbow]`, `[fade]`, `[b]`/`[i]`/`[u]`/`[s]`, outlines, `[url]`, and a static stand-in for animated effects (`[wave]` wavy underline, `[shake]` dotted, `[tornado]` dashed, `[pulse]` dimmed). Tags can be combined and nested. `[hint]` and `[img]` show their text / image on hover, `[char]` its character."
           }
         }
       },

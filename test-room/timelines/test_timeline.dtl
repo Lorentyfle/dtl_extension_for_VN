@@ -39,6 +39,7 @@ if Global.state == Global.State.TALKING and Global.hearts < Global.MAX_HEARTS
     TestCharacter: You look hurt. You have {Global.hearts} hearts left.
 
 TestCharacter: [color=red]Danger![/color] [wave amp=25 freq=5]Wheee[/wave][br]New line, [rainbow]fabulous[/rainbow].
+TestCharacter: [b][i][rainbow freq=2]All at once[/rainbow][/i][/b], [outline_size=4][outline_color=black][color=yellow]outlined[/color][/outline_color][/outline_size], [fade start=2 length=8]fading away...[/fade] [hint="Hover me"]hint[/hint] [char=2665]
 
 set {chapter} = 1
 if {chapter} == 1

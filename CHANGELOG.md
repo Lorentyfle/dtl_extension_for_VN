@@ -1,4 +1,14 @@
 # Changelog
+## [1.3.0]
+- BBCode preview: the text inside Godot BBCode tags shows their effect right in the editor, in timelines and in the Translation View:
+    - `[b]`, `[i]`, `[u]`, `[s]`: bold, italic, underline, strikethrough.
+    - `[color=...]`: the real color (Godot color names like `red`, `aqua`, `light_blue`, or `#hex`). `[bgcolor=...]`: a background. `[fgcolor=...]`: "redacted" (text hidden in that color).
+    - `[outline_size]` + `[outline_color]`: an outline around the letters.
+    - `[rainbow]`: a rainbow across the letters (using its `freq`, `sat` and `val`). `[fade]`: the letters fade out where Godot fades them (`start`, `length`).
+    - Animated effects get a static stand-in: `[wave]` wavy underline, `[shake]` dotted underline with spaced letters, `[tornado]` dashed underline, `[pulse]` dimmed.
+    - `[url]`: link color and underline. `[hint=...]`: dotted underline, with the hint on hover. `[img]res://...[/img]`: the image on hover. `[char=2665]`: shows the character (♥).
+    - Tags combine and nest freely (`[b][i][rainbow][wave]...`): bold/italic/underlines add up, the innermost color or background wins, opacity multiplies.
+    - Can be turned off with `dtlReader.preview.bbcodeEffects`.
 ## [1.2.2]
 - Bug: a BBCode tag with parameters lost its color: `[shake level=1]...[/shake]`, `[color=red]...[/color]`, `[wave amp=50 freq=5]...[/wave]` and every other tag taking a value were colored like a plain `[option]` instead of like `[shake]...[/shake]`. They now get the effect color, with their parameters colored inside the tag (names, `=`, strings, numbers and `true`/`false`). Dialogic's own text effects without a closer (`[pause=1.5]`, `[speed=2]`...) are unchanged.
 - Bug: a BBCode tag with parameters that is never closed (`[shake level=1]` without `[/shake]`) is now reported by the unclosed BBCode check too.
