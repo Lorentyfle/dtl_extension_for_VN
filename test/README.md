@@ -27,6 +27,8 @@ Each suite opens its own VS Code window, with every other extension disabled and
 | `fixes-and-navigation` | Quick fixes (typos, missing labels and portraits, adding characters and variables to project.godot, the folder a new character goes in), Ctrl+Click, Go to Symbol in Workspace |
 | `project-checks` | Unreachable events and labels, unused characters and portraits, custom events, block snippets, Play in Godot (with a stand-in for Godot), the event index of each line |
 | `expressions` | Suggestions on `set`, `if` and `elif` lines |
+| `features` | One check of each other feature: hover, outline, semantic tokens, colors, code lens, references, rename, completion, `.dch` files, glossary, translation (including a Translation View edit saved into the CSV) |
+| `isolated` | A timeline without `project.godot`: what is still checked and suggested |
 
 ## Writing one
 

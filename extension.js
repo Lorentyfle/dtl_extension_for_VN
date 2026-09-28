@@ -9743,7 +9743,7 @@ function activate(context) {
   context.subscriptions.push(completionProvider);
   // Internals the test suite checks directly (`extension.exports`) - not an
   // API for other extensions.
-  return { forTests: { rankCharacterFolders, godotUserDataDir, setConfigFileValues, parseCustomEventScript, findGodotExecutable, computeDialogicEventIndices, scriptStrings: () => cachedScriptStrings, resourcePaths: () => cachedResourcePaths } };
+  return { forTests: { rankCharacterFolders, godotUserDataDir, setConfigFileValues, parseCustomEventScript, findGodotExecutable, computeDialogicEventIndices, translationViewUri, scriptStrings: () => cachedScriptStrings, resourcePaths: () => cachedResourcePaths } };
 }
 // =============================================================================
 // DEACTIVATE

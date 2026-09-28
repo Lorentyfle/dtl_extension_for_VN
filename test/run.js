@@ -66,10 +66,14 @@ function runSuite(vscodePath, name, temp) {
   ];
   if (process.platform === 'linux') { args.unshift('--no-sandbox', '--disable-gpu'); }
   const run = spawnSync(vscodePath, args, { env, stdio: 'ignore', timeout: 5 * 60 * 1000 });
-  if (!fs.existsSync(results)) {
-    return [`ERROR the suite wrote no results (VS Code exit code ${run.status}${run.error ? `, ${run.error.message}` : ''})`];
+  const lines = fs.existsSync(results) ? fs.readFileSync(results, 'utf8').split('\n').filter(Boolean) : [];
+  if (run.error || run.signal) {
+    // Timed out or killed: the checks after the last one written never ran.
+    lines.push(`ERROR the suite didn't finish (${run.error ? run.error.message : run.signal}) - it stopped after "${(lines[lines.length - 1] || 'nothing').slice(0, 80)}"`);
+  } else if (lines.length === 0) {
+    lines.push(`ERROR the suite wrote no results (VS Code exit code ${run.status})`);
   }
-  return fs.readFileSync(results, 'utf8').split('\n').filter(Boolean);
+  return lines;
 }
 
 async function main() {
