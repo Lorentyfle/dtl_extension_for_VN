@@ -1,4 +1,11 @@
 # Changelog
+## [1.2.0]
+- Translation View: "DTL: Open Translation View" (or the globe button at the top right of a timeline) opens, beside the timeline, an editor listing every translatable line of the timeline with its original text and an editable line for the translation language. Type the translations there like in any file (search, multi-cursor, copy/paste...) and save with Ctrl+S: every changed translation is written into Dialogic's CSV at once.
+    - Each block shows its CSV key, the timeline line and who says it (speaker, narration, choice, label, text input).
+    - The original line is only a reference: editing it changes nothing. A line break in a translation is written `\n`.
+    - Moving the cursor in the timeline scrolls the view to that line's block, and the other way round.
+    - The view reloads when the timeline is saved or the CSV changes (unless it has unsaved edits).
+    - If the translations can't be saved (no CSV yet, or the CSV has unsaved changes in an editor), the save fails with the reason and nothing is lost.
 ## [1.1.0]
 - New setting `dtlReader.outline.style` to choose how the Outline view, breadcrumbs and Go to Symbol show a timeline:
     - `flow` (default): the flow of time. Each label is a section with its `if`/`elif`/`else`/`while` blocks and choices nested by indentation, and every `jump`/`return`/`[end_timeline]` says where it leads: back to an earlier line (a loop), ahead, to another timeline, or a runtime `{variable}` target. A label indented inside a choice or condition now stays inside it.

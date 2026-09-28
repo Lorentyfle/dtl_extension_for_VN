@@ -60,7 +60,8 @@ Translate your timelines without leaving them. Set **DTL Reader > Translation: L
 - every translatable line (it has a `#id:`) shows its translation at the end of the line, or "not translated yet";
 - **DTL: Translate Line** (Command Palette, right-click menu or the lightbulb) asks for the translation next to the original, and writes it in Dialogic's translation CSV;
 - **DTL: Go to Next Untranslated Line** jumps to the next line left to translate;
-- hover a line's `#id:` to see it in every language.
+- hover a line's `#id:` to see it in every language;
+- **DTL: Open Translation View** (or the globe button at the top right of a timeline) opens the whole timeline as a translation sheet beside it: each line's original text with an editable line for your language. Type, then save with **Ctrl+S** to write everything into the CSV. Both editors scroll together.
 
 The CSV files are the ones Dialogic generates with **Update CSV files** in its Translation settings.
 

@@ -4462,6 +4462,7 @@ async function refreshTranslations() {
   cachedTranslationLocales = [...locales];
   cachedTranslationFiles = files;
   updateAllTranslationDecorations();
+  if (translationViewFileSystem) { translationViewFileSystem.refresh(); }
 }
 
 /**
@@ -4650,9 +4651,74 @@ function findTranslationFileFor(key, document) {
 }
 
 /**
- * Write one translation into its CSV: adds the locale column and/or the
- * key's row if they don't exist yet (a new row also gets the original
- * text in the original-locale column), keeping the file's line endings.
+ * Write a batch of translations into Dialogic's CSV files, one read and
+ * one write per file: each translation goes to the CSV that already has
+ * its key, else to this timeline's CSV (see findTranslationFileFor). The
+ * locale column and/or the key's row are added if missing (a new row also
+ * gets the original text in the original-locale column), and the file's
+ * line endings are kept.
+ *
+ * Throws an Error with a readable message instead of writing anything if
+ * a translation has no CSV to go to, or a target CSV has unsaved changes
+ * in an editor.
+ *
+ * @param {{key: string, original: string, translation: string}[]} entries
+ * @param {string} language
+ * @param {vscode.Uri} timelineUri - the timeline the entries come from
+ * @returns {Promise<number>} how many translations were written
+ */
+async function writeTranslations(entries, language, timelineUri) {
+  if (entries.length === 0) { return 0; }
+  const byFile = new Map();
+  for (const entry of entries) {
+    const uri = findTranslationFileFor(entry.key, { uri: timelineUri });
+    if (!uri) {
+      throw new Error('No Dialogic translation CSV found for this timeline. Enable translation in Dialogic\'s settings and click "Update CSV files" first.');
+    }
+    if (!byFile.has(uri.fsPath)) { byFile.set(uri.fsPath, { uri, entries: [] }); }
+    byFile.get(uri.fsPath).entries.push(entry);
+  }
+  for (const { uri } of byFile.values()) {
+    const openCsv = vscode.workspace.textDocuments.find(candidate => normalizeFsPath(candidate.uri.fsPath || '') === normalizeFsPath(uri.fsPath));
+    if (openCsv && openCsv.isDirty) {
+      throw new Error(`${uri.fsPath} has unsaved changes - save or revert it before translating here.`);
+    }
+  }
+  for (const { uri, entries: fileEntries } of byFile.values()) {
+    const text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
+    const eol = text.includes('\r\n') ? '\r\n' : '\n';
+    const rows = parseCsv(text);
+    if (rows.length === 0) { rows.push(['keys']); }
+    const header = rows[0];
+    let column = header.indexOf(language);
+    if (column === -1) {
+      header.push(language);
+      column = header.length - 1;
+    }
+    const originalColumn = translationOriginalLocale ? header.indexOf(translationOriginalLocale) : -1;
+    for (const entry of fileEntries) {
+      let row = rows.find((candidate, index) => index > 0 && candidate[0] === entry.key);
+      if (!row) {
+        row = [entry.key];
+        if (originalColumn > 0) { row[originalColumn] = entry.original; }
+        rows.push(row);
+      }
+      row[column] = entry.translation;
+    }
+    for (const candidate of rows) {
+      while (candidate.length < header.length) { candidate.push(''); }
+      for (let i = 0; i < candidate.length; i++) { if (candidate[i] === undefined) { candidate[i] = ''; } }
+    }
+    await vscode.workspace.fs.writeFile(uri, Buffer.from(serializeCsv(rows, eol), 'utf8'));
+  }
+  await refreshTranslations();
+  refreshAllDiagnostics();
+  return entries.length;
+}
+
+/**
+ * Write one translation (see writeTranslations), showing any problem as an
+ * error message.
  *
  * @param {{key: string, original: string}} entry
  * @param {string} language
@@ -4661,42 +4727,13 @@ function findTranslationFileFor(key, document) {
  * @returns {Promise<boolean>} whether it was written
  */
 async function writeTranslation(entry, language, translation, document) {
-  const uri = findTranslationFileFor(entry.key, document);
-  if (!uri) {
-    vscode.window.showErrorMessage('DTL Reader: no Dialogic translation CSV found for this timeline. Enable translation in Dialogic\'s settings and click "Update CSV files" first.');
+  try {
+    await writeTranslations([{ ...entry, translation }], language, document.uri);
+    return true;
+  } catch (error) {
+    vscode.window.showErrorMessage(`DTL Reader: ${error.message}`);
     return false;
   }
-  const openCsv = vscode.workspace.textDocuments.find(candidate => normalizeFsPath(candidate.uri.fsPath) === normalizeFsPath(uri.fsPath));
-  if (openCsv && openCsv.isDirty) {
-    vscode.window.showErrorMessage(`DTL Reader: ${uri.fsPath} has unsaved changes - save or revert it before translating here.`);
-    return false;
-  }
-  const text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
-  const eol = text.includes('\r\n') ? '\r\n' : '\n';
-  const rows = parseCsv(text);
-  if (rows.length === 0) { rows.push(['keys']); }
-  const header = rows[0];
-  let column = header.indexOf(language);
-  if (column === -1) {
-    header.push(language);
-    column = header.length - 1;
-  }
-  let row = rows.find((candidate, index) => index > 0 && candidate[0] === entry.key);
-  if (!row) {
-    row = [entry.key];
-    const originalColumn = translationOriginalLocale ? header.indexOf(translationOriginalLocale) : -1;
-    if (originalColumn > 0) { row[originalColumn] = entry.original; }
-    rows.push(row);
-  }
-  row[column] = translation;
-  for (const candidate of rows) {
-    while (candidate.length < header.length) { candidate.push(''); }
-    for (let i = 0; i < candidate.length; i++) { if (candidate[i] === undefined) { candidate[i] = ''; } }
-  }
-  await vscode.workspace.fs.writeFile(uri, Buffer.from(serializeCsv(rows, eol), 'utf8'));
-  await refreshTranslations();
-  refreshAllDiagnostics();
-  return true;
 }
 
 /**
@@ -4777,6 +4814,320 @@ function provideTranslationCodeActions(document, range) {
 }
 
 // =============================================================================
+// TRANSLATION VIEW
+// =============================================================================
+// An editor, opened next to a timeline, listing every translatable line as
+// its original text plus an editable translation line - saving it (Ctrl+S)
+// writes the translations into Dialogic's CSV. It isn't a file on disk: it
+// lives in a virtual file system under the `dtl-translation:` scheme, whose
+// readFile builds the text from the timeline and the CSV (buildTranslationView)
+// and whose writeFile parses it back (parseTranslationView) and writes the
+// changed translations (writeTranslations). Each block looks like:
+//
+//   [Text/greeting/text]  line 7 - TestCharacter
+//   en: Hello! [b]Welcome[/b] to the room.
+//   fr: Bonjour ! [b]Bienvenue[/b] dans la salle.
+//
+// The `[key]` header says which CSV row the block is; only the line of the
+// language being translated is read back, the original one is a reference.
+
+/** @type {string} */
+const TRANSLATION_VIEW_SCHEME = 'dtl-translation';
+
+/**
+ * URI of the Translation View of a timeline in a language. The path is
+ * what the tab shows ("test_timeline (fr).dtltr"); the query carries the
+ * timeline's URI and the language, so reading/writing needs no other state.
+ *
+ * @param {vscode.Uri} timelineUri
+ * @param {string} language
+ * @returns {vscode.Uri}
+ */
+function translationViewUri(timelineUri, language) {
+  const name = timelineUri.path.split('/').pop().replace(/\.dtl$/i, '');
+  const query = `timeline=${encodeURIComponent(timelineUri.toString())}&language=${encodeURIComponent(language)}`;
+  return vscode.Uri.from({ scheme: TRANSLATION_VIEW_SCHEME, path: `/${name} (${language}).dtltr`, query });
+}
+
+/**
+ * @param {vscode.Uri} uri - a Translation View URI
+ * @returns {{timelineUri: vscode.Uri, language: string}}
+ */
+function parseTranslationViewUri(uri) {
+  const params = {};
+  for (const part of uri.query.split('&')) {
+    const [name, value = ''] = part.split('=');
+    params[name] = decodeURIComponent(value);
+  }
+  return { timelineUri: vscode.Uri.parse(params.timeline), language: params.language };
+}
+
+/**
+ * A timeline's current text: from its editor if it's open (so unsaved
+ * edits are included), else from disk.
+ *
+ * @param {vscode.Uri} timelineUri
+ * @returns {Promise<string>}
+ */
+async function readTimelineText(timelineUri) {
+  const open = vscode.workspace.textDocuments.find(document => document.uri.toString() === timelineUri.toString());
+  if (open) { return open.getText(); }
+  return Buffer.from(await vscode.workspace.fs.readFile(timelineUri)).toString('utf8');
+}
+
+/**
+ * Who/what a translatable line is, for the block header: the speaker of a
+ * dialogue line, "narration", "choice", "label ...", "text input".
+ *
+ * @param {string} text - the timeline line
+ * @param {string} key
+ * @returns {string}
+ */
+function describeTranslatableLine(text, key) {
+  if (key.startsWith('Choice/')) { return 'choice'; }
+  if (key.startsWith('Label/')) { const label = parseLabelLine(text); return label ? `label ${label.name}` : 'label'; }
+  if (key.startsWith('Text Input/')) { return 'text input'; }
+  const speakerMatch = text.match(new RegExp(`^\\s*(${CHARACTER_NAME_SOURCE})\\s*(?:\\([^)]*\\))?\\s*:`, 'u'));
+  return speakerMatch ? stripCharacterNameQuotes(speakerMatch[1]) : 'narration';
+}
+
+/** Line breaks inside a translation are shown as a literal "\n", so each translation stays on one line. */
+const escapeViewText = text => text.replace(/\r?\n/g, '\\n');
+const unescapeViewText = text => text.replace(/\\n/g, '\n');
+
+/**
+ * The translatable lines of a timeline, in order.
+ *
+ * @param {string} timelineText
+ * @returns {{line: number, text: string, entry: {key: string, original: string}}[]}
+ */
+function collectTranslatableLines(timelineText) {
+  const result = [];
+  timelineText.split(/\r?\n/).forEach((text, line) => {
+    const entry = parseTranslatableLine(text);
+    if (entry) { result.push({ line, text, entry }); }
+  });
+  return result;
+}
+
+/**
+ * Build the Translation View text of a timeline in a language.
+ *
+ * @param {vscode.Uri} timelineUri
+ * @param {string} language
+ * @returns {Promise<string>}
+ */
+async function buildTranslationView(timelineUri, language) {
+  const timelineText = await readTimelineText(timelineUri);
+  const timelineName = timelineUri.path.split('/').pop();
+  const original = translationOriginalLocale || 'original';
+  const items = collectTranslatableLines(timelineText);
+  const withoutId = timelineText.split(/\r?\n/).filter(text => isPlayerFacingTextLine(text) && !/#id:\S+\s*$/.test(text)).length;
+  const translated = items.filter(item => getTranslation(item.entry.key, language)).length;
+  const lines = [
+    `# Translation of ${timelineName} to "${language}" - ${translated}/${items.length} lines translated.`,
+    `# Write each translation after "${language}:" and save (Ctrl+S) to put it in Dialogic's CSV.`,
+    `# The "${original}:" lines are the original text, for reference: editing them changes nothing.`,
+  ];
+  if (withoutId > 0) {
+    lines.push(`# ${withoutId} line(s) of the timeline have no translation id yet - "Update CSV files" in Dialogic's translation settings adds them.`);
+  }
+  if (cachedTranslationFiles.length === 0) {
+    lines.push('# No Dialogic translation CSV found yet - saving will fail until "Update CSV files" has been run in Dialogic.');
+  }
+  for (const { line, text, entry } of items) {
+    lines.push('');
+    lines.push(`[${entry.key}]  line ${line + 1} - ${describeTranslatableLine(text, entry.key)}`);
+    lines.push(`${original}: ${escapeViewText(entry.original)}`);
+    lines.push(`${language}: ${escapeViewText(getTranslation(entry.key, language))}`);
+  }
+  return lines.join('\n') + '\n';
+}
+
+/**
+ * Read the translations back from a Translation View's text: for each
+ * `[key]` block, the text after "<language>:". Blocks without that line
+ * (deleted by accident) are simply left out, so nothing is erased.
+ *
+ * @param {string} text
+ * @param {string} language
+ * @returns {Map<string, string>} key -> translation
+ */
+function parseTranslationView(text, language) {
+  const translations = new Map();
+  const prefix = `${language}:`;
+  let currentKey = null;
+  for (const line of text.split(/\r?\n/)) {
+    const headerMatch = line.match(/^\[([^\]]+)\]/);
+    if (headerMatch) {
+      currentKey = headerMatch[1];
+    } else if (currentKey && line.startsWith(prefix)) {
+      translations.set(currentKey, unescapeViewText(line.slice(prefix.length).replace(/^ /, '').replace(/\s+$/, '')));
+      currentKey = null; // one translation line per block
+    }
+  }
+  return translations;
+}
+
+/**
+ * The virtual file system behind Translation Views. Only the files VS
+ * Code opens exist (there are no directories); reading builds the text,
+ * writing saves the translations that changed.
+ */
+class TranslationViewFileSystem {
+  constructor() {
+    this._emitter = new vscode.EventEmitter();
+    /** @type {vscode.Event<vscode.FileChangeEvent[]>} */
+    this.onDidChangeFile = this._emitter.event;
+    /** Per view URI, when its content last changed - VS Code compares it to detect outside changes. @type {Map<string, number>} */
+    this._mtimes = new Map();
+    this._suppressRefresh = false;
+  }
+
+  watch() { return new vscode.Disposable(() => {}); }
+
+  async stat(uri) {
+    const content = await this.readFile(uri);
+    return { type: vscode.FileType.File, ctime: 0, mtime: this._mtimes.get(uri.toString()) || 1, size: content.byteLength };
+  }
+
+  async readFile(uri) {
+    const { timelineUri, language } = parseTranslationViewUri(uri);
+    try {
+      return Buffer.from(await buildTranslationView(timelineUri, language), 'utf8');
+    } catch (error) {
+      throw vscode.FileSystemError.FileNotFound(uri);
+    }
+  }
+
+  async writeFile(uri, content) {
+    const { timelineUri, language } = parseTranslationViewUri(uri);
+    const written = parseTranslationView(Buffer.from(content).toString('utf8'), language);
+    const items = collectTranslatableLines(await readTimelineText(timelineUri));
+    const changes = items
+      .filter(item => written.has(item.entry.key) && written.get(item.entry.key) !== getTranslation(item.entry.key, language))
+      .map(item => ({ ...item.entry, translation: written.get(item.entry.key) }));
+    this._suppressRefresh = true;
+    try {
+      const count = await writeTranslations(changes, language, timelineUri);
+      this._mtimes.set(uri.toString(), Date.now());
+      vscode.window.setStatusBarMessage(count > 0 ? `DTL Reader: ${count} translation(s) saved to "${language}"` : 'DTL Reader: no translation changed', 4000);
+    } catch (error) {
+      throw vscode.FileSystemError.Unavailable(`DTL Reader: ${error.message}`);
+    } finally {
+      this._suppressRefresh = false;
+    }
+  }
+
+  /**
+   * Tell VS Code every open Translation View (optionally only those of one
+   * timeline) changed, so the ones without unsaved edits reload.
+   *
+   * @param {vscode.Uri} [timelineUri]
+   */
+  refresh(timelineUri) {
+    if (this._suppressRefresh) { return; }
+    const events = [];
+    for (const document of vscode.workspace.textDocuments) {
+      if (document.uri.scheme !== TRANSLATION_VIEW_SCHEME) { continue; }
+      if (timelineUri && parseTranslationViewUri(document.uri).timelineUri.toString() !== timelineUri.toString()) { continue; }
+      this._mtimes.set(document.uri.toString(), Date.now());
+      events.push({ type: vscode.FileChangeType.Changed, uri: document.uri });
+    }
+    if (events.length > 0) { this._emitter.fire(events); }
+  }
+
+  readDirectory() { return []; }
+  createDirectory() { throw vscode.FileSystemError.NoPermissions('Translation Views have no directories.'); }
+  delete() { throw vscode.FileSystemError.NoPermissions('Close the Translation View instead.'); }
+  rename() { throw vscode.FileSystemError.NoPermissions('Translation Views cannot be renamed.'); }
+}
+
+/** @type {TranslationViewFileSystem | null} */
+let translationViewFileSystem = null;
+
+/**
+ * "DTL: Open Translation View" - opens the active timeline's Translation
+ * View in the current translation language (asking for one if none is
+ * set), beside the timeline.
+ */
+async function openTranslationViewCommand() {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== 'dtl') {
+    vscode.window.showInformationMessage('DTL Reader: open a timeline (.dtl) first.');
+    return;
+  }
+  const language = getTranslationLanguage() || await selectTranslationLanguage();
+  if (!language) { return; }
+  if (language === translationOriginalLocale) {
+    vscode.window.showWarningMessage(`DTL Reader: "${language}" is the language the timelines are written in - pick another translation language.`);
+    return;
+  }
+  const document = await vscode.workspace.openTextDocument(translationViewUri(editor.document.uri, language));
+  await vscode.window.showTextDocument(document, { viewColumn: vscode.ViewColumn.Beside, preview: false });
+}
+
+/** Set while one editor scrolls the other, so the other's own move doesn't bounce back. */
+let syncingTranslationScroll = false;
+
+/**
+ * Keep a timeline and its Translation View on the same line: moving the
+ * cursor in one scrolls the other to the matching block / line.
+ *
+ * @param {vscode.TextEditorSelectionChangeEvent} event
+ */
+function syncTranslationScroll(event) {
+  if (syncingTranslationScroll) { return; }
+  const editor = event.textEditor;
+  const document = editor.document;
+  const cursorLine = editor.selection.active.line;
+  let key = null;
+  let targets = [];
+  let findLine = null;
+
+  if (document.languageId === 'dtl' && document.uri.scheme !== TRANSLATION_VIEW_SCHEME) {
+    const entry = parseTranslatableLine(document.lineAt(cursorLine).text);
+    if (!entry) { return; }
+    key = entry.key;
+    targets = vscode.window.visibleTextEditors.filter(other => other.document.uri.scheme === TRANSLATION_VIEW_SCHEME
+      && parseTranslationViewUri(other.document.uri).timelineUri.toString() === document.uri.toString());
+    findLine = other => {
+      for (let line = 0; line < other.document.lineCount; line++) {
+        if (other.document.lineAt(line).text.startsWith(`[${key}]`)) { return line; }
+      }
+      return -1;
+    };
+  } else if (document.uri.scheme === TRANSLATION_VIEW_SCHEME) {
+    for (let line = cursorLine; line >= 0 && !key; line--) {
+      const headerMatch = document.lineAt(line).text.match(/^\[([^\]]+)\]/);
+      if (headerMatch) { key = headerMatch[1]; }
+    }
+    if (!key) { return; }
+    const timelineUri = parseTranslationViewUri(document.uri).timelineUri.toString();
+    targets = vscode.window.visibleTextEditors.filter(other => other.document.uri.toString() === timelineUri);
+    findLine = other => {
+      for (let line = 0; line < other.document.lineCount; line++) {
+        const entry = parseTranslatableLine(other.document.lineAt(line).text);
+        if (entry && entry.key === key) { return line; }
+      }
+      return -1;
+    };
+  } else {
+    return;
+  }
+
+  syncingTranslationScroll = true;
+  try {
+    for (const other of targets) {
+      const line = findLine(other);
+      if (line !== -1) { other.revealRange(new vscode.Range(line, 0, line, 0), vscode.TextEditorRevealType.InCenterIfOutsideViewport); }
+    }
+  } finally {
+    setTimeout(() => { syncingTranslationScroll = false; }, 50);
+  }
+}
+
+// =============================================================================
 // ACTIVATE
 // =============================================================================
 function activate(context) {
@@ -4850,6 +5201,12 @@ function activate(context) {
     vscode.commands.registerCommand('dtlReader.translateLine', translateLineCommand),
     vscode.commands.registerCommand('dtlReader.nextUntranslated', nextUntranslatedCommand),
     vscode.commands.registerCommand('dtlReader.selectTranslationLanguage', selectTranslationLanguage),
+    vscode.commands.registerCommand('dtlReader.openTranslationView', openTranslationViewCommand),
+    vscode.workspace.registerFileSystemProvider(TRANSLATION_VIEW_SCHEME, translationViewFileSystem = new TranslationViewFileSystem()),
+    vscode.window.onDidChangeTextEditorSelection(syncTranslationScroll),
+    vscode.workspace.onDidSaveTextDocument(document => {
+      if (document.languageId === 'dtl' && translationViewFileSystem) { translationViewFileSystem.refresh(document.uri); }
+    }),
     vscode.languages.registerHoverProvider('dtl', { provideHover: provideTranslationHover }),
     vscode.languages.registerCodeActionsProvider('dtl', { provideCodeActions: provideTranslationCodeActions }, { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }),
     vscode.window.onDidChangeVisibleTextEditors(updateAllTranslationDecorations),

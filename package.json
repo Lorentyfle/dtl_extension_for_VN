@@ -2,7 +2,7 @@
   "name": "dtl-reader",
   "displayName": "DTL Reader",
   "description": "Syntax highlighting for Dialogic2 TimeLine (.dtl) files",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "lorentyfle",
   "icon": "./icons/favicon.png",
   "engines": {
@@ -46,6 +46,19 @@
           "light": "./icons/dtl.svg",
           "dark": "./icons/favicon.svg"
         }
+      },
+      {
+        "id": "dtl-translation",
+        "aliases": [
+          "DTL Translation"
+        ],
+        "extensions": [
+          ".dtltr"
+        ],
+        "icon": {
+          "light": "./icons/dtl.svg",
+          "dark": "./icons/favicon.svg"
+        }
       }
     ],
     "grammars": [
@@ -58,6 +71,11 @@
         "language": "dch",
         "scopeName": "source.dch",
         "path": "./syntaxes/dch.tmLanguage.json"
+      },
+      {
+        "language": "dtl-translation",
+        "scopeName": "source.dtl-translation",
+        "path": "./syntaxes/dtl-translation.tmLanguage.json"
       }
     ],
     "themes": [
@@ -110,6 +128,12 @@
     ],
     "commands": [
       {
+        "command": "dtlReader.openTranslationView",
+        "title": "Open Translation View",
+        "category": "DTL",
+        "icon": "$(globe)"
+      },
+      {
         "command": "dtlReader.translateLine",
         "title": "Translate Line",
         "category": "DTL"
@@ -128,6 +152,10 @@
     "menus": {
       "commandPalette": [
         {
+          "command": "dtlReader.openTranslationView",
+          "when": "editorLangId == dtl"
+        },
+        {
           "command": "dtlReader.translateLine",
           "when": "editorLangId == dtl"
         },
@@ -138,6 +166,11 @@
       ],
       "editor/context": [
         {
+          "command": "dtlReader.openTranslationView",
+          "when": "editorLangId == dtl",
+          "group": "dtl@0"
+        },
+        {
           "command": "dtlReader.translateLine",
           "when": "editorLangId == dtl && config.dtlReader.translation.language",
           "group": "dtl@1"
@@ -146,6 +179,13 @@
           "command": "dtlReader.nextUntranslated",
           "when": "editorLangId == dtl && config.dtlReader.translation.language",
           "group": "dtl@2"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "dtlReader.openTranslationView",
+          "when": "editorLangId == dtl",
+          "group": "navigation"
         }
       ]
     },
@@ -453,6 +493,9 @@
           "comments": false,
           "strings": true
         }
+      },
+      "[dtl-translation]": {
+        "editor.wordWrap": "on"
       }
     }
   },
