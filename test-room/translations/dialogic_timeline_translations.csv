@@ -1,0 +1,5 @@
+keys,en,fr
+Text/greeting/text,Hello! [b]Welcome[/b] to the [i]test[/i] room.,"Bonjour ! [b]Bienvenue[/b] dans la salle de [i]test[/i]."
+Choice/choice_weather/text,Ask about the weather,Demander la météo
+Choice/choice_goodbye/text,Say goodbye,
+Label/cc3/display_name,First choice,Premier choix

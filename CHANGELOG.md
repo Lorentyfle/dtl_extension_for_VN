@@ -1,4 +1,17 @@
 # Changelog
+## [1.0.10]
+- `.dch` files now use the same Dialogic icon as `.dtl` files.
+- Settings (File > Preferences > Settings > Extensions > DTL Reader), in 4 sections:
+    - General: `includeAddonAutoloads`, `outline.showFlow` (already there).
+    - Autocomplete: `completion.dialogueWords` (word suggestions while writing dialogue, on/off) and `completion.bbcode` (`common`, `all` or `off`).
+    - Diagnostics: every check has its own severity (`error`, `warning`, `information`, `hint` or `off` to hide it): unresolved jump, jump with a translation id, unknown character, unknown speaker, unknown mood, unknown variable, unclosed BBCode, missing translation, and the two `.dch` checks. The Problems view shows each diagnostic's setting name as its code.
+    - Translation: `translation.language` and `translation.showInline`.
+- Translation mode, to translate the timelines in the timelines themselves. Set `dtlReader.translation.language` (e.g. `fr`), or use "DTL: Select Translation Language":
+    - Each translatable line (dialogue, narration, choice, label display name, text input, with its `#id:`) shows its translation at the end of the line, or "not translated yet".
+    - "DTL: Translate Line" (Command Palette, right-click menu, or the lightbulb quick fix) asks for the translation, showing the original text, and writes it into Dialogic's translation CSV (`dialogic_timeline_translations.csv` or `dialogic_<timeline>_translation.csv`). It adds the language column or the line's row if they're missing.
+    - "DTL: Go to Next Untranslated Line".
+    - Untranslated lines are marked with a hint (`diagnostics.missingTranslation`).
+    - Hovering a line's `#id:` shows its text in every language of the CSV, even without translation mode.
 ## [1.0.9]
 - Bug: a label's translation id (`label choice A1 #id:cc3`) was read as part of its name, so `jump` suggested and inserted `choice A1 #id:cc3`. Like Dialogic, everything from `#id:` on is now ignored in a label, and colored as a translation id.
 - A `jump` with a `#id:` is now an error: a jump isn't translatable, so Dialogic doesn't cut the id off and would look for a label named `choice A1 #id:cc3`.

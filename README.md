@@ -53,6 +53,21 @@ DTL Reader understands the relationship between `jump` and `label`.
 - Get an error for characters, moods and `{variables}` that don't exist in the Godot project.
 - Document a label with `##` comment lines right above it: the doc shows when hovering a `jump` to it.
 
+### Translation mode
+
+Translate your timelines without leaving them. Set **DTL Reader > Translation: Language** (e.g. `fr`), or run **DTL: Select Translation Language**:
+
+- every translatable line (it has a `#id:`) shows its translation at the end of the line, or "not translated yet";
+- **DTL: Translate Line** (Command Palette, right-click menu or the lightbulb) asks for the translation next to the original, and writes it in Dialogic's translation CSV;
+- **DTL: Go to Next Untranslated Line** jumps to the next line left to translate;
+- hover a line's `#id:` to see it in every language.
+
+The CSV files are the ones Dialogic generates with **Update CSV files** in its Translation settings.
+
+### Settings
+
+Every warning and error can be set to error, warning, information, hint or hidden, one by one (**DTL Reader > Diagnostics**). You can also choose which BBCode tags are suggested, turn off word suggestions in dialogue, show only labels in the outline, and more.
+
 ### Dialogic character files (.dch)
 
 `.dch` files get syntax highlighting, autocomplete of the keys and values Dialogic expects at each level (character, portrait, `export_overrides`), hover documentation for every key, and errors for a missing default portrait or portrait scene.

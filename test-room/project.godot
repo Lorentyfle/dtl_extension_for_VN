@@ -10,6 +10,10 @@ config/name="DTL Reader Test Room"
 
 [dialogic]
 
+translation/enabled=true
+translation/original_locale="en"
+translation/file_mode=0
+translation/translation_folder="res://translations"
 directories/dch_directory={
 "TestCharacter": "res://characters/TestCharacter.dch",
 "TestCharacter2": "res://characters/TestCharacter2.dch",

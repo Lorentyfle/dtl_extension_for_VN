@@ -40,6 +40,8 @@ every DTL Reader feature without risking real project data.
   contains a space - for testing the quoted-character-name feature.
 - `assets/theme.ogg`, `assets/voice_line.ogg`, `assets/bg.png` - empty
   placeholder files so `res://` path autocomplete has real files to offer.
+- `translations/dialogic_timeline_translations.csv` - a Dialogic
+  translation CSV (en + partial fr) for translation mode.
 - `timelines/chapter2.dtl` - a second timeline (registered in
   `directories/dtl_directory`) for cross-timeline `jump chapter2/label`.
 - `timelines/test_timeline.dtl` - one file touching every language
@@ -111,6 +113,14 @@ every DTL Reader feature without risking real project data.
   highlighted. Inside a portrait, type `&"` for the portrait keys; after
   `&"default_portrait": ` the portraits are suggested; hover any key.
   Setting `default_portrait` to a missing portrait gives an error.
+- **Translation mode**: run "DTL: Select Translation Language" and pick
+  `fr`. The greeting and "Ask about the weather" lines show their French
+  text at the end; "Say goodbye" shows "not translated yet" and a hint.
+  Use the lightbulb on it (or right-click > Translate Line) - the text is
+  written into `translations/dialogic_timeline_translations.csv`. Hover
+  `#id:greeting` to see both languages.
+- **Settings**: set `DTL Reader > Diagnostics: Unknown Speaker` to `off`
+  and `Ghost: hi` no longer gets a warning.
 - **No stray suggestions in dialogue**: typing `.` or a space at the end
   of a dialogue sentence should NOT open a suggestion list.
 - **BBCode**: in dialogue type `[co` - `code` and `color` should appear;

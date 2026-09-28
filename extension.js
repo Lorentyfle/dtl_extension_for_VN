@@ -2176,6 +2176,8 @@ async function refreshProjectGodotData() {
       timelines: /directories\/dtl_directory\s*=/.test(dialogicSection),
     };
     cachedTimelinePaths = extractDialogicDirectory(text, 'dtl');
+    const originalLocaleMatch = dialogicSection.match(/(?:^|\n)translation\/original_locale\s*=\s*"([^"]*)"/);
+    translationOriginalLocale = originalLocaleMatch ? originalLocaleMatch[1] : null;
     await refreshTimelineLabels();
     cachedCharacterPaths = extractCharacterPaths(text);
     await refreshCharacterMoods(cachedCharacterPaths);
@@ -2197,6 +2199,7 @@ async function refreshProjectGodotData() {
     declaredProjectData = { characters: false, variables: false, timelines: false };
   }
   await refreshResourcePaths();
+  await refreshTranslations();
   refreshAllDiagnostics();
 }
 
@@ -2804,37 +2807,29 @@ function findUnresolvedJumpDiagnostics(document) {
     const jump = parseJumpLine(lineText);
     if (!jump) { continue; }
     if (jump.translationIdStart !== -1) {
-      diagnostics.push(new vscode.Diagnostic(
+      pushDiagnostic(diagnostics, 'jumpTranslationId',
         new vscode.Range(line, jump.translationIdStart, line, lineText.trimEnd().length),
-        `A jump can't have a translation id: Dialogic would look for a label named "${lineText.slice(jump.labelStart).trim()}". Remove the #id part.`,
-        vscode.DiagnosticSeverity.Error
-      ));
+        `A jump can't have a translation id: Dialogic would look for a label named "${lineText.slice(jump.labelStart).trim()}". Remove the #id part.`);
     }
     if (jump.target.includes('{')) { continue; }
     if (jump.timeline === null) {
       if (!localLabels.has(jump.label)) {
-        diagnostics.push(new vscode.Diagnostic(
+        pushDiagnostic(diagnostics, 'unresolvedJump',
           new vscode.Range(line, jump.labelStart, line, jump.labelStart + jump.label.length),
-          `No "label ${jump.label}" in this timeline - Dialogic will print an error and skip this jump.`,
-          vscode.DiagnosticSeverity.Error
-        ));
+          `No "label ${jump.label}" in this timeline - Dialogic will print an error and skip this jump.`);
       }
       continue;
     }
     if (!projectRootUri || !declaredProjectData.timelines) { continue; }
     const labels = getTimelineLabels(jump.timeline);
     if (!labels) {
-      diagnostics.push(new vscode.Diagnostic(
+      pushDiagnostic(diagnostics, 'unresolvedJump',
         new vscode.Range(line, jump.targetStart, line, jump.targetStart + jump.timeline.length),
-        `No timeline "${jump.timeline}" in this project (project.godot's directories/dtl_directory).`,
-        vscode.DiagnosticSeverity.Error
-      ));
+        `No timeline "${jump.timeline}" in this project (project.godot's directories/dtl_directory).`);
     } else if (jump.label && !labels.has(jump.label)) {
-      diagnostics.push(new vscode.Diagnostic(
+      pushDiagnostic(diagnostics, 'unresolvedJump',
         new vscode.Range(line, jump.labelStart, line, jump.labelStart + jump.label.length),
-        `No "label ${jump.label}" in the timeline "${jump.timeline}" - Dialogic will print an error and skip this jump.`,
-        vscode.DiagnosticSeverity.Error
-      ));
+        `No "label ${jump.label}" in the timeline "${jump.timeline}" - Dialogic will print an error and skip this jump.`);
     }
   }
   return diagnostics;
@@ -3617,16 +3612,63 @@ function findUnclosedBaliseDiagnostics(document) {
       }
 
       const range = new vscode.Range(line, 0, line, text.length);
-      diagnostics.push(new vscode.Diagnostic(
+      pushDiagnostic(diagnostics, 'unclosedBBCode',
         range,
-        `"[${tagName}]" has no matching "${closingTag}" on this line - the balise is unclosed.`,
-        vscode.DiagnosticSeverity.Warning
-      ));
+        `"[${tagName}]" has no matching "${closingTag}" on this line - the balise is unclosed.`);
       break; // one whole-line warning per line is enough, even if several tags are broken
     }
   }
 
   return diagnostics;
+}
+
+/**
+ * Default severity of every diagnostic check, by its setting name
+ * (`dtlReader.diagnostics.<check>`). Each can be changed to "error",
+ * "warning", "information", "hint", or "off" to hide it.
+ *
+ * @type {Record<string, string>}
+ */
+const DIAGNOSTIC_DEFAULT_LEVELS = {
+  unresolvedJump: 'error',
+  jumpTranslationId: 'error',
+  unclosedBBCode: 'warning',
+  unknownCharacter: 'error',
+  unknownSpeaker: 'warning',
+  unknownMood: 'error',
+  unknownVariable: 'error',
+  missingTranslation: 'hint',
+  dchDefaultPortrait: 'error',
+  dchMissingScene: 'error',
+};
+
+/** @type {Record<string, vscode.DiagnosticSeverity>} */
+const DIAGNOSTIC_SEVERITY_BY_LEVEL = {
+  error: vscode.DiagnosticSeverity.Error,
+  warning: vscode.DiagnosticSeverity.Warning,
+  information: vscode.DiagnosticSeverity.Information,
+  hint: vscode.DiagnosticSeverity.Hint,
+};
+
+/**
+ * Add a diagnostic for `check` with the severity the person configured
+ * for it (`dtlReader.diagnostics.<check>`), or nothing if it's "off". The
+ * check name is set as the diagnostic's code, so the Problems view shows
+ * which setting controls it.
+ *
+ * @param {vscode.Diagnostic[]} diagnostics
+ * @param {string} check - a key of DIAGNOSTIC_DEFAULT_LEVELS
+ * @param {vscode.Range} range
+ * @param {string} message
+ */
+function pushDiagnostic(diagnostics, check, range, message) {
+  const level = vscode.workspace.getConfiguration('dtlReader').get(`diagnostics.${check}`, DIAGNOSTIC_DEFAULT_LEVELS[check]);
+  const severity = DIAGNOSTIC_SEVERITY_BY_LEVEL[level];
+  if (severity === undefined) { return; } // "off"
+  const diagnostic = new vscode.Diagnostic(range, message, severity);
+  diagnostic.source = 'DTL Reader';
+  diagnostic.code = check;
+  diagnostics.push(diagnostic);
 }
 
 /**
@@ -3659,24 +3701,20 @@ function findUnknownCharacterDiagnostics(document) {
     if (speakerMatch && RESERVED_LINE_KEYWORDS.has(name)) { continue; }
     const nameStart = match[1].length;
     if (!knownCharacters.has(name)) {
-      diagnostics.push(new vscode.Diagnostic(
+      pushDiagnostic(diagnostics, commandMatch ? 'unknownCharacter' : 'unknownSpeaker',
         new vscode.Range(line, nameStart, line, nameStart + match[2].length),
         commandMatch
           ? `"${name}" is not a Dialogic character of this project (not in project.godot's directories/dch_directory).`
-          : `"${name}" is not a Dialogic character of this project - Dialogic will show this whole line, "${name}:" included, as narration.`,
-        commandMatch ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning
-      ));
+          : `"${name}" is not a Dialogic character of this project - Dialogic will show this whole line, "${name}:" included, as narration.`);
       continue;
     }
     const mood = match[4];
     const moods = cachedCharacterMoods.get(name);
     if (mood && moods && moods.size > 0 && !moods.has(mood)) {
       const moodStart = nameStart + match[2].length + match[3].indexOf(mood);
-      diagnostics.push(new vscode.Diagnostic(
+      pushDiagnostic(diagnostics, 'unknownMood',
         new vscode.Range(line, moodStart, line, moodStart + mood.length),
-        `"${mood}" is not a portrait of ${name}. Available: ${[...moods.keys()].join(', ')}.`,
-        vscode.DiagnosticSeverity.Error
-      ));
+        `"${mood}" is not a portrait of ${name}. Available: ${[...moods.keys()].join(', ')}.`);
     }
   }
   return diagnostics;
@@ -3706,11 +3744,9 @@ function findUnknownVariableDiagnostics(document) {
       const problem = describeUnknownVariablePath(match[1].split('.'));
       if (!problem) { continue; }
       const start = match.index + 1;
-      diagnostics.push(new vscode.Diagnostic(
+      pushDiagnostic(diagnostics, 'unknownVariable',
         new vscode.Range(line, start, line, start + match[1].length),
-        problem,
-        vscode.DiagnosticSeverity.Error
-      ));
+        problem);
     }
   }
   return diagnostics;
@@ -3778,7 +3814,8 @@ function updateDiagnostics(document) {
     ...findUnresolvedJumpDiagnostics(document),
     ...findUnclosedBaliseDiagnostics(document),
     ...findUnknownCharacterDiagnostics(document),
-    ...findUnknownVariableDiagnostics(document)
+    ...findUnknownVariableDiagnostics(document),
+    ...findMissingTranslationDiagnostics(document)
   ];
 
   diagnosticCollection.set(document.uri, diagnostics);
@@ -4235,11 +4272,9 @@ function findDchDiagnostics(document) {
   const defaultMatch = text.match(/&?"default_portrait"\s*:\s*"([^"]*)"/);
   if (defaultMatch && defaultMatch[1] && portraits.size > 0 && !portraits.has(defaultMatch[1])) {
     const start = defaultMatch.index + defaultMatch[0].length - defaultMatch[1].length - 1;
-    diagnostics.push(new vscode.Diagnostic(
+    pushDiagnostic(diagnostics, 'dchDefaultPortrait',
       new vscode.Range(document.positionAt(start), document.positionAt(start + defaultMatch[1].length)),
-      `"${defaultMatch[1]}" is not one of this character's portraits (${[...portraits.keys()].join(', ')}).`,
-      vscode.DiagnosticSeverity.Error
-    ));
+      `"${defaultMatch[1]}" is not one of this character's portraits (${[...portraits.keys()].join(', ')}).`);
   }
   if (projectRootUri && cachedResourcePaths.length > 0) {
     const scenePattern = /&?"scene"\s*:\s*"([^"]+)"/g;
@@ -4247,20 +4282,450 @@ function findDchDiagnostics(document) {
     while ((match = scenePattern.exec(text)) !== null) {
       if (cachedResourcePaths.includes(match[1])) { continue; }
       const start = match.index + match[0].length - match[1].length - 1;
-      diagnostics.push(new vscode.Diagnostic(
+      pushDiagnostic(diagnostics, 'dchMissingScene',
         new vscode.Range(document.positionAt(start), document.positionAt(start + match[1].length)),
-        `"${match[1]}" doesn't exist in this project.`,
-        vscode.DiagnosticSeverity.Error
-      ));
+        `"${match[1]}" doesn't exist in this project.`);
     }
   }
   return diagnostics;
 }
 
 // =============================================================================
+// TRANSLATIONS
+// =============================================================================
+// Dialogic translates timelines through CSV files it generates ("Update CSV
+// files" in its Translation settings): first column `keys`, then one column
+// per locale. A key is `<event name>/<translation id>/<property>`, where the
+// id is the `#id:...` Dialogic appends to each translatable line, e.g.
+// `Text/greeting/text` for `Laripo: Hello! #id:greeting`. The CSVs are named
+// `dialogic_timeline_translations.csv` (one per project) or
+// `dialogic_<timeline>_translation.csv` (one per timeline).
+//
+// With `dtlReader.translation.language` set (e.g. "fr"), each translatable
+// line shows its translation right after it, missing ones can be reported,
+// and "DTL: Translate line" writes a translation back into the CSV - so a
+// translator can work in the timeline itself, next to the original text.
+
+/** Translation key -> locale -> text, from every Dialogic translation CSV. @type {Map<string, Map<string, string>>} */
+let cachedTranslations = new Map();
+
+/** Every locale column found in the CSVs. @type {string[]} */
+let cachedTranslationLocales = [];
+
+/** Translation key -> the CSV file it's in. @type {Map<string, vscode.Uri>} */
+let cachedTranslationFileOfKey = new Map();
+
+/** Every Dialogic translation CSV found. @type {vscode.Uri[]} */
+let cachedTranslationFiles = [];
+
+/** project.godot's `dialogic/translation/original_locale`, the language timelines are written in. @type {string|null} */
+let translationOriginalLocale = null;
+
+/** Decoration showing a line's translation after it. @type {vscode.TextEditorDecorationType | null} */
+let translationDecorationType = null;
+
+/**
+ * Parse CSV text (RFC 4180 style, as Godot and Dialogic write it: fields
+ * quoted when they contain a comma, quote or line break, quotes doubled).
+ *
+ * @param {string} text
+ * @returns {string[][]}
+ */
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (ch === '"') { inQuotes = false; }
+      else { field += ch; }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      row.push(field); field = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') { i++; }
+      row.push(field); field = '';
+      rows.push(row); row = [];
+    } else {
+      field += ch;
+    }
+  }
+  if (field !== '' || row.length > 0) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+/**
+ * Write rows back as CSV, quoting only the fields that need it.
+ *
+ * @param {string[][]} rows
+ * @param {string} eol
+ * @returns {string}
+ */
+function serializeCsv(rows, eol) {
+  const quote = field => /[",\r\n]/.test(field) || /^\s|\s$/.test(field) ? `"${field.replace(/"/g, '""')}"` : field;
+  return rows.map(row => row.map(quote).join(',')).join(eol) + eol;
+}
+
+/**
+ * Re-read every Dialogic translation CSV of the project.
+ */
+async function refreshTranslations() {
+  const translations = new Map();
+  const fileOfKey = new Map();
+  const locales = new Set();
+  const files = [];
+  if (projectRootUri) {
+    try {
+      const uris = await vscode.workspace.findFiles('**/dialogic_*.csv', '**/{.git,.godot,node_modules}/**');
+      for (const uri of uris) {
+        const rows = parseCsv(Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8'));
+        if (rows.length === 0 || rows[0][0] !== 'keys') { continue; } // not a translation CSV
+        files.push(uri);
+        const header = rows[0];
+        header.slice(1).forEach(locale => { if (locale) { locales.add(locale); } });
+        for (const row of rows.slice(1)) {
+          const key = row[0];
+          if (!key) { continue; }
+          const byLocale = translations.get(key) || new Map();
+          header.forEach((locale, column) => { if (column > 0 && locale && row[column]) { byLocale.set(locale, row[column]); } });
+          translations.set(key, byLocale);
+          if (!fileOfKey.has(key)) { fileOfKey.set(key, uri); }
+        }
+      }
+    } catch (error) {
+      console.error('DTL Reader: could not read the Dialogic translation CSV files', error);
+    }
+  }
+  cachedTranslations = translations;
+  cachedTranslationFileOfKey = fileOfKey;
+  cachedTranslationLocales = [...locales];
+  cachedTranslationFiles = files;
+  updateAllTranslationDecorations();
+}
+
+/**
+ * The language being translated to (`dtlReader.translation.language`), or
+ * null when translation mode is off.
+ *
+ * @returns {string | null}
+ */
+function getTranslationLanguage() {
+  const language = vscode.workspace.getConfiguration('dtlReader').get('translation.language', '');
+  return language ? language.trim() : null;
+}
+
+/**
+ * If `text` is a translatable line with a translation id, which CSV key it
+ * uses and its original text: a dialogue/narration line
+ * (`Text/<id>/text`), a choice (`Choice/<id>/text`), a label's display
+ * name (`Label/<id>/display_name`) or a text input's prompt
+ * (`Text Input/<id>/text`).
+ *
+ * @param {string} text - one line
+ * @returns {{key: string, original: string, idStart: number, idEnd: number} | null}
+ */
+function parseTranslatableLine(text) {
+  const idMatch = text.match(/#id:(\S+)\s*$/);
+  if (!idMatch) { return null; }
+  const id = idMatch[1];
+  const idStart = idMatch.index;
+  const idEnd = idStart + idMatch[0].trimEnd().length;
+  const body = text.slice(0, idStart).replace(/\s+$/, '');
+  const trimmed = body.trim();
+  if (trimmed === '') { return null; }
+  const entry = (key, original) => ({ key, original, idStart, idEnd });
+
+  const label = parseLabelLine(text);
+  if (label) { return label.displayName ? entry(`Label/${id}/display_name`, label.displayName) : null; }
+  if (/^-\s/.test(trimmed)) { return entry(`Choice/${id}/text`, trimmed.slice(1).split('|')[0].trim()); }
+  const textInputMatch = trimmed.match(/^\[text_input\b[^\]]*?\btext="([^"]*)"/);
+  if (textInputMatch) { return entry(`Text Input/${id}/text`, textInputMatch[1]); }
+  if (!isPlayerFacingTextLine(body)) { return null; }
+  const speakerMatch = body.match(new RegExp(`^\\s*${CHARACTER_NAME_SOURCE}\\s*(?:\\([^)]*\\))?\\s*:\\s*`, 'u'));
+  return entry(`Text/${id}/text`, speakerMatch ? body.slice(speakerMatch[0].length).trim() : trimmed);
+}
+
+/**
+ * @param {string} key
+ * @param {string} locale
+ * @returns {string} empty if not translated
+ */
+function getTranslation(key, locale) {
+  const byLocale = cachedTranslations.get(key);
+  return (byLocale && byLocale.get(locale)) || '';
+}
+
+/**
+ * Show each translatable line's translation in the current language right
+ * after the line, in the editor (or "not translated" when missing).
+ *
+ * @param {vscode.TextEditor} editor
+ */
+function updateTranslationDecorations(editor) {
+  if (!translationDecorationType || !editor || editor.document.languageId !== 'dtl') { return; }
+  const language = getTranslationLanguage();
+  const showInline = vscode.workspace.getConfiguration('dtlReader').get('translation.showInline', true);
+  if (!language || !showInline) {
+    editor.setDecorations(translationDecorationType, []);
+    return;
+  }
+  const decorations = [];
+  const document = editor.document;
+  for (let line = 0; line < document.lineCount; line++) {
+    const text = document.lineAt(line).text;
+    const entry = parseTranslatableLine(text);
+    if (!entry) { continue; }
+    const translation = getTranslation(entry.key, language);
+    decorations.push({
+      range: new vscode.Range(line, text.length, line, text.length),
+      renderOptions: {
+        after: {
+          contentText: translation ? `   ${language}: ${translation}` : `   ${language}: not translated yet`,
+          color: new vscode.ThemeColor(translation ? 'editorCodeLens.foreground' : 'editorWarning.foreground'),
+          fontStyle: 'italic',
+        },
+      },
+    });
+  }
+  editor.setDecorations(translationDecorationType, decorations);
+}
+
+function updateAllTranslationDecorations() {
+  if (!translationDecorationType) { return; }
+  vscode.window.visibleTextEditors.forEach(updateTranslationDecorations);
+}
+
+/**
+ * Report translatable lines that have no translation in the current
+ * language yet (`dtlReader.diagnostics.missingTranslation`, a Hint by
+ * default). Only while a translation language is set and translation CSVs
+ * exist.
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {vscode.Diagnostic[]}
+ */
+function findMissingTranslationDiagnostics(document) {
+  const language = getTranslationLanguage();
+  if (!language || cachedTranslationFiles.length === 0) { return []; }
+  const diagnostics = [];
+  for (let line = 0; line < document.lineCount; line++) {
+    const entry = parseTranslatableLine(document.lineAt(line).text);
+    if (!entry || getTranslation(entry.key, language)) { continue; }
+    pushDiagnostic(diagnostics, 'missingTranslation',
+      new vscode.Range(line, entry.idStart, line, entry.idEnd),
+      `Not translated to "${language}" yet - use the quick fix or "DTL: Translate Line".`);
+  }
+  return diagnostics;
+}
+
+/**
+ * Hover on a line's `#id:...`: its translation key and the text in every
+ * language of the CSVs, the original first.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Position} position
+ * @returns {vscode.Hover | undefined}
+ */
+function provideTranslationHover(document, position) {
+  const entry = parseTranslatableLine(document.lineAt(position.line).text);
+  if (!entry || position.character < entry.idStart || position.character > entry.idEnd) { return undefined; }
+  const markdown = new vscode.MarkdownString();
+  markdown.appendMarkdown(`**Translation** \`${entry.key}\`\n\n`);
+  const escape = text => text.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  const locales = [...cachedTranslationLocales].sort((a, b) => (a === translationOriginalLocale ? -1 : b === translationOriginalLocale ? 1 : 0));
+  if (locales.length === 0) {
+    markdown.appendMarkdown(cachedTranslationFiles.length === 0
+      ? '_No Dialogic translation CSV found. Enable translation in Dialogic\'s settings and click "Update CSV files"._'
+      : '_This line is not in the translation CSVs yet - "Update CSV files" in Dialogic adds it._');
+    return new vscode.Hover(markdown);
+  }
+  markdown.appendMarkdown('| Locale | Text |\n|---|---|\n');
+  for (const locale of locales) {
+    const text = locale === translationOriginalLocale && !getTranslation(entry.key, locale) ? entry.original : getTranslation(entry.key, locale);
+    markdown.appendMarkdown(`| ${locale}${locale === translationOriginalLocale ? ' (original)' : ''} | ${text ? escape(text) : '_not translated_'} |\n`);
+  }
+  return new vscode.Hover(markdown, new vscode.Range(position.line, entry.idStart, position.line, entry.idEnd));
+}
+
+/**
+ * Pick the language to translate to, among the CSVs' locale columns (or a
+ * new one), and save it as `dtlReader.translation.language`.
+ *
+ * @returns {Promise<string | null>} the chosen locale, or null if cancelled / turned off
+ */
+async function selectTranslationLanguage() {
+  const current = getTranslationLanguage();
+  const items = cachedTranslationLocales
+    .filter(locale => locale !== translationOriginalLocale)
+    .map(locale => ({ label: locale, description: locale === current ? 'current' : '' }));
+  items.push({ label: '$(add) Other language...', description: 'type a locale code, e.g. fr or pt_BR', other: true });
+  if (current) { items.push({ label: '$(close) Turn translation mode off', off: true }); }
+  const picked = await vscode.window.showQuickPick(items, { title: 'DTL: Translation language', placeHolder: translationOriginalLocale ? `Timelines are written in "${translationOriginalLocale}"` : 'Language to translate the timelines to' });
+  if (!picked) { return null; }
+  let language = picked.off ? '' : picked.label;
+  if (picked.other) {
+    language = (await vscode.window.showInputBox({ title: 'DTL: Translation language', prompt: 'Locale code, as used by Godot and the CSV column (e.g. fr, ja, pt_BR)' }) || '').trim();
+    if (!language) { return null; }
+  }
+  const target = vscode.workspace.workspaceFolders ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+  await vscode.workspace.getConfiguration('dtlReader').update('translation.language', language, target);
+  return language || null;
+}
+
+/**
+ * The CSV a new translation of `key` should go to: the one that already
+ * has the key, else this timeline's own CSV (per-timeline mode), else the
+ * project's timeline CSV (per-project mode).
+ *
+ * @param {string} key
+ * @param {vscode.TextDocument} document
+ * @returns {vscode.Uri | null}
+ */
+function findTranslationFileFor(key, document) {
+  if (cachedTranslationFileOfKey.has(key)) { return cachedTranslationFileOfKey.get(key); }
+  const timelineName = (document.uri.fsPath || '').replace(/\\/g, '/').split('/').pop().replace(/\.dtl$/i, '');
+  const byName = name => cachedTranslationFiles.find(uri => uri.fsPath.replace(/\\/g, '/').split('/').pop().toLowerCase() === name.toLowerCase());
+  return byName(`dialogic_${timelineName}_translation.csv`) || byName('dialogic_timeline_translations.csv') || null;
+}
+
+/**
+ * Write one translation into its CSV: adds the locale column and/or the
+ * key's row if they don't exist yet (a new row also gets the original
+ * text in the original-locale column), keeping the file's line endings.
+ *
+ * @param {{key: string, original: string}} entry
+ * @param {string} language
+ * @param {string} translation
+ * @param {vscode.TextDocument} document
+ * @returns {Promise<boolean>} whether it was written
+ */
+async function writeTranslation(entry, language, translation, document) {
+  const uri = findTranslationFileFor(entry.key, document);
+  if (!uri) {
+    vscode.window.showErrorMessage('DTL Reader: no Dialogic translation CSV found for this timeline. Enable translation in Dialogic\'s settings and click "Update CSV files" first.');
+    return false;
+  }
+  const openCsv = vscode.workspace.textDocuments.find(candidate => normalizeFsPath(candidate.uri.fsPath) === normalizeFsPath(uri.fsPath));
+  if (openCsv && openCsv.isDirty) {
+    vscode.window.showErrorMessage(`DTL Reader: ${uri.fsPath} has unsaved changes - save or revert it before translating here.`);
+    return false;
+  }
+  const text = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const rows = parseCsv(text);
+  if (rows.length === 0) { rows.push(['keys']); }
+  const header = rows[0];
+  let column = header.indexOf(language);
+  if (column === -1) {
+    header.push(language);
+    column = header.length - 1;
+  }
+  let row = rows.find((candidate, index) => index > 0 && candidate[0] === entry.key);
+  if (!row) {
+    row = [entry.key];
+    const originalColumn = translationOriginalLocale ? header.indexOf(translationOriginalLocale) : -1;
+    if (originalColumn > 0) { row[originalColumn] = entry.original; }
+    rows.push(row);
+  }
+  row[column] = translation;
+  for (const candidate of rows) {
+    while (candidate.length < header.length) { candidate.push(''); }
+    for (let i = 0; i < candidate.length; i++) { if (candidate[i] === undefined) { candidate[i] = ''; } }
+  }
+  await vscode.workspace.fs.writeFile(uri, Buffer.from(serializeCsv(rows, eol), 'utf8'));
+  await refreshTranslations();
+  refreshAllDiagnostics();
+  return true;
+}
+
+/**
+ * "DTL: Translate Line" - asks for the translation of a line in the
+ * current language (showing the original), and writes it to the CSV.
+ *
+ * @param {vscode.Uri} [uri] - given by the quick fix
+ * @param {number} [line] - given by the quick fix
+ */
+async function translateLineCommand(uri, line) {
+  const editor = vscode.window.activeTextEditor;
+  // From the quick fix: (uri, line). From the editor context menu: (uri).
+  // From the Command Palette: nothing - use the active editor's cursor.
+  const document = uri && uri.fsPath
+    ? vscode.workspace.textDocuments.find(candidate => candidate.uri.fsPath === uri.fsPath) || await vscode.workspace.openTextDocument(uri)
+    : editor && editor.document;
+  if (!document || document.languageId !== 'dtl') { return; }
+  const lineNumber = typeof line === 'number' ? line : editor.selection.active.line;
+  const entry = parseTranslatableLine(document.lineAt(lineNumber).text);
+  if (!entry) {
+    vscode.window.showInformationMessage('DTL Reader: this line has no translation id (#id:...). "Update CSV files" in Dialogic\'s translation settings adds them.');
+    return;
+  }
+  const language = getTranslationLanguage() || await selectTranslationLanguage();
+  if (!language) { return; }
+  const translation = await vscode.window.showInputBox({
+    title: `Translate to ${language}`,
+    prompt: `${translationOriginalLocale || 'Original'}: ${entry.original}`,
+    value: getTranslation(entry.key, language),
+    placeHolder: entry.original,
+    ignoreFocusOut: true,
+  });
+  if (translation === undefined) { return; }
+  if (await writeTranslation(entry, language, translation, document)) {
+    vscode.window.setStatusBarMessage(`DTL Reader: ${entry.key} translated to ${language}`, 3000);
+  }
+}
+
+/**
+ * "DTL: Go to Next Untranslated Line" - moves the cursor to the next
+ * translatable line with no translation in the current language,
+ * wrapping around the end of the timeline.
+ */
+async function nextUntranslatedCommand() {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== 'dtl') { return; }
+  const language = getTranslationLanguage() || await selectTranslationLanguage();
+  if (!language) { return; }
+  const document = editor.document;
+  const start = editor.selection.active.line;
+  for (let offset = 1; offset <= document.lineCount; offset++) {
+    const line = (start + offset) % document.lineCount;
+    const entry = parseTranslatableLine(document.lineAt(line).text);
+    if (entry && !getTranslation(entry.key, language)) {
+      const position = new vscode.Position(line, entry.idStart);
+      editor.selection = new vscode.Selection(position, position);
+      editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+      return;
+    }
+  }
+  vscode.window.showInformationMessage(`DTL Reader: every translatable line of this timeline is translated to "${language}".`);
+}
+
+/**
+ * Lightbulb action on a translatable line: "Translate to <language>".
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Range} range
+ * @returns {vscode.CodeAction[]}
+ */
+function provideTranslationCodeActions(document, range) {
+  const entry = parseTranslatableLine(document.lineAt(range.start.line).text);
+  if (!entry) { return []; }
+  const language = getTranslationLanguage();
+  const action = new vscode.CodeAction(language ? `Translate to ${language}` : 'Translate this line...', vscode.CodeActionKind.QuickFix);
+  action.command = { command: 'dtlReader.translateLine', title: action.title, arguments: [document.uri, range.start.line] };
+  return [action];
+}
+
+// =============================================================================
 // ACTIVATE
 // =============================================================================
 function activate(context) {
+  // Created before the first project refresh, which already paints it.
+  translationDecorationType = vscode.window.createTextEditorDecorationType({});
+  context.subscriptions.push(translationDecorationType);
   // ---------------------------------------------------------------------------
   // Initial character cache
   // ---------------------------------------------------------------------------
@@ -4309,6 +4774,30 @@ function activate(context) {
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(event => {
       if (event.affectsConfiguration('dtlReader.includeAddonAutoloads')) { refreshProjectGodotData(); }
+      if (event.affectsConfiguration('dtlReader')) {
+        refreshAllDiagnostics();
+        updateAllTranslationDecorations();
+      }
+    })
+  );
+  // ---------------------------------------------------------------------------
+  // Translations: Dialogic's CSV files, commands, inline view, quick fix
+  // ---------------------------------------------------------------------------
+  const csvWatcher = vscode.workspace.createFileSystemWatcher('**/dialogic_*.csv');
+  const refreshCsv = async () => { await refreshTranslations(); refreshAllDiagnostics(); };
+  csvWatcher.onDidChange(refreshCsv);
+  csvWatcher.onDidCreate(refreshCsv);
+  csvWatcher.onDidDelete(refreshCsv);
+  context.subscriptions.push(
+    csvWatcher,
+    vscode.commands.registerCommand('dtlReader.translateLine', translateLineCommand),
+    vscode.commands.registerCommand('dtlReader.nextUntranslated', nextUntranslatedCommand),
+    vscode.commands.registerCommand('dtlReader.selectTranslationLanguage', selectTranslationLanguage),
+    vscode.languages.registerHoverProvider('dtl', { provideHover: provideTranslationHover }),
+    vscode.languages.registerCodeActionsProvider('dtl', { provideCodeActions: provideTranslationCodeActions }, { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }),
+    vscode.window.onDidChangeVisibleTextEditors(updateAllTranslationDecorations),
+    vscode.workspace.onDidChangeTextDocument(event => {
+      vscode.window.visibleTextEditors.filter(editor => editor.document === event.document).forEach(updateTranslationDecorations);
     })
   );
   // ===========================================================================
@@ -4877,10 +5366,11 @@ function activate(context) {
             }
             // BBCode only makes sense inside dialogue/narration text and
             // choices - a standalone "[" line is a Dialogic event.
-            if (!isInPlayerFacingText(beforeCursor.slice(0, bracketMatch.index))) {
+            const bbcodeMode = vscode.workspace.getConfiguration('dtlReader').get('completion.bbcode', 'common');
+            if (bbcodeMode === 'off' || !isInPlayerFacingText(beforeCursor.slice(0, bracketMatch.index))) {
               return items;
             }
-            const showAllBbcodes = prefix !== '';
+            const showAllBbcodes = prefix !== '' || bbcodeMode === 'all';
             // Replace an auto-closed "]" right after the cursor, since
             // the BBCode snippet brings its own.
             const nameStart = bracketMatch.index + 1;
@@ -5057,7 +5547,8 @@ function activate(context) {
           // the start of anything worth suggesting.
           // =========================================================================
           if (isInsideDialogueText(beforeCursor)) {
-            return triggerCharacter ? [] : createWordSuggestions(document, beforeCursor);
+            const wordsEnabled = vscode.workspace.getConfiguration('dtlReader').get('completion.dialogueWords', true);
+            return triggerCharacter || !wordsEnabled ? [] : createWordSuggestions(document, beforeCursor);
           }
           /// Fall back
           if (triggerCharacter) {
@@ -5066,7 +5557,9 @@ function activate(context) {
           for (const name of cachedCharacterNames) {
             items.push(createCharacterCompletion(name));
           }
-          items.push(...createWordSuggestions(document, beforeCursor));
+          if (vscode.workspace.getConfiguration('dtlReader').get('completion.dialogueWords', true)) {
+            items.push(...createWordSuggestions(document, beforeCursor));
+          }
           return items;
           }
         }

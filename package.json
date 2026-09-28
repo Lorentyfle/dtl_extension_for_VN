@@ -2,7 +2,7 @@
   "name": "dtl-reader",
   "displayName": "DTL Reader",
   "description": "Syntax highlighting for Dialogic2 TimeLine (.dtl) files",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "publisher": "lorentyfle",
   "icon": "./icons/favicon.png",
   "engines": {
@@ -41,7 +41,11 @@
         "extensions": [
           ".dch"
         ],
-        "configuration": "./dch-language-configuration.json"
+        "configuration": "./dch-language-configuration.json",
+        "icon": {
+          "light": "./icons/dtl.svg",
+          "dark": "./icons/favicon.svg"
+        }
       }
     ],
     "grammars": [
@@ -86,29 +90,337 @@
       {
         "language": "dtl",
         "scopes": {
-          "class": ["support.class.global.dtl"],
-          "property": ["variable.other.member.dtl"],
-          "enum": ["entity.name.type.enum.dtl"],
-          "enumMember": ["constant.other.enum-member.dtl"],
-          "function": ["support.function.dtl"]
+          "class": [
+            "support.class.global.dtl"
+          ],
+          "property": [
+            "variable.other.member.dtl"
+          ],
+          "enum": [
+            "entity.name.type.enum.dtl"
+          ],
+          "enumMember": [
+            "constant.other.enum-member.dtl"
+          ],
+          "function": [
+            "support.function.dtl"
+          ]
         }
       }
     ],
-    "configuration": {
-      "title": "DTL Reader",
-      "properties": {
-        "dtlReader.outline.showFlow": {
-          "type": "boolean",
-          "default": true,
-          "description": "In the Outline view, list each label's flow (if/elif/else/while blocks, choices, jump/return/end_timeline), nested by indentation. When off, the outline only lists the labels."
+    "commands": [
+      {
+        "command": "dtlReader.translateLine",
+        "title": "Translate Line",
+        "category": "DTL"
+      },
+      {
+        "command": "dtlReader.nextUntranslated",
+        "title": "Go to Next Untranslated Line",
+        "category": "DTL"
+      },
+      {
+        "command": "dtlReader.selectTranslationLanguage",
+        "title": "Select Translation Language",
+        "category": "DTL"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "dtlReader.translateLine",
+          "when": "editorLangId == dtl"
         },
-        "dtlReader.includeAddonAutoloads": {
-          "type": "boolean",
-          "default": false,
-          "description": "Also suggest autoloads declared by addons (scripts or scenes under res://addons/, e.g. Dialogic's own \"Dialogic\" singleton) in do/if/elif and {...} autocomplete. Off by default, since addon autoloads usually expose hundreds of members that are not meant to be used from a timeline."
+        {
+          "command": "dtlReader.nextUntranslated",
+          "when": "editorLangId == dtl"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "dtlReader.translateLine",
+          "when": "editorLangId == dtl && config.dtlReader.translation.language",
+          "group": "dtl@1"
+        },
+        {
+          "command": "dtlReader.nextUntranslated",
+          "when": "editorLangId == dtl && config.dtlReader.translation.language",
+          "group": "dtl@2"
+        }
+      ]
+    },
+    "configuration": [
+      {
+        "title": "General",
+        "order": 1,
+        "properties": {
+          "dtlReader.includeAddonAutoloads": {
+            "type": "boolean",
+            "default": false,
+            "description": "Also suggest autoloads declared by addons (scripts or scenes under res://addons/, e.g. Dialogic's own \"Dialogic\" singleton) in do/if/elif and {...} autocomplete. Off by default, since addon autoloads usually expose hundreds of members that are not meant to be used from a timeline.",
+            "order": 1
+          },
+          "dtlReader.outline.showFlow": {
+            "type": "boolean",
+            "default": true,
+            "description": "In the Outline view, list each label's flow (if/elif/else/while blocks, choices, jump/return/end_timeline), nested by indentation. When off, the outline only lists the labels.",
+            "order": 2
+          }
+        }
+      },
+      {
+        "title": "Autocomplete",
+        "order": 2,
+        "properties": {
+          "dtlReader.completion.dialogueWords": {
+            "type": "boolean",
+            "default": true,
+            "order": 1,
+            "description": "While writing dialogue, narration and choices, suggest words already used in the timeline (like a plain text file)."
+          },
+          "dtlReader.completion.bbcode": {
+            "type": "string",
+            "enum": [
+              "common",
+              "all",
+              "off"
+            ],
+            "default": "common",
+            "order": 2,
+            "enumDescriptions": [
+              "After '[' in text, suggest the most used BBCode tags; the others appear once a letter is typed.",
+              "After '[' in text, suggest every Godot BBCode tag right away.",
+              "Never suggest BBCode tags (Dialogic's own [commands] are still suggested)."
+            ],
+            "description": "Which Godot BBCode tags to suggest inside dialogue, narration and choices."
+          }
+        }
+      },
+      {
+        "title": "Diagnostics",
+        "order": 3,
+        "properties": {
+          "dtlReader.diagnostics.unresolvedJump": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "information",
+              "hint",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Error (red squiggle, in Problems)",
+              "Warning (yellow squiggle, in Problems)",
+              "Information (blue squiggle, in Problems)",
+              "Hint (faint dots, not in Problems)",
+              "Hidden"
+            ],
+            "default": "error",
+            "description": "A `jump` to a label or timeline that doesn't exist (Dialogic prints an error and skips the jump).",
+            "order": 1
+          },
+          "dtlReader.diagnostics.jumpTranslationId": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "information",
+              "hint",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Error (red squiggle, in Problems)",
+              "Warning (yellow squiggle, in Problems)",
+              "Information (blue squiggle, in Problems)",
+              "Hint (faint dots, not in Problems)",
+              "Hidden"
+            ],
+            "default": "error",
+            "description": "A `jump` ending with a `#id:` translation id (Dialogic would search for a label including it).",
+            "order": 2
+          },
+          "dtlReader.diagnostics.unknownCharacter": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "information",
+              "hint",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Error (red squiggle, in Problems)",
+              "Warning (yellow squiggle, in Problems)",
+              "Information (blue squiggle, in Problems)",
+              "Hint (faint dots, not in Problems)",
+              "Hidden"
+            ],
+            "default": "error",
+            "description": "`join`/`update`/`leave` with a character that isn't in project.godot.",
+            "order": 3
+          },
+          "dtlReader.diagnostics.unknownSpeaker": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "information",
+              "hint",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Error (red squiggle, in Problems)",
+              "Warning (yellow squiggle, in Problems)",
+              "Information (blue squiggle, in Problems)",
+              "Hint (faint dots, not in Problems)",
+              "Hidden"
+            ],
+            "default": "warning",
+            "description": "A `Name: text` dialogue line whose speaker isn't a known character (Dialogic shows the whole line as narration). Turn off if you use `Something:` in narration on purpose.",
+            "order": 4
+          },
+          "dtlReader.diagnostics.unknownMood": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "information",
+              "hint",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Error (red squiggle, in Problems)",
+              "Warning (yellow squiggle, in Problems)",
+              "Information (blue squiggle, in Problems)",
+              "Hint (faint dots, not in Problems)",
+              "Hidden"
+            ],
+            "default": "error",
+            "description": "A `(mood)` the character's .dch file doesn't declare.",
+            "order": 5
+          },
+          "dtlReader.diagnostics.unknownVariable": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "information",
+              "hint",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Error (red squiggle, in Problems)",
+              "Warning (yellow squiggle, in Problems)",
+              "Information (blue squiggle, in Problems)",
+              "Hint (faint dots, not in Problems)",
+              "Hidden"
+            ],
+            "default": "error",
+            "description": "A `{variable}` that is neither a Dialogic variable of project.godot nor an autoload member.",
+            "order": 6
+          },
+          "dtlReader.diagnostics.unclosedBBCode": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "information",
+              "hint",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Error (red squiggle, in Problems)",
+              "Warning (yellow squiggle, in Problems)",
+              "Information (blue squiggle, in Problems)",
+              "Hint (faint dots, not in Problems)",
+              "Hidden"
+            ],
+            "default": "warning",
+            "description": "A BBCode tag like `[b]` without its closing `[/b]` on the same line.",
+            "order": 7
+          },
+          "dtlReader.diagnostics.missingTranslation": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "information",
+              "hint",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Error (red squiggle, in Problems)",
+              "Warning (yellow squiggle, in Problems)",
+              "Information (blue squiggle, in Problems)",
+              "Hint (faint dots, not in Problems)",
+              "Hidden"
+            ],
+            "default": "hint",
+            "description": "A translatable line with no translation yet in `dtlReader.translation.language` (only while a translation language is set).",
+            "order": 8
+          },
+          "dtlReader.diagnostics.dchDefaultPortrait": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "information",
+              "hint",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Error (red squiggle, in Problems)",
+              "Warning (yellow squiggle, in Problems)",
+              "Information (blue squiggle, in Problems)",
+              "Hint (faint dots, not in Problems)",
+              "Hidden"
+            ],
+            "default": "error",
+            "description": "A .dch `default_portrait` that isn't one of the character's portraits.",
+            "order": 9
+          },
+          "dtlReader.diagnostics.dchMissingScene": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "information",
+              "hint",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Error (red squiggle, in Problems)",
+              "Warning (yellow squiggle, in Problems)",
+              "Information (blue squiggle, in Problems)",
+              "Hint (faint dots, not in Problems)",
+              "Hidden"
+            ],
+            "default": "error",
+            "description": "A .dch portrait `scene` that doesn't exist in the project.",
+            "order": 10
+          }
+        }
+      },
+      {
+        "title": "Translation",
+        "order": 4,
+        "properties": {
+          "dtlReader.translation.language": {
+            "type": "string",
+            "default": "",
+            "order": 1,
+            "markdownDescription": "Language you are translating the timelines to, as a locale code of Dialogic's translation CSV files (e.g. `fr`, `ja`, `pt_BR`). When set, each translatable line (with a `#id:`) shows its translation next to the original text, and **DTL: Translate Line** writes translations into the CSV. Leave empty to turn translation mode off. Also settable with **DTL: Select Translation Language**."
+          },
+          "dtlReader.translation.showInline": {
+            "type": "boolean",
+            "default": true,
+            "order": 2,
+            "description": "In translation mode, show each line's translation (or 'not translated yet') at the end of the line."
+          }
         }
       }
-    },
+    ],
     "configurationDefaults": {
       "[dtl]": {
         "editor.quickSuggestions": {
