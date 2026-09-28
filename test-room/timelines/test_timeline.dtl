@@ -80,5 +80,13 @@ if {chapter} < 3:
 - Go to its ending
     jump chapter2/Ending With Spaces
 
+# A custom event, from addons/dialogic_additions/ScreenShake/.
+[screen_shake strength=2 wait=true]
+
 leave --All--
 [end_timeline]
+
+# Nothing below ever runs: the timeline ends just above, and no jump leads
+# to "label forgotten" - these lines are faded, the label is warned about.
+label forgotten
+TestCharacter: Nobody will ever read this.

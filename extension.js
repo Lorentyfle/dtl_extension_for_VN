@@ -11,8 +11,12 @@
 // - Hover documentation for commands and Godot BBCode tags
 // - Autoload (script or scene) member autocomplete + hover docs: functions,
 //   variables, constants and enums, in do/if/elif and {...}
-// - Go to Definition for `jump NAME` -> `label NAME`
-// - Diagnostics: unresolved `jump` targets, unclosed [balise] tags
+// - Go to Definition for jumps, characters, moods, res:// paths, autoload
+//   members and glossary words; Go to Symbol in Workspace
+// - Diagnostics (unresolved jumps, unknown characters/moods/variables,
+//   unclosed BBCode tags, unreachable events, unused portraits...) with
+//   quick fixes
+// - Custom Dialogic events, block snippets, Play Timeline in Godot
 // -----------------------------------------------------------------------------
 
 const vscode = require('vscode');
@@ -138,20 +142,28 @@ function findCharacterNameAtPosition(document, position) {
 }
 
 /**
- * Find the autoload reference under the cursor, if any - the autoload name
- * itself (`Global`), one of its members (`Global.apply_tint`,
+ * Locate the autoload reference under the cursor, if any - the autoload
+ * name itself (`Global`), one of its members (`Global.apply_tint`,
  * `Global.max_hp`, `Global.State`), or a named enum's value
  * (`Global.State.IDLE`) - resolved against cachedAutoloadSymbols. Only
  * looked for where Dialogic actually evaluates such references: a
- * `do`/`if`/`elif` expression, or inside a `{...}` variable block. Used by
- * the hover provider - isGlobalScriptExpressionLine is defined further
- * down alongside the completion logic that shares this same line shape.
+ * `do`/`if`/`elif` expression, or inside a `{...}` variable block
+ * (isGlobalScriptExpressionLine is defined further down alongside the
+ * completion logic that shares this same line shape). Shared by the hover
+ * and Go to Definition.
  *
  * @param {vscode.TextDocument} document
  * @param {vscode.Position} position
- * @returns {{markdown: vscode.MarkdownString, range: vscode.Range} | null}
+ * @returns {{
+ *   globalName: string,
+ *   symbols: GdScriptSymbols & {scriptPath: string, scenePath: string|null},
+ *   part: 'global'|'member'|'value',
+ *   memberName: string,
+ *   subName: string|undefined,
+ *   range: vscode.Range
+ * } | null}
  */
-function findAutoloadReferenceAtPosition(document, position) {
+function locateAutoloadReferenceAtPosition(document, position) {
   const line = document.lineAt(position.line).text;
   const isExpressionLine = isGlobalScriptExpressionLine(line);
   const referencePattern = /\b([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)(?:\.([A-Za-z_][A-Za-z0-9_]*))?/g;
@@ -167,23 +179,37 @@ function findAutoloadReferenceAtPosition(document, position) {
     const subStart = memberStart + memberName.length + 1;
     const rangeOf = (start, name) => new vscode.Range(position.line, start, position.line, start + name.length);
     const covers = (start, name) => position.character >= start && position.character <= start + name.length;
+    const reference = { globalName, symbols, memberName, subName };
 
-    if (covers(globalStart, globalName)) {
-      return { markdown: createAutoloadDocumentation(globalName, symbols), range: rangeOf(globalStart, globalName) };
-    }
-    if (covers(memberStart, memberName)) {
-      const markdown = createAutoloadMemberDocumentation(globalName, memberName, symbols);
-      return markdown ? { markdown, range: rangeOf(memberStart, memberName) } : null;
-    }
-    if (subName && covers(subStart, subName)) {
-      const enumInfo = symbols.enums.get(memberName);
-      const valueInfo = enumInfo && enumInfo.values.find(value => value.name === subName);
-      return valueInfo
-        ? { markdown: createEnumValueDocumentation(globalName, memberName, valueInfo), range: rangeOf(subStart, subName) }
-        : null;
-    }
+    if (covers(globalStart, globalName)) { return { ...reference, part: 'global', range: rangeOf(globalStart, globalName) }; }
+    if (covers(memberStart, memberName)) { return { ...reference, part: 'member', range: rangeOf(memberStart, memberName) }; }
+    if (subName && covers(subStart, subName)) { return { ...reference, part: 'value', range: rangeOf(subStart, subName) }; }
   }
   return null;
+}
+
+/**
+ * Hover documentation for the autoload reference under the cursor (see
+ * locateAutoloadReferenceAtPosition).
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Position} position
+ * @returns {{markdown: vscode.MarkdownString, range: vscode.Range} | null}
+ */
+function findAutoloadReferenceAtPosition(document, position) {
+  const reference = locateAutoloadReferenceAtPosition(document, position);
+  if (!reference) { return null; }
+  const { globalName, memberName, subName, symbols, range } = reference;
+  if (reference.part === 'global') {
+    return { markdown: createAutoloadDocumentation(globalName, symbols), range };
+  }
+  if (reference.part === 'member') {
+    const markdown = createAutoloadMemberDocumentation(globalName, memberName, symbols);
+    return markdown ? { markdown, range } : null;
+  }
+  const enumInfo = symbols.enums.get(memberName);
+  const valueInfo = enumInfo && enumInfo.values.find(value => value.name === subName);
+  return valueInfo ? { markdown: createEnumValueDocumentation(globalName, memberName, valueInfo), range } : null;
 }
 
 /**
@@ -1366,6 +1392,24 @@ let cachedTimelinePaths = new Map();
  */
 let cachedTimelineLabels = new Map();
 
+/**
+ * Every registered timeline's lines as last read from disk, by identifier -
+ * to know where each label is jumped to from and which characters and
+ * moods the timelines use. See currentTimelineLines for the live view.
+ *
+ * @type {Map<string, string[]>}
+ */
+let cachedTimelineLines = new Map();
+
+/**
+ * Every string literal of the project's own scripts (`.gd` files outside
+ * `res://addons/dialogic/`), so a label, character or portrait that a script
+ * names - `Dialogic.start("chapter1", "intro")` - isn't reported unused.
+ *
+ * @type {Set<string>}
+ */
+let cachedScriptStrings = new Set();
+
 function extractCharacterNames(text) {
   const sectionMatch = text.match(/(?:^|\n)\[dialogic\]([\s\S]*?)(\n\[|$)/);
   if (!sectionMatch) { return []; }
@@ -1571,15 +1615,36 @@ function extractDialogicDirectory(text, extension) {
  */
 async function refreshTimelineLabels() {
   const labelsByTimeline = new Map();
+  const linesByTimeline = new Map();
   for (const [identifier, resPath] of cachedTimelinePaths) {
     try {
       const bytes = await vscode.workspace.fs.readFile(resolveResourcePath(resPath));
-      labelsByTimeline.set(identifier, collectLabelsFromLines(Buffer.from(bytes).toString('utf8').split(/\r?\n/)));
+      const lines = Buffer.from(bytes).toString('utf8').split(/\r?\n/);
+      labelsByTimeline.set(identifier, collectLabelsFromLines(lines));
+      linesByTimeline.set(identifier, lines);
     } catch (error) {
       console.error(`DTL Reader: timeline "${identifier}" declares "${resPath}" but it could not be read - its labels are unavailable for jump.`, error);
     }
   }
   cachedTimelineLabels = labelsByTimeline;
+  cachedTimelineLines = linesByTimeline;
+}
+
+/**
+ * Every registered timeline's lines, by identifier - read live from its
+ * editor if it's open (so unsaved edits count), else as last read from
+ * disk (cachedTimelineLines).
+ *
+ * @returns {Map<string, string[]>}
+ */
+function currentTimelineLines() {
+  const result = new Map(cachedTimelineLines);
+  for (const document of vscode.workspace.textDocuments) {
+    if (document.languageId !== 'dtl') { continue; }
+    const identifier = findTimelineIdentifier(document);
+    if (identifier) { result.set(identifier, documentLines(document)); }
+  }
+  return result;
 }
 
 /**
@@ -1604,11 +1669,11 @@ function extractAutoloadPaths(text) {
 }
 
 /**
- * @typedef {{params: string, returnType: string|null, doc: string, isStatic: boolean}} GdFunctionInfo
- * @typedef {{type: string|null, defaultValue: string|null, doc: string, isStatic: boolean}} GdVariableInfo
- * @typedef {{type: string|null, value: string, doc: string}} GdConstantInfo
+ * @typedef {{params: string, returnType: string|null, doc: string, isStatic: boolean, line: number}} GdFunctionInfo
+ * @typedef {{type: string|null, defaultValue: string|null, doc: string, isStatic: boolean, isExported: boolean, line: number}} GdVariableInfo
+ * @typedef {{type: string|null, value: string, doc: string, line: number}} GdConstantInfo
  * @typedef {{name: string, value: string, doc: string}} GdEnumValueInfo
- * @typedef {{values: GdEnumValueInfo[], doc: string}} GdEnumInfo
+ * @typedef {{values: GdEnumValueInfo[], doc: string, line: number}} GdEnumInfo
  * @typedef {{
  *   doc: string,
  *   functions: Map<string, GdFunctionInfo>,
@@ -1788,6 +1853,7 @@ function parseGdScript(text) {
       seenMember = true;
       const doc = takeDoc();
       const name = funcMatch[2];
+      const declarationLine = i;
       const lineOffset = stripGdComment(rawLine).indexOf(funcMatch[0]);
       const openIndex = lineOffset + funcMatch[0].length - 1;
       const joined = joinUntilBracketCloses(lines, i, openIndex);
@@ -1796,7 +1862,7 @@ function parseGdScript(text) {
       if (name.startsWith('_')) { continue; }
       const params = joined.text.slice(openIndex + 1, joined.closeIndex).replace(/\s+/g, ' ').replace(/,\s*$/, '').trim();
       const returnMatch = joined.text.slice(joined.closeIndex + 1).match(/^\s*->\s*([A-Za-z_][A-Za-z0-9_.\[\], ]*?)\s*:/);
-      symbols.functions.set(name, { params, returnType: returnMatch ? returnMatch[1] : null, doc, isStatic: !!funcMatch[1] });
+      symbols.functions.set(name, { params, returnType: returnMatch ? returnMatch[1] : null, doc, isStatic: !!funcMatch[1], line: declarationLine });
       continue;
     }
 
@@ -1814,6 +1880,7 @@ function parseGdScript(text) {
         doc,
         isStatic: !!varMatch[1],
         isExported,
+        line: i,
       });
       continue;
     }
@@ -1823,7 +1890,7 @@ function parseGdScript(text) {
       seenMember = true;
       const doc = takeDoc();
       if (constMatch[1].startsWith('_')) { continue; }
-      symbols.constants.set(constMatch[1], { type: constMatch[2] ? constMatch[2].trim() : null, value: constMatch[3].trim(), doc });
+      symbols.constants.set(constMatch[1], { type: constMatch[2] ? constMatch[2].trim() : null, value: constMatch[3].trim(), doc, line: i });
       continue;
     }
 
@@ -1831,6 +1898,7 @@ function parseGdScript(text) {
     if (enumMatch) {
       seenMember = true;
       const doc = takeDoc();
+      const declarationLine = i;
       const openIndex = stripGdComment(rawLine).indexOf('{');
       const joined = joinUntilBracketCloses(lines, i, openIndex);
       if (!joined) { continue; }
@@ -1843,10 +1911,10 @@ function parseGdScript(text) {
       i = joined.lastLineIndex;
       const enumName = enumMatch[1];
       if (enumName) {
-        if (!enumName.startsWith('_')) { symbols.enums.set(enumName, { values, doc }); }
+        if (!enumName.startsWith('_')) { symbols.enums.set(enumName, { values, doc, line: declarationLine }); }
       } else {
         for (const value of values) {
-          symbols.constants.set(value.name, { type: 'int', value: value.value, doc: value.doc || doc });
+          symbols.constants.set(value.name, { type: 'int', value: value.value, doc: value.doc || doc, line: declarationLine });
         }
       }
       continue;
@@ -2263,10 +2331,44 @@ function parseTscnNodeInfo(text) {
   return nodes;
 }
 
+/** The project refresh running, if any. @type {Promise<void> | null} */
+let projectRefresh = null;
+/** A refresh was asked for while one was running. */
+let projectRefreshPending = false;
+
 /**
- * Re-read project.godot and refresh both caches from a single file read.
+ * Re-read the Godot project (see readProjectGodotData). Refreshes never
+ * overlap: one asked for while another runs (several file watchers firing
+ * at once, a quick fix saving files...) runs once right after it, so the
+ * caches always end up from a single, complete read.
+ *
+ * @returns {Promise<void>} resolves once the project is up to date
  */
-async function refreshProjectGodotData() {
+function refreshProjectGodotData() {
+  if (projectRefresh) {
+    projectRefreshPending = true;
+    return projectRefresh;
+  }
+  projectRefresh = (async () => {
+    try {
+      do {
+        projectRefreshPending = false;
+        await readProjectGodotData();
+      } while (projectRefreshPending);
+    } finally {
+      projectRefresh = null;
+    }
+  })();
+  return projectRefresh;
+}
+
+/**
+ * Re-read project.godot and everything it points to (characters, timelines,
+ * autoloads, glossaries, translations, custom events...), then re-check
+ * every open document. Use refreshProjectGodotData, which never runs two
+ * of these at once.
+ */
+async function readProjectGodotData() {
   const matches = await vscode.workspace.findFiles('**/project.godot', '**/.godot/**', 1);
   if (matches.length === 0) {
     cachedCharacterNames = [];
@@ -2279,6 +2381,9 @@ async function refreshProjectGodotData() {
     cachedPortraitDetails = new Map();
     cachedTimelinePaths = new Map();
     cachedTimelineLabels = new Map();
+    cachedTimelineLines = new Map();
+    cachedScriptStrings = new Set();
+    await refreshCustomEvents('');
     cachedGlossaryEntries = [];
     cachedGlossaryFiles = [];
     glossaryPatternsKey = null;
@@ -2289,13 +2394,14 @@ async function refreshProjectGodotData() {
     return;
   }
   projectRootUri = vscode.Uri.joinPath(matches[0], '..');
+  let dialogicSection = '';
   try {
     const bytes = await vscode.workspace.fs.readFile(matches[0]);
     const text = Buffer.from(bytes).toString('utf8');
     cachedCharacterNames = extractCharacterNames(text);
     cachedAudioChannels = extractAudioChannels(text);
     cachedVariablesTree = extractVariablesTree(text);
-    const dialogicSection = (text.match(/(?:^|\n)\[dialogic\]([\s\S]*?)(\n\[|$)/) || [])[1] || '';
+    dialogicSection = (text.match(/(?:^|\n)\[dialogic\]([\s\S]*?)(\n\[|$)/) || [])[1] || '';
     declaredProjectData = {
       characters: /directories\/dch_directory\s*=/.test(dialogicSection),
       variables: /(?:^|\n)variables\s*=/.test(dialogicSection),
@@ -2326,6 +2432,8 @@ async function refreshProjectGodotData() {
     declaredProjectData = { characters: false, variables: false, timelines: false };
   }
   await refreshResourcePaths();
+  await refreshScriptStrings();
+  await refreshCustomEvents(dialogicSection);
   await refreshTranslations();
   refreshAllDiagnostics();
   if (bbcodeCharDecorationType) { scheduleBbcodePreview(); } // glossary colors may have changed
@@ -3583,47 +3691,6 @@ function collectVariableLeaves() {
   return leaves;
 }
 
-/**
- * Completion items for `{variable}` references typed without their `{`,
- * e.g. in `if cha|` or after `set `. Inserted with their braces; an
- * auto-closed "}" after the cursor is replaced, not doubled.
- *
- * @param {string} prefix - the identifier typed so far
- * @param {vscode.Range} range - that identifier
- * @returns {vscode.CompletionItem[]}
- */
-function createVariableReferenceItems(prefix, range) {
-  const lower = prefix.toLowerCase();
-  const items = [];
-  for (const { path, value } of collectVariableLeaves()) {
-    if (!path.toLowerCase().startsWith(lower)) { continue; }
-    const type = inferGdValueType(value);
-    const item = new vscode.CompletionItem({ label: `{${path}}`, description: type || '' }, vscode.CompletionItemKind.Variable);
-    item.detail = value === null ? 'Variable used in this timeline' : `Dialogic variable - default: ${value}`;
-    item.insertText = `{${path}}`;
-    item.filterText = path;
-    item.range = range;
-    item.sortText = `1_${path}`;
-    items.push(item);
-  }
-  // Autoload variables can be set and read as {Autoload.variable} too.
-  for (const [globalName, symbols] of cachedAutoloadSymbols) {
-    for (const [name, info] of symbols.variables) {
-      const path = `${globalName}.${name}`;
-      if (!path.toLowerCase().startsWith(lower)) { continue; }
-      const item = new vscode.CompletionItem({ label: `{${path}}`, description: info.type || '' }, vscode.CompletionItemKind.Field);
-      item.detail = formatAutoloadMemberSignature(globalName, name, 'variable', info);
-      item.documentation = new vscode.MarkdownString(info.doc || NO_GD_DOC_MESSAGE);
-      item.insertText = `{${path}}`;
-      item.filterText = path;
-      item.range = range;
-      item.sortText = `3_${path}`;
-      items.push(item);
-    }
-  }
-  return items;
-}
-
 /** Operators, as Dialogic's conditions (Godot Expression) and set events accept them. */
 const CONDITION_OPERATORS = [
   ['==', 'is equal to'], ['!=', 'is not equal to'], ['>', 'is greater than'], ['<', 'is less than'],
@@ -3655,22 +3722,58 @@ function createOperatorItems(operators, group) {
 }
 
 /**
+ * The `{}` suggestion where a variable can go (a set target, an if/elif
+ * operand): it inserts the braces - around what was typed, if anything -
+ * and reopens the suggestions inside them, where the variables are listed
+ * folder by folder.
+ *
+ * @param {string} typed - the name typed so far
+ * @param {vscode.Range} range - that name
+ * @returns {vscode.CompletionItem}
+ */
+function createVariableBracesItem(typed, range) {
+  const item = new vscode.CompletionItem({ label: '{}', description: 'a variable' }, vscode.CompletionItemKind.Variable);
+  item.detail = 'Dialogic variable - {folder.variable}, or {Autoload.variable}';
+  item.documentation = new vscode.MarkdownString('Inserts `{}` and suggests the variables inside it, folder by folder (`{chapter.` lists `chapter`\'s variables), then the autoloads\' variables.');
+  item.insertText = new vscode.SnippetString(`{${typed.replace(/[$}\\]/g, '\\$&')}$0}`);
+  item.filterText = typed || '{';
+  item.range = range;
+  item.sortText = '0_{}';
+  item.command = { command: 'editor.action.triggerSuggest', title: 'Suggest variables' };
+  return item;
+}
+
+/**
  * Suggestions on a `set` line before its operator (see Dialogic's set
- * event: `set {variable} <operator> value`): the variable to set, then
- * the operators `=`, `+=`, `-=`, `*=`, `/=`.
+ * event: `set {variable} <operator> value`): `{}` and the autoloads
+ * (inserted as `{Autoload.`) for the variable to set, then the operators
+ * `=`, `+=`, `-=`, `*=`, `/=`.
  *
  * @param {string} beforeCursor
  * @param {vscode.Position} position
- * @returns {vscode.CompletionItem[] | null} null if this isn't that part of a set line
+ * @returns {vscode.CompletionItem[] | null} null if not a set target
  */
 function createSetTargetSuggestions(beforeCursor, position) {
   const setMatch = beforeCursor.match(/^\s*set\s+(.*)$/);
   if (!setMatch || isGlobalScriptExpressionLine(beforeCursor)) { return null; }
   const rest = setMatch[1];
-  const targetMatch = rest.match(/^([A-Za-z_][A-Za-z0-9_.]*)?$/);
+  const targetMatch = rest.match(/^([A-Za-z_][A-Za-z0-9_]*)?$/);
   if (targetMatch) {
+    // Only `{}` and the autoloads - the variables themselves come once
+    // inside the braces, folder by folder, instead of all at once here.
     const typed = targetMatch[1] || '';
-    return createVariableReferenceItems(typed, new vscode.Range(position.line, position.character - typed.length, position.line, position.character));
+    const range = new vscode.Range(position.line, position.character - typed.length, position.line, position.character);
+    const items = [createVariableBracesItem(typed, range)];
+    for (const name of cachedAutoloadSymbols.keys()) {
+      if (!name.toLowerCase().startsWith(typed.toLowerCase())) { continue; }
+      // A set target is always a {variable}: {Autoload.variable}.
+      const item = createGlobalNameCompletion(name);
+      item.insertText = new vscode.SnippetString(`{${name}.$0}`);
+      item.filterText = name;
+      item.range = range;
+      items.push(item);
+    }
+    return items;
   }
   if (/^\{[^}]*\}\s+$/.test(rest)) {
     return SET_OPERATORS.map(([operator, doc], index) => {
@@ -3792,8 +3895,10 @@ function createGlobalScriptSuggestions(beforeCursor, triggerCharacter) {
     }
   }
   if (isDo) { return items; }
+  // One `{}` rather than every variable: inside the braces, the variables
+  // are suggested folder by folder.
   const cursor = beforeCursor.length;
-  items.push(...createVariableReferenceItems(typedName, new vscode.Range(0, cursor - typedName.length, 0, cursor)));
+  items.push(createVariableBracesItem(typedName, new vscode.Range(0, cursor - typedName.length, 0, cursor)));
   if (isSet && expression.trim() === '') { items.push(...createSetValueItems(beforeCursor)); }
   for (const [keyword, doc] of [['not', 'negates the condition after it'], ['true', 'bool'], ['false', 'bool']]) {
     if (keyword.startsWith(prefix) && (keyword !== 'not' || !isSet)) {
@@ -3911,41 +4016,19 @@ function createClosingTagSuggestions(textBeforeTag, prefix, line, position) {
  */
 function findUnclosedBaliseDiagnostics(document) {
   const diagnostics = [];
-  // `[name]`, or `[name=value]` / `[name key=value ...]` (group 2 set).
-  const openTagPattern = /\[([A-Za-z_][A-Za-z0-9_]*)([=\s][^\]]*)?\]/g;
-
   for (let line = 0; line < document.lineCount; line++) {
     const text = document.lineAt(line).text;
     if (!isPlayerFacingTextLine(text)) {
       continue;
     }
-
-    openTagPattern.lastIndex = 0;
-    let match;
-    while ((match = openTagPattern.exec(text)) !== null) {
-      const tagName = match[1];
-      if (RESERVED_BRACKET_NAMES.has(tagName) || SELF_CLOSING_BBCODE_NAMES.has(tagName) || TEXT_EFFECT_NAMES.has(tagName)) {
-        continue; // a DTL command, a Dialogic text effect ([aa], [n]...) or a BBCode tag like [br] - none has a closer
-      }
-      // With parameters, only real Godot BBCode tags need a closer - Dialogic's
-      // own text effects ([pause=1.5], [speed=2], [portrait=happy]...) don't.
-      if (match[2] !== undefined && !DTL_BBCODES.some(entry => entry.name === tagName)) {
-        continue;
-      }
-
-      const closingTag = `[/${tagName}]`;
-      if (text.includes(closingTag)) {
-        continue; // properly closed
-      }
-
-      const range = new vscode.Range(line, 0, line, text.length);
+    // One whole-line warning per line is enough, even if several tags are broken.
+    const tagName = findUnclosedTag(text);
+    if (tagName) {
       pushDiagnostic(diagnostics, 'unclosedBBCode',
-        range,
-        `"[${tagName}]" has no matching "${closingTag}" on this line - the balise is unclosed.`);
-      break; // one whole-line warning per line is enough, even if several tags are broken
+        new vscode.Range(line, 0, line, text.length),
+        `"[${tagName}]" has no matching "[/${tagName}]" on this line - the balise is unclosed.`);
     }
   }
-
   return diagnostics;
 }
 
@@ -3967,6 +4050,10 @@ const DIAGNOSTIC_DEFAULT_LEVELS = {
   missingTranslation: 'hint',
   dchDefaultPortrait: 'error',
   dchMissingScene: 'error',
+  unreachableCode: 'hint',
+  unreachableLabel: 'warning',
+  unusedCharacter: 'hint',
+  unusedPortrait: 'hint',
 };
 
 /** @type {Record<string, vscode.DiagnosticSeverity>} */
@@ -3987,15 +4074,17 @@ const DIAGNOSTIC_SEVERITY_BY_LEVEL = {
  * @param {string} check - a key of DIAGNOSTIC_DEFAULT_LEVELS
  * @param {vscode.Range} range
  * @param {string} message
+ * @returns {vscode.Diagnostic | undefined} the diagnostic added, if the check isn't "off"
  */
 function pushDiagnostic(diagnostics, check, range, message) {
   const level = vscode.workspace.getConfiguration('dtlReader').get(`diagnostics.${check}`, DIAGNOSTIC_DEFAULT_LEVELS[check]);
   const severity = DIAGNOSTIC_SEVERITY_BY_LEVEL[level];
-  if (severity === undefined) { return; } // "off"
+  if (severity === undefined) { return undefined; } // "off"
   const diagnostic = new vscode.Diagnostic(range, message, severity);
   diagnostic.source = 'DTL Reader';
   diagnostic.code = check;
   diagnostics.push(diagnostic);
+  return diagnostic;
 }
 
 /**
@@ -4140,7 +4229,7 @@ function refreshAllDiagnostics() {
  */
 function updateDiagnostics(document) {
   if (document.languageId === 'dch') {
-    diagnosticCollection.set(document.uri, findDchDiagnostics(document));
+    diagnosticCollection.set(document.uri, [...findDchDiagnostics(document), ...findUnusedCharacterDiagnostics(document)]);
     return;
   }
   if (document.languageId !== 'dtl') {
@@ -4152,7 +4241,8 @@ function updateDiagnostics(document) {
     ...findUnclosedBaliseDiagnostics(document),
     ...findUnknownCharacterDiagnostics(document),
     ...findUnknownVariableDiagnostics(document),
-    ...findMissingTranslationDiagnostics(document)
+    ...findMissingTranslationDiagnostics(document),
+    ...findUnreachableDiagnostics(document)
   ];
 
   diagnosticCollection.set(document.uri, diagnostics);
@@ -6998,6 +7088,1621 @@ function completionResourcePaths() {
 }
 
 // =============================================================================
+// CUSTOM EVENTS
+// =============================================================================
+// Dialogic events the project adds itself: scripts extending DialogicEvent
+// in Dialogic's extensions folder (project setting `dialogic/extensions_folder`,
+// `res://addons/dialogic_additions/` by default). A shortcode event -
+// `get_shortcode()` returning its name and `get_shortcode_parameters()` its
+// parameters - is written `[name param=value]` in a timeline, like the
+// built-in bracket events. Each one found is added to DTL_ENTRIES (and its
+// values to DTL_ATTRIBUTE_VALUE_SUGGESTIONS), so completion, parameters,
+// values and hover treat it exactly like a built-in event.
+
+/** Names of the custom events currently in DTL_ENTRIES. @type {string[]} */
+let customEventNames = [];
+
+/**
+ * Parse a custom event script into a DTL_ENTRIES entry (plus its parameter
+ * values), from what Dialogic reads: `event_name`, `event_description`,
+ * `get_shortcode()` and `get_shortcode_parameters()` - each parameter
+ * documented by the `##` comment of the property it sets, with its type
+ * and default.
+ *
+ * @param {string} text - the .gd file
+ * @param {string} resPath - where it is, shown in the documentation
+ * @returns {{entry: object, values: Record<string, string[]>} | null} null if it isn't a shortcode event
+ */
+function parseCustomEventScript(text, resPath) {
+  if (!/^\s*extends\s+DialogicEvent\b/m.test(text)) { return null; }
+  const shortcode = (text.match(/func\s+get_shortcode\s*\([^)]*\)[^:\n]*:\s*(?:#[^\n]*)?\n\s*return\s+["']([A-Za-z_][A-Za-z0-9_]*)["']/) || [])[1];
+  if (!shortcode) { return null; }
+  const eventName = (text.match(/\bevent_name\s*=\s*["']([^"'\n]*)["']/) || [])[1] || shortcode;
+  const description = (text.match(/\bevent_description\s*=\s*["']([^"'\n]*)["']/) || [])[1] || '';
+  const symbols = parseGdScript(text);
+  const variables = {};
+  const values = {};
+  const header = text.match(/func\s+get_shortcode_parameters\s*\([^)]*\)[^:\n]*:/);
+  const openIndex = header ? text.indexOf('{', header.index + header[0].length) : -1;
+  const body = openIndex === -1 ? null : extractBalancedBraces(text, openIndex);
+  for (const { key, body: parameter } of body ? extractTopLevelDictEntries(body) : []) {
+    const property = (parameter.match(/["']property["']\s*:\s*["']([^"']+)["']/) || [])[1] || key;
+    const defaultValue = ((parameter.match(/["']default["']\s*:\s*([^,}\n]+)/) || [])[1] || '').trim();
+    const info = symbols.variables.get(property);
+    // A `### Section` title above the first property isn't its documentation.
+    const doc = info && info.doc ? info.doc.split('\n').filter(line => !line.startsWith('#')).join(' ').trim() : '';
+    const type = info && info.type ? info.type : '';
+    const details = [type && `\`${type}\``, defaultValue && `default \`${defaultValue}\``].filter(Boolean).join(', ');
+    variables[key] = `${doc || `Sets \`${property}\`.`}${details ? ` (${details})` : ''}`;
+    const suggested = [...parameter.matchAll(/["']value["']\s*:\s*([^,}\n]+)/g)].map(match => match[1].trim().replace(/^["']|["']$/g, ''));
+    if (suggested.length > 0) { values[key] = suggested; }
+    else if (type === 'bool' || /^(?:true|false)$/.test(defaultValue) || (info && /^(?:true|false)$/.test(info.defaultValue || ''))) { values[key] = ['true', 'false']; }
+  }
+  const firstParameter = Object.keys(variables)[0];
+  return {
+    entry: {
+      name: shortcode,
+      type: 'bracket',
+      syntax: `[${shortcode} ...]`,
+      description: `${eventName !== shortcode ? `${eventName}: ` : ''}${description || 'A custom Dialogic event.'}\n\n_Custom event, from \`${resPath}\`._`,
+      example: firstParameter ? `[${shortcode} ${firstParameter}=${values[firstParameter] ? values[firstParameter][0] : '""'}]` : `[${shortcode}]`,
+      variables,
+      custom: true,
+    },
+    values,
+  };
+}
+
+/**
+ * Re-read the custom events of the project's Dialogic extensions folder
+ * into DTL_ENTRIES, replacing the previous ones. A built-in event of the
+ * same name wins.
+ *
+ * @param {string} dialogicSection - project.godot's [dialogic] section
+ */
+async function refreshCustomEvents(dialogicSection) {
+  for (const name of customEventNames) {
+    const index = DTL_ENTRIES.findIndex(entry => entry.custom && entry.name === name);
+    if (index !== -1) { DTL_ENTRIES.splice(index, 1); }
+    delete DTL_ATTRIBUTE_VALUE_SUGGESTIONS[name];
+  }
+  customEventNames = [];
+  if (!projectRootUri) { return; }
+  const folderMatch = dialogicSection.match(/(?:^|\n)extensions_folder\s*=\s*"([^"]*)"/);
+  const folder = (folderMatch ? folderMatch[1] : 'res://addons/dialogic_additions/').replace(/\/?$/, '/');
+  for (const resPath of cachedResourcePaths) {
+    if (!resPath.startsWith(folder) || !resPath.toLowerCase().endsWith('.gd')) { continue; }
+    let parsed;
+    try { parsed = parseCustomEventScript(Buffer.from(await vscode.workspace.fs.readFile(resolveResourcePath(resPath))).toString('utf8'), resPath); } catch (error) { continue; }
+    if (!parsed || DTL_ENTRIES.some(entry => entry.name === parsed.entry.name)) { continue; }
+    DTL_ENTRIES.push(parsed.entry);
+    if (Object.keys(parsed.values).length > 0) { DTL_ATTRIBUTE_VALUE_SUGGESTIONS[parsed.entry.name] = parsed.values; }
+    customEventNames.push(parsed.entry.name);
+  }
+}
+
+/**
+ * Re-read every string literal of the project's own scripts into
+ * cachedScriptStrings (Dialogic's own addon is left out).
+ */
+async function refreshScriptStrings() {
+  const strings = new Set();
+  for (const resPath of cachedResourcePaths) {
+    if (!resPath.toLowerCase().endsWith('.gd') || resPath.startsWith('res://addons/dialogic/')) { continue; }
+    try {
+      const text = Buffer.from(await vscode.workspace.fs.readFile(resolveResourcePath(resPath))).toString('utf8');
+      for (const match of text.matchAll(/"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'/g)) { strings.add(match[1] !== undefined ? match[1] : match[2]); }
+    } catch (error) {
+      // unreadable script - skip it
+    }
+  }
+  cachedScriptStrings = strings;
+}
+
+// =============================================================================
+// UNREACHABLE EVENTS AND LABELS
+// =============================================================================
+// Dialogic runs a timeline from top to bottom; labels are only markers that
+// the flow runs through. So after a top-level `[end_timeline]`, `jump` or
+// `return`, the events that follow never run - until a label, which a jump
+// may lead to. A label that nothing jumps to (in any timeline), that no
+// script starts the timeline at, and that the flow can't run into, never
+// runs either.
+
+/**
+ * The labels of a timeline that something may jump to: the jumps of every
+ * timeline (`jump label` in its own, `jump Timeline/label` anywhere), plus
+ * every string a script names. Null when a jump's target is computed
+ * (`jump {variable}`), since it could then be any label.
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {Set<string> | null}
+ */
+function collectJumpedLabels(document) {
+  const identifier = findTimelineIdentifier(document);
+  const labels = new Set(cachedScriptStrings);
+  const timelines = currentTimelineLines();
+  if (!identifier) { timelines.set(null, documentLines(document)); } // an unregistered timeline only counts its own jumps
+  for (const [timeline, lines] of timelines) {
+    const isThis = timeline === identifier;
+    for (const text of lines) {
+      const jump = parseJumpLine(text);
+      if (!jump || !jump.label) { continue; }
+      if (jump.target.includes('{')) {
+        const targetsThis = jump.timeline === null ? isThis : (jump.timeline.includes('{') || jump.timeline === identifier);
+        if (targetsThis) { return null; }
+        continue;
+      }
+      if (jump.timeline === null ? isThis : jump.timeline === identifier) { labels.add(jump.label); }
+    }
+  }
+  return labels;
+}
+
+/**
+ * Report events that never run (faded) and labels nothing leads to.
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {vscode.Diagnostic[]}
+ */
+function findUnreachableDiagnostics(document) {
+  const diagnostics = [];
+  let jumped;
+  const isJumpedTo = name => {
+    if (jumped === undefined) { jumped = collectJumpedLabels(document); }
+    return jumped === null || jumped.has(name);
+  };
+  let reachable = true;
+  let endedBy = '';
+  let deadStart = -1;
+  let deadEnd = -1;
+  const closeDeadRegion = () => {
+    if (deadStart === -1) { return; }
+    const diagnostic = pushDiagnostic(diagnostics, 'unreachableCode',
+      new vscode.Range(deadStart, 0, deadEnd, document.lineAt(deadEnd).text.length),
+      `This never runs: the timeline stops at the "${endedBy}" above, and no label leads here.`);
+    if (diagnostic) { diagnostic.tags = [vscode.DiagnosticTag.Unnecessary]; }
+    deadStart = -1;
+  };
+  for (let line = 0; line < document.lineCount; line++) {
+    const text = document.lineAt(line).text;
+    const trimmed = text.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) { continue; }
+    const label = parseLabelLine(text);
+    if (label && !reachable) {
+      if (isJumpedTo(label.name)) {
+        closeDeadRegion();
+        reachable = true;
+        continue;
+      }
+      pushDiagnostic(diagnostics, 'unreachableLabel',
+        new vscode.Range(line, label.nameStart, line, label.nameStart + label.name.length),
+        `Nothing leads to "label ${label.name}": no jump to it, no script naming it, and the timeline stops at the "${endedBy}" above - it never runs.`);
+    }
+    if (!reachable) {
+      if (deadStart === -1) { deadStart = line; }
+      deadEnd = line;
+      continue;
+    }
+    const stop = /^(\[end_timeline\]|jump\b|return\b)/.exec(text);
+    if (stop) {
+      reachable = false;
+      endedBy = stop[1] === 'jump' ? trimmed.split('#id:')[0].trim() : stop[1];
+    }
+  }
+  closeDeadRegion();
+  return diagnostics;
+}
+
+// =============================================================================
+// UNUSED CHARACTERS AND PORTRAITS
+// =============================================================================
+
+/**
+ * Which characters the project's timelines use, and with which portraits:
+ * `join`/`update`/`leave`, speakers, `(mood)` tags and `[portrait=...]`.
+ *
+ * @returns {Map<string, Set<string>>} character -> moods used
+ */
+function collectCharacterUsage() {
+  const usage = new Map();
+  const use = (name, mood) => {
+    if (!usage.has(name)) { usage.set(name, new Set()); }
+    if (mood) { usage.get(name).add(mood); }
+  };
+  const linePattern = new RegExp(`^\\s*(?:(?:join|update|leave)\\s+)?(${CHARACTER_NAME_SOURCE})\\s*(?:\\(([\\p{L}_][\\p{L}0-9_]*)\\))?`, 'u');
+  for (const lines of currentTimelineLines().values()) {
+    for (const text of lines) {
+      const isCommand = /^\s*(?:join|update|leave)\s/.test(text);
+      const speaker = findLineSpeaker(text);
+      if (!isCommand && !speaker) { continue; }
+      const match = text.match(linePattern);
+      if (!match) { continue; }
+      const name = stripCharacterNameQuotes(match[1]);
+      use(name, match[2]);
+      if (speaker) {
+        for (const portrait of text.matchAll(/\[portrait=([^\]\s]+)\]/g)) { use(name, portrait[1]); }
+      }
+    }
+  }
+  return usage;
+}
+
+/**
+ * In a .dch file: the character no timeline uses, and the portraits no
+ * timeline uses (faded) - except the default portrait, and names a script
+ * mentions. Only checked once the project's timelines are known.
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {vscode.Diagnostic[]}
+ */
+function findUnusedCharacterDiagnostics(document) {
+  const character = findCharacterForDocument(document);
+  if (!character || !declaredProjectData.timelines || cachedTimelineLines.size === 0) { return []; }
+  const diagnostics = [];
+  const text = document.getText();
+  const tokens = scanDch(text).keyTokens;
+  const usage = collectCharacterUsage();
+  const moods = usage.get(character);
+  if (!moods && !cachedScriptStrings.has(character)) {
+    const token = tokens.find(candidate => candidate.path.length === 0 && candidate.name === 'display_name') || tokens[0];
+    const range = token ? new vscode.Range(document.positionAt(token.start), document.positionAt(token.end)) : new vscode.Range(0, 0, 0, 1);
+    pushDiagnostic(diagnostics, 'unusedCharacter', range, `No timeline uses "${character}" (no join, update, leave or dialogue line).`);
+    return diagnostics; // every portrait is unused then - no need to say it for each
+  }
+  const portraitTokens = tokens.filter(token => token.path.length === 1 && token.path[0] === 'portraits');
+  // Without a default_portrait, a line without (mood) shows the first one.
+  const defaultPortrait = (text.match(/&?"default_portrait"\s*:\s*"([^"]+)"/) || [])[1] || (portraitTokens[0] && portraitTokens[0].name);
+  for (const token of portraitTokens) {
+    if (token.name === defaultPortrait || (moods && moods.has(token.name)) || cachedScriptStrings.has(token.name)) { continue; }
+    const diagnostic = pushDiagnostic(diagnostics, 'unusedPortrait',
+      new vscode.Range(document.positionAt(token.start), document.positionAt(token.end)),
+      `No timeline uses the portrait "${token.name}" of ${character} (as a (mood) or a [portrait=]).`);
+    if (diagnostic) { diagnostic.tags = [vscode.DiagnosticTag.Unnecessary]; }
+  }
+  return diagnostics;
+}
+
+// =============================================================================
+// BLOCK SNIPPETS
+// =============================================================================
+// Ready-made blocks, suggested with the events at the start of a line (so
+// never while writing dialogue): a choice, a condition, a loop, a small
+// scene, a question. Character placeholders offer the project's characters.
+
+/**
+ * @returns {vscode.CompletionItem[]}
+ */
+function createBlockSnippets() {
+  const names = completionCharacterNames();
+  const character = index => (names.length > 0
+    ? `\${${index}|${names.map(name => formatCharacterName(name).replace(/[,|$}\\]/g, '\\$&')).join(',')}|}`
+    : `\${${index}:Character}`);
+  const blocks = [
+    ['choice', 'Choice block', 'Two choices, each with what follows it.',
+      `- \${1:First choice}\n\t${character(2)}: \${3:...}\n- \${4:Second choice}\n\t$2: \${5:...}`],
+    ['if', 'Condition block (if / else)', 'Different events depending on a condition.',
+      'if {${1:variable}} == ${2:true}\n\t${3}\nelse\n\t${0}'],
+    ['if', 'Condition block (if / elif / else)', 'Three branches depending on conditions.',
+      'if {${1:variable}} == ${2:1}\n\t${3}\nelif {$1} == ${4:2}\n\t${5}\nelse\n\t${0}'],
+    ['loop', 'Loop (label + jump back)', 'Dialogic has no while: a loop is a label, and a condition jumping back to it.',
+      'set {${1:counter}} = 0\nlabel ${2:loop_start}\n${3}\nset {$1} += 1\nif {$1} < ${4:3}\n\tjump $2'],
+    ['scene', 'Scene (join, talk, leave)', 'A character comes in, says something and leaves.',
+      `join ${character(1)} \${2|left,center,right|}\n$1: \${3:Hello!}\nleave $1`],
+    ['text_input', 'Question (text input + condition)', 'Ask the player something, then react to the answer.',
+      '[text_input text="${1:What is your name?}" var="${2:player_name}"]\nif {$2} == "${3}"\n\t${0}'],
+  ];
+  return blocks.map(([keyword, label, doc, body]) => {
+    const item = new vscode.CompletionItem({ label: keyword, description: label }, vscode.CompletionItemKind.Snippet);
+    item.insertText = new vscode.SnippetString(body);
+    item.documentation = new vscode.MarkdownString(doc).appendCodeblock(body.replace(/\$\{\d+\|([^,|]*)[^}]*\}/g, '$1').replace(/\$\{\d+:([^}]*)\}/g, '$1').replace(/\$\{?\d+\}?/g, ''), 'dtl');
+    item.sortText = `2_${keyword}_${label}`;
+    return item;
+  });
+}
+
+// =============================================================================
+// PLAY IN GODOT
+// =============================================================================
+// Plays a timeline the way Dialogic's own "Play timeline" button does: it
+// writes the timeline in Dialogic's editor settings
+// (`user://dialogic/editor_settings.cfg`, section [DES]:
+// `current_timeline_path`, `play_from_index`), then runs Dialogic's test
+// scene, which starts that timeline.
+
+/** @type {vscode.OutputChannel | null} */
+let godotOutputChannel = null;
+
+/**
+ * The project's `user://` folder, as Godot computes it: `app_userdata/<name>`
+ * in Godot's data folder, or `<custom name>` directly in the OS data folder
+ * with `application/config/use_custom_user_dir`.
+ *
+ * @param {string} projectText - project.godot
+ * @returns {string | null}
+ */
+function godotUserDataDir(projectText) {
+  const os = require('os');
+  const path = require('path');
+  const application = (projectText.match(/(?:^|\n)\[application\]([\s\S]*?)(?:\n\[|$)/) || [])[1] || '';
+  const setting = key => ((application.match(new RegExp(`(?:^|\\n)config/${key}\\s*=\\s*(.+)`)) || [])[1] || '').trim().replace(/^"|"$/g, '');
+  const safe = name => name.replace(/[:/\\?*"|%<>]/g, '_');
+  const name = safe(setting('name') || '[unnamed project]');
+  const custom = setting('use_custom_user_dir') === 'true' ? safe(setting('custom_user_dir_name')) : '';
+  let dataDir;
+  if (process.platform === 'win32') { dataDir = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'); }
+  else if (process.platform === 'darwin') { dataDir = path.join(os.homedir(), 'Library', 'Application Support'); }
+  else { dataDir = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'); }
+  if (custom) { return path.join(dataDir, custom); }
+  return path.join(dataDir, process.platform === 'win32' || process.platform === 'darwin' ? 'Godot' : 'godot', 'app_userdata', name);
+}
+
+/**
+ * Set keys of one section of a Godot ConfigFile text, keeping everything
+ * else as it is.
+ *
+ * @param {string} text - the file ('' for a new one)
+ * @param {string} section
+ * @param {Record<string, string>} values - key -> Godot literal
+ * @returns {string}
+ */
+function setConfigFileValues(text, section, values) {
+  const lines = text.split(/\r?\n/);
+  let start = lines.findIndex(line => line.trim() === `[${section}]`);
+  if (start === -1) {
+    while (lines.length > 0 && lines[lines.length - 1].trim() === '') { lines.pop(); }
+    if (lines.length > 0) { lines.push(''); }
+    lines.push(`[${section}]`, '');
+    start = lines.length - 2;
+  }
+  let end = lines.findIndex((line, index) => index > start && /^\[.*\]\s*$/.test(line.trim()));
+  if (end === -1) { end = lines.length; }
+  for (const [key, value] of Object.entries(values)) {
+    const index = lines.findIndex((line, i) => i > start && i < end && line.startsWith(`${key}=`));
+    if (index !== -1) { lines[index] = `${key}=${value}`; continue; }
+    // After the section's last key - keeping the blank line Godot writes
+    // under the section title.
+    let insertAt = end;
+    while (insertAt > start + 2 && lines[insertAt - 1].trim() === '') { insertAt--; }
+    if (insertAt === start + 1) { lines.splice(insertAt++, 0, ''); end++; }
+    lines.splice(insertAt, 0, `${key}=${value}`);
+    end++;
+  }
+  return lines.join('\n').replace(/\n*$/, '\n');
+}
+
+/**
+ * The Godot executable: `dtlReader.godotPath`, else the godot-tools
+ * extension's `godotTools.editorPath.godot4`, else `godot` on the PATH.
+ *
+ * @returns {string}
+ */
+function findGodotExecutable() {
+  const own = vscode.workspace.getConfiguration('dtlReader').get('godotPath', '');
+  if (own) { return own; }
+  const godotTools = vscode.workspace.getConfiguration('godotTools').get('editorPath.godot4', '');
+  return godotTools || 'godot';
+}
+
+/**
+ * DTL: Play Timeline in Godot - save the timeline, point Dialogic's test
+ * scene at it, and run the project's Godot on that scene. Godot's output
+ * goes to the "DTL Reader: Godot" output channel.
+ *
+ * @param {vscode.Uri} [uri] - from the editor title button; else the active editor
+ */
+async function playTimelineCommand(uri) {
+  const target = uri || (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri);
+  if (!target) { return; }
+  const document = await vscode.workspace.openTextDocument(target);
+  if (document.languageId !== 'dtl') { vscode.window.showErrorMessage('Only a timeline (.dtl) can be played.'); return; }
+  if (!projectRootUri) { vscode.window.showErrorMessage('Playing a timeline needs its Godot project: open the folder containing project.godot.'); return; }
+  const resPath = toResPath(document.uri);
+  if (!resPath) { vscode.window.showErrorMessage('This timeline is not inside the Godot project.'); return; }
+  const scene = cachedResourcePaths.find(candidate => candidate.endsWith('/Editor/TimelineEditor/test_timeline_scene.tscn'));
+  if (!scene) { vscode.window.showErrorMessage('Dialogic\'s test scene (addons/dialogic/Editor/TimelineEditor/test_timeline_scene.tscn) was not found - is Dialogic installed in this project?'); return; }
+  if (document.isDirty) { await document.save(); }
+
+  const fs = require('fs');
+  const path = require('path');
+  const projectText = Buffer.from(await vscode.workspace.fs.readFile(projectGodotUri())).toString('utf8');
+  const userDir = godotUserDataDir(projectText);
+  const settingsFile = path.join(userDir, 'dialogic', 'editor_settings.cfg');
+  try {
+    fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
+    const current = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile, 'utf8') : '';
+    fs.writeFileSync(settingsFile, setConfigFileValues(current, 'DES', { current_timeline_path: godotString(resPath), play_from_index: '-1' }));
+  } catch (error) {
+    vscode.window.showErrorMessage(`Could not write Dialogic's editor settings (${settingsFile}): ${error.message}`);
+    return;
+  }
+
+  if (!godotOutputChannel) { godotOutputChannel = vscode.window.createOutputChannel('DTL Reader: Godot'); }
+  const executable = findGodotExecutable();
+  const args = ['--path', projectRootUri.fsPath, scene];
+  godotOutputChannel.appendLine(`> ${executable} ${args.join(' ')}   (${resPath})`);
+  const child = require('child_process').spawn(executable, args, { cwd: projectRootUri.fsPath });
+  child.stdout.on('data', data => godotOutputChannel.append(data.toString()));
+  child.stderr.on('data', data => godotOutputChannel.append(data.toString()));
+  child.on('exit', code => godotOutputChannel.appendLine(`> Godot exited (${code})`));
+  child.on('error', async error => {
+    godotOutputChannel.appendLine(`> ${error.message}`);
+    const choice = await vscode.window.showErrorMessage(`Could not start Godot ("${executable}"). Set the path to your Godot 4 executable.`, 'Set Godot path');
+    if (choice) { vscode.commands.executeCommand('workbench.action.openSettings', 'dtlReader.godotPath'); }
+  });
+}
+
+// =============================================================================
+// SPELLING SUGGESTIONS
+// =============================================================================
+
+/**
+ * Edit distance between two names: one insertion, deletion, substitution
+ * or swap of two neighbouring letters per step ("strat" is one step from
+ * "start"), ignoring case - so a name differing only by its case is at
+ * distance 0.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {number}
+ */
+function editDistance(a, b) {
+  a = a.toLowerCase();
+  b = b.toLowerCase();
+  if (a === b) { return 0; }
+  let beforePrevious = [];
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j++) {
+      current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        current[j] = Math.min(current[j], beforePrevious[j - 2] + 1);
+      }
+    }
+    beforePrevious = previous;
+    previous = current;
+  }
+  return previous[b.length];
+}
+
+/**
+ * The known names closest to a misspelled one, best first - only those
+ * close enough to be a plausible typo: at most one edit per three letters
+ * (at least one), case differences being free.
+ *
+ * @param {string} name - what was typed
+ * @param {Iterable<string>} candidates
+ * @param {number} [max]
+ * @returns {string[]}
+ */
+function findSimilarNames(name, candidates, max = 3) {
+  const limit = Math.max(1, Math.floor(name.length / 3));
+  return [...new Set(candidates)]
+    .filter(candidate => candidate !== name)
+    .map(candidate => ({ candidate, distance: editDistance(name, candidate) }))
+    .filter(entry => entry.distance <= limit)
+    .sort((a, b) => a.distance - b.distance || a.candidate.localeCompare(b.candidate))
+    .slice(0, max)
+    .map(entry => entry.candidate);
+}
+
+/**
+ * A character name as it must be written in a timeline: quoted when it
+ * contains spaces or symbols (same rule as createCharacterCompletion).
+ *
+ * @param {string} name
+ * @returns {string}
+ */
+function formatCharacterName(name) {
+  if (!/[^\p{L}0-9_]/u.test(name)) { return name; }
+  const quote = name.includes('"') ? "'" : '"';
+  return `${quote}${name}${quote}`;
+}
+
+// =============================================================================
+// QUICK FIXES
+// =============================================================================
+// Lightbulb fixes (Ctrl+.) for the problems DTL Reader reports: the closest
+// existing names for a typo, creating what's missing (a label, a portrait),
+// and removing or closing what's wrong (a jump's #id, an unclosed BBCode
+// tag). Each fix re-reads the line its diagnostic points at rather than
+// storing data on the diagnostic, so it always matches the current text.
+
+/**
+ * @param {vscode.TextDocument} document
+ * @returns {string}
+ */
+function documentEol(document) {
+  return document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+}
+
+/**
+ * A quick fix replacing `range` with `text`.
+ *
+ * @param {string} title
+ * @param {vscode.Uri} uri
+ * @param {vscode.Range} range
+ * @param {string} text
+ * @param {vscode.Diagnostic} diagnostic
+ * @param {boolean} [isPreferred] - the fix applied by "Auto Fix" (Shift+Alt+.)
+ * @returns {vscode.CodeAction}
+ */
+function createReplaceFix(title, uri, range, text, diagnostic, isPreferred = false) {
+  const action = new vscode.CodeAction(title, vscode.CodeActionKind.QuickFix);
+  action.edit = new vscode.WorkspaceEdit();
+  action.edit.replace(uri, range, text);
+  action.diagnostics = [diagnostic];
+  action.isPreferred = isPreferred;
+  return action;
+}
+
+/**
+ * "Change to ..." fixes for a misspelled name: its closest candidates,
+ * replacing the diagnostic's range. Only the closest one is preferred,
+ * and only when it's the single suggestion.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Diagnostic} diagnostic
+ * @param {string} typed
+ * @param {Iterable<string>} candidates
+ * @param {(name: string) => string} [format] - how the name is written
+ * @returns {vscode.CodeAction[]}
+ */
+function createDidYouMeanFixes(document, diagnostic, typed, candidates, format = name => name) {
+  const names = findSimilarNames(typed, candidates);
+  return names.map(name => createReplaceFix(`Change to "${name}"`, document.uri, diagnostic.range, format(name), diagnostic, names.length === 1));
+}
+
+/**
+ * Where text appended to a document goes, and how it must start: after a
+ * blank line, whether or not the file ends with a newline.
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {{position: vscode.Position, prefix: string, firstLine: number}} firstLine: the first line of the appended text once inserted
+ */
+function appendPoint(document) {
+  const eol = documentEol(document);
+  const lastLine = document.lineAt(document.lineCount - 1);
+  const endsWithNewline = lastLine.text.trim() === '';
+  const previousBlank = endsWithNewline && (document.lineCount < 2 || document.lineAt(document.lineCount - 2).text.trim() === '');
+  if (!endsWithNewline) { return { position: lastLine.range.end, prefix: eol + eol, firstLine: lastLine.lineNumber + 2 }; }
+  if (previousBlank) { return { position: lastLine.range.end, prefix: '', firstLine: lastLine.lineNumber }; }
+  return { position: lastLine.range.end, prefix: eol, firstLine: lastLine.lineNumber + 1 };
+}
+
+/**
+ * Whether a timeline's last event already stops the flow (`[end_timeline]`,
+ * `jump`, `return`), so nothing written after it runs by falling through.
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {boolean}
+ */
+function timelineEndsFlow(document) {
+  for (let line = document.lineCount - 1; line >= 0; line--) {
+    const text = document.lineAt(line).text.trim();
+    if (text === '' || text.startsWith('#')) { continue; }
+    return /^(?:\[end_timeline\]|jump\b|return\b)/.test(text);
+  }
+  return true; // an empty timeline
+}
+
+/**
+ * "Create label X" for a jump to a missing label: appended at the end of
+ * the target timeline (this one, or the other timeline of `jump
+ * Other/label`). An `[end_timeline]` is added before it when the timeline
+ * didn't end its flow, so what gets written under the new label doesn't
+ * run for everyone reaching the end. The other timeline is opened on the
+ * new label.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Diagnostic} diagnostic
+ * @param {NonNullable<ReturnType<typeof parseJumpLine>>} jump
+ * @returns {Promise<vscode.CodeAction | null>}
+ */
+async function createMissingLabelFix(document, diagnostic, jump) {
+  if (validateLabelName(jump.label)) { return null; }
+  let target = document;
+  if (jump.timeline !== null) {
+    const resPath = cachedTimelinePaths.get(jump.timeline);
+    if (!resPath) { return null; }
+    try { target = await vscode.workspace.openTextDocument(resolveResourcePath(resPath)); } catch (error) { return null; }
+  }
+  const eol = documentEol(target);
+  const { position, prefix, firstLine } = appendPoint(target);
+  const endTimeline = timelineEndsFlow(target) ? '' : `[end_timeline]${eol}${eol}`;
+  const labelLine = firstLine + (endTimeline ? 2 : 0);
+  const action = new vscode.CodeAction(
+    jump.timeline === null ? `Create "label ${jump.label}" at the end of this timeline` : `Create "label ${jump.label}" at the end of ${jump.timeline}`,
+    vscode.CodeActionKind.QuickFix);
+  action.edit = new vscode.WorkspaceEdit();
+  action.edit.insert(target.uri, position, `${prefix}${endTimeline}label ${jump.label}${eol}`);
+  action.diagnostics = [diagnostic];
+  if (jump.timeline !== null) {
+    const labelEnd = new vscode.Position(labelLine, `label ${jump.label}`.length);
+    action.command = { command: 'vscode.open', title: 'Open the label', arguments: [target.uri, { selection: new vscode.Range(labelEnd, labelEnd) }] };
+  }
+  return action;
+}
+
+/**
+ * Quick fixes for an unresolved jump: the closest labels (or timelines,
+ * when the timeline part is wrong), and creating the missing label.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Diagnostic} diagnostic
+ * @returns {Promise<vscode.CodeAction[]>}
+ */
+async function createUnresolvedJumpFixes(document, diagnostic) {
+  const jump = parseJumpLine(document.lineAt(diagnostic.range.start.line).text);
+  if (!jump) { return []; }
+  if (jump.timeline !== null && diagnostic.range.start.character < jump.labelStart) {
+    return createDidYouMeanFixes(document, diagnostic, jump.timeline, cachedTimelinePaths.keys());
+  }
+  const target = resolveJumpTarget(document, jump);
+  const fixes = target ? createDidYouMeanFixes(document, diagnostic, jump.label, target.labels.keys()) : [];
+  const create = await createMissingLabelFix(document, diagnostic, jump);
+  if (create) { fixes.push(create); }
+  return fixes;
+}
+
+/**
+ * "Remove the translation id" for a jump ending with `#id:...`.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Diagnostic} diagnostic
+ * @returns {vscode.CodeAction[]}
+ */
+function createJumpTranslationIdFixes(document, diagnostic) {
+  const line = diagnostic.range.start.line;
+  const text = document.lineAt(line).text;
+  const idStart = text.indexOf('#id:');
+  if (idStart === -1) { return []; }
+  const start = text.slice(0, idStart).trimEnd().length;
+  return [createReplaceFix('Remove the translation id', document.uri, new vscode.Range(line, start, line, text.length), '', diagnostic, true)];
+}
+
+/**
+ * The character a timeline line is about: its speaker, or the character
+ * of a join/update/leave.
+ *
+ * @param {string} text
+ * @returns {string | null}
+ */
+function findLineCharacter(text) {
+  const match = text.match(new RegExp(`^\\s*(?:(?:join|update|leave)\\s+)?(${CHARACTER_NAME_SOURCE})`, 'u'));
+  if (!match) { return null; }
+  const name = stripCharacterNameQuotes(match[1]);
+  return RESERVED_LINE_KEYWORDS.has(name) ? null : name;
+}
+
+/**
+ * Find a portrait's name in a .dch file, as the range of its key.
+ *
+ * @param {vscode.TextDocument} dchDocument
+ * @param {string} mood
+ * @returns {vscode.Range | null}
+ */
+function findDchPortraitRange(dchDocument, mood) {
+  const token = scanDch(dchDocument.getText()).keyTokens.find(candidate => candidate.path.length === 1 && candidate.path[0] === 'portraits' && candidate.name === mood);
+  return token ? new vscode.Range(dchDocument.positionAt(token.start), dchDocument.positionAt(token.end)) : null;
+}
+
+/**
+ * An edit adding a new image portrait to a .dch file's `portraits`, written
+ * the way Dialogic writes it (in the file's own `&"key"` or `"key"` style),
+ * and where its image path is to be typed once inserted.
+ *
+ * @param {vscode.TextDocument} dchDocument
+ * @param {string} mood
+ * @returns {{range: vscode.Range, text: string, imagePosition: vscode.Position} | null} null if the file has no `portraits`
+ */
+function createAddPortraitEdit(dchDocument, mood) {
+  const text = dchDocument.getText();
+  const header = text.match(/&?"portraits"\s*:\s*\{/);
+  if (!header) { return null; }
+  const openIndex = header.index + header[0].length - 1;
+  const body = extractBalancedBraces(text, openIndex);
+  if (body === null) { return null; }
+  const eol = documentEol(dchDocument);
+  const keyPrefix = /&"/.test(text) ? '&' : '';
+  const k = key => `${keyPrefix}"${key}"`;
+  const name = mood.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const portrait = [
+    `${keyPrefix}"${name}": {`,
+    `${k('export_overrides')}: {`,
+    `${k('image')}: "\\"res://\\""`,
+    '},',
+    `${k('mirror')}: false,`,
+    `${k('offset')}: Vector2(0, 0),`,
+    `${k('scale')}: 1.0,`,
+    `${k('scene')}: ""`,
+    '}',
+  ].join(eol);
+  const content = body.trimEnd();
+  const start = openIndex + 1 + (content ? content.length : 0);
+  const end = content ? start : openIndex + 1 + body.length;
+  const inserted = content ? `,${eol}${portrait}` : `${eol}${portrait}${eol}`;
+  // Where `res://` ends in the image line, in the edited file.
+  const before = (text.slice(0, start) + inserted.slice(0, inserted.indexOf('res://') + 'res://'.length)).split('\n');
+  const imagePosition = new vscode.Position(before.length - 1, before[before.length - 1].length);
+  return { range: new vscode.Range(dchDocument.positionAt(start), dchDocument.positionAt(end)), text: inserted, imagePosition };
+}
+
+/**
+ * Quick fixes for an unknown mood: the character's closest portraits, and
+ * adding the mood to their .dch file as a new image portrait (then opened
+ * on its image path).
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Diagnostic} diagnostic
+ * @returns {Promise<vscode.CodeAction[]>}
+ */
+async function createUnknownMoodFixes(document, diagnostic) {
+  const character = findLineCharacter(document.lineAt(diagnostic.range.start.line).text);
+  const moods = character && cachedCharacterMoods.get(character);
+  if (!moods) { return []; }
+  const mood = document.getText(diagnostic.range);
+  const fixes = createDidYouMeanFixes(document, diagnostic, mood, moods.keys());
+  const dchPath = cachedCharacterPaths.get(character);
+  if (!dchPath || !/^[\p{L}_][\p{L}0-9_]*$/u.test(mood)) { return fixes; }
+  let dchDocument;
+  try { dchDocument = await vscode.workspace.openTextDocument(resolveResourcePath(dchPath)); } catch (error) { return fixes; }
+  const edit = createAddPortraitEdit(dchDocument, mood);
+  if (!edit) { return fixes; }
+  const action = new vscode.CodeAction(`Add the portrait "${mood}" to ${character}`, vscode.CodeActionKind.QuickFix);
+  action.edit = new vscode.WorkspaceEdit();
+  action.edit.replace(dchDocument.uri, edit.range, edit.text);
+  action.diagnostics = [diagnostic];
+  action.command = { command: 'vscode.open', title: 'Open the portrait', arguments: [dchDocument.uri, { selection: new vscode.Range(edit.imagePosition, edit.imagePosition) }] };
+  fixes.push(action);
+  return fixes;
+}
+
+/**
+ * Every `{path}` a timeline can reference: Dialogic variables and the
+ * members of the loaded autoloads.
+ *
+ * @returns {string[]}
+ */
+function collectVariableReferencePaths() {
+  const paths = collectVariableLeaves().map(leaf => leaf.path);
+  for (const [globalName, symbols] of cachedAutoloadSymbols) {
+    for (const members of [symbols.variables, symbols.constants, symbols.enums]) {
+      for (const name of members.keys()) { paths.push(`${globalName}.${name}`); }
+    }
+  }
+  return paths;
+}
+
+/**
+ * The first BBCode tag of a line that has no closing tag on it, if any -
+ * the same rule as findUnclosedBaliseDiagnostics.
+ *
+ * @param {string} text
+ * @returns {string | null} the tag name
+ */
+function findUnclosedTag(text) {
+  // `[name]`, or `[name=value]` / `[name key=value ...]` (group 2 set).
+  const openTagPattern = /\[([A-Za-z_][A-Za-z0-9_]*)([=\s][^\]]*)?\]/g;
+  let match;
+  while ((match = openTagPattern.exec(text)) !== null) {
+    const tagName = match[1];
+    if (RESERVED_BRACKET_NAMES.has(tagName) || SELF_CLOSING_BBCODE_NAMES.has(tagName) || TEXT_EFFECT_NAMES.has(tagName)) {
+      continue; // a DTL command, a Dialogic text effect ([aa], [n]...) or a BBCode tag like [br] - none has a closer
+    }
+    // With parameters, only real Godot BBCode tags need a closer - Dialogic's
+    // own text effects ([pause=1.5], [speed=2], [portrait=happy]...) don't.
+    if (match[2] !== undefined && !DTL_BBCODES.some(entry => entry.name === tagName)) {
+      continue;
+    }
+    if (!text.includes(`[/${tagName}]`)) { return tagName; }
+  }
+  return null;
+}
+
+/**
+ * "Close [tag]" for an unclosed BBCode tag: its closing tag at the end of
+ * the line's text - before a translation id, and before a choice's `|`
+ * condition.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Diagnostic} diagnostic
+ * @returns {vscode.CodeAction[]}
+ */
+function createUnclosedTagFixes(document, diagnostic) {
+  const line = diagnostic.range.start.line;
+  const text = document.lineAt(line).text;
+  const tagName = findUnclosedTag(text);
+  if (!tagName) { return []; }
+  let end = text.indexOf('#id:') === -1 ? text.length : text.indexOf('#id:');
+  if (/^\s*-\s/.test(text) && text.lastIndexOf('|', end) !== -1) { end = text.lastIndexOf('|', end); }
+  end = text.slice(0, end).trimEnd().length;
+  return [createReplaceFix(`Close [${tagName}] at the end of the line`, document.uri, new vscode.Range(line, end, line, end), `[/${tagName}]`, diagnostic, true)];
+}
+
+// -----------------------------------------------------------------------------
+// Adding what's missing to project.godot
+// -----------------------------------------------------------------------------
+// An unknown character or variable may be a typo - or something new that
+// the project doesn't have yet. These fixes write it where Dialogic keeps
+// it, in project.godot's [dialogic] section: `variables` (the Dialogic
+// variables, a nested dictionary of folders) and `directories/dch_directory`
+// (character identifier -> .dch file, the identifier being the file name).
+// The changed files are saved right away, so the project is re-read and
+// the problem goes away.
+
+/**
+ * A string literal for a Godot dictionary key or value.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function godotString(text) {
+  return `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * The index just past a string literal starting at `start` (a `"`).
+ *
+ * @param {string} text
+ * @param {number} start
+ * @returns {number}
+ */
+function skipGodotString(text, start) {
+  let end = start + 1;
+  while (end < text.length && text[end] !== '"') { end += text[end] === '\\' ? 2 : 1; }
+  return end + 1;
+}
+
+/**
+ * Walk the dictionary opening at `openIndex` (a `{`): where each of its own
+ * keys' values starts, and where it closes. Strings are skipped whole, so
+ * braces inside them don't count.
+ *
+ * @param {string} text
+ * @param {number} openIndex
+ * @returns {{entries: Map<string, number>, closeIndex: number} | null} null if it never closes
+ */
+function scanGodotDict(text, openIndex) {
+  const entries = new Map();
+  let depth = 0;
+  for (let i = openIndex; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      const end = skipGodotString(text, i);
+      const colon = depth === 1 ? text.slice(end).match(/^\s*:\s*/) : null;
+      if (colon) {
+        let key = text.slice(i + 1, end - 1);
+        try { key = JSON.parse(text.slice(i, end)); } catch (error) { /* an escape JSON doesn't know - keep it raw */ }
+        entries.set(key, end + colon[0].length);
+      }
+      i = end - 1;
+    } else if (ch === '{' || ch === '[') {
+      depth++;
+    } else if (ch === '}' || ch === ']') {
+      depth--;
+      if (depth === 0) { return { entries, closeIndex: i }; }
+    }
+  }
+  return null;
+}
+
+/**
+ * The text of an edit adding one `key: value` entry at the end of the
+ * dictionary opening at `openIndex`, one entry per line like Godot writes
+ * them (a trailing comma already there is kept).
+ *
+ * @param {string} text
+ * @param {number} openIndex
+ * @param {string} entry - `"key": value`
+ * @param {string} eol
+ * @returns {{start: number, end: number, text: string} | null}
+ */
+function appendGodotDictEntry(text, openIndex, entry, eol) {
+  const dict = scanGodotDict(text, openIndex);
+  if (!dict) { return null; }
+  const content = text.slice(openIndex + 1, dict.closeIndex).trimEnd();
+  if (content.trim() === '') { return { start: openIndex + 1, end: dict.closeIndex, text: `${eol}${entry}${eol}` }; }
+  const start = openIndex + 1 + content.length;
+  return { start, end: start, text: `${content.endsWith(',') ? '' : ','}${eol}${entry}` };
+}
+
+/**
+ * Where a `[dialogic]` setting's dictionary opens in project.godot, e.g.
+ * `variables` or `directories/dch_directory`.
+ *
+ * @param {string} text - project.godot
+ * @param {string} setting
+ * @returns {number} the index of its `{`, or -1
+ */
+function findDialogicSettingDict(text, setting) {
+  const section = /(?:^|\n)\[dialogic\][^\n]*\n/.exec(text);
+  if (!section) { return -1; }
+  const sectionStart = section.index + section[0].length;
+  const nextSection = text.slice(sectionStart).search(/\n\[/);
+  const sectionEnd = nextSection === -1 ? text.length : sectionStart + nextSection;
+  const escaped = setting.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+  const header = new RegExp(`(?:^|\\n)${escaped}\\s*=\\s*\\{`).exec(text.slice(sectionStart, sectionEnd));
+  return header ? sectionStart + header.index + header[0].length - 1 : -1;
+}
+
+/**
+ * The types a Dialogic variable can have (those of Dialogic's variable
+ * editor), each with the default value a new variable gets.
+ *
+ * @type {{type: string, label: string, value: string}[]}
+ */
+const DIALOGIC_VARIABLE_TYPES = [
+  { type: 'String', label: 'a text', value: '""' },
+  { type: 'int', label: 'a whole number', value: '0' },
+  { type: 'float', label: 'a decimal number', value: '0.0' },
+  { type: 'bool', label: 'a bool', value: 'false' },
+];
+
+/**
+ * The type a new Dialogic variable most likely has, from how the line
+ * uses it: `set {x} = 2` or `if {x} > 1` an int, `= 1.5` a float, `==
+ * true` a bool - a text otherwise (Dialogic's own default).
+ *
+ * @param {string} lineText
+ * @param {string} path - e.g. "chapter.flag"
+ * @returns {string} one of DIALOGIC_VARIABLE_TYPES' types
+ */
+function inferVariableType(lineText, path) {
+  const escaped = path.replace(/\./g, '\\.');
+  const match = lineText.match(new RegExp(`\\{${escaped}\\}\\s*(?:==|!=|<=|>=|[-+*/]?=|<|>)\\s*(.+)$`));
+  const value = match ? match[1].split(/\s+(?:and|or)\s+/)[0].trim() : '';
+  if (/^-?\d+$/.test(value)) { return 'int'; }
+  if (/^-?\d*\.\d+$/.test(value)) { return 'float'; }
+  if (/^(?:true|false)$/.test(value)) { return 'bool'; }
+  return 'String';
+}
+
+/**
+ * An edit adding a Dialogic variable to project.godot's `variables`,
+ * creating its folders as needed (`{chapter1.met_john}` adds `met_john` to
+ * the `chapter1` folder, creating it if it doesn't exist).
+ *
+ * @param {string} text - project.godot
+ * @param {string[]} segments - the variable path
+ * @param {string} value - its default, a Godot literal
+ * @param {string} eol
+ * @returns {{start: number, end: number, text: string} | null} null if it can't be added (a variable where a folder is needed)
+ */
+function createAddVariableEdit(text, segments, value, eol) {
+  let openIndex = findDialogicSettingDict(text, 'variables');
+  if (openIndex === -1) { return null; }
+  for (let i = 0; i < segments.length; i++) {
+    const dict = scanGodotDict(text, openIndex);
+    if (!dict) { return null; }
+    const valueIndex = dict.entries.get(segments[i]);
+    if (valueIndex === undefined) {
+      let entry = value;
+      for (let j = segments.length - 1; j > i; j--) { entry = `{${eol}${godotString(segments[j])}: ${entry}${eol}}`; }
+      return appendGodotDictEntry(text, openIndex, `${godotString(segments[i])}: ${entry}`, eol);
+    }
+    if (i === segments.length - 1 || text[valueIndex] !== '{') { return null; } // exists already, or isn't a folder
+    openIndex = valueIndex;
+  }
+  return null;
+}
+
+/**
+ * The text of a new .dch character file, as Dialogic writes it, with the
+ * given portraits (image portraits to fill in) - the first one being the
+ * default.
+ *
+ * @param {string} name
+ * @param {string[]} moods
+ * @param {string} eol
+ * @returns {string}
+ */
+function newCharacterFileText(name, moods, eol) {
+  const k = key => `&"${key}"`;
+  const portraits = moods.map(mood => [
+    `&${godotString(mood)}: {`,
+    `${k('export_overrides')}: {`,
+    `${k('image')}: "\\"res://\\""`,
+    '},',
+    `${k('mirror')}: false,`,
+    `${k('offset')}: Vector2(0, 0),`,
+    `${k('scale')}: 1.0,`,
+    `${k('scene')}: ""`,
+    '}',
+  ].join(eol));
+  return [
+    '{',
+    `${k('@path')}: "res://addons/dialogic/Resources/character.gd",`,
+    `${k('@subpath')}: NodePath(""),`,
+    `${k('color')}: Color(1, 1, 1, 1),`,
+    `${k('custom_info')}: {},`,
+    `${k('default_portrait')}: ${godotString(moods[0] || '')},`,
+    `${k('description')}: "",`,
+    `${k('display_name')}: ${godotString(name)},`,
+    `${k('mirror')}: false,`,
+    `${k('nicknames')}: [],`,
+    `${k('offset')}: Vector2(0, 0),`,
+    portraits.length ? `${k('portraits')}: {${eol}${portraits.join(`,${eol}`)}${eol}},` : `${k('portraits')}: {},`,
+    `${k('scale')}: 1.0`,
+    '}',
+    '',
+  ].join(eol);
+}
+
+/**
+ * A `<name>.dch` file the project already has but doesn't register, if any.
+ *
+ * @param {string} name
+ * @returns {string | null} its res:// path
+ */
+function findUnregisteredCharacterFile(name) {
+  const fileName = `/${name}.dch`.toLowerCase();
+  const registered = new Set([...cachedCharacterPaths.values()].map(resPath => resPath.toLowerCase()));
+  return cachedResourcePaths.find(resPath => resPath.toLowerCase().endsWith(fileName) && !registered.has(resPath.toLowerCase())) || null;
+}
+
+/** @param {string} resPath @returns {string} its folder, without the trailing "/" */
+const resFolderOf = resPath => resPath.slice(0, resPath.lastIndexOf('/'));
+
+/**
+ * The folders a new character of this timeline could go in, best first,
+ * each with why it's suggested:
+ * 1. a character folder named like one of this timeline's folders
+ *    (`timelines/chapter2/market.dtl` -> `characters/chapter2`), for
+ *    projects organized by chapter or route;
+ * 2. the folders of the characters this timeline already uses - a new
+ *    character most likely belongs with the rest of the scene's cast;
+ * 3. the folders of the project's other characters, most used first;
+ * 4. with no characters yet: a `characters` folder beside the timelines
+ *    folder (`res://story/timelines/` -> `res://story/characters`), the
+ *    timeline's own folder, and `res://characters`.
+ *
+ * @param {vscode.TextDocument} document - the timeline
+ * @returns {{folder: string, reason: string}[]}
+ */
+function rankCharacterFolders(document) {
+  const candidates = new Map();
+  const add = (folder, score, reason) => {
+    const current = candidates.get(folder);
+    if (!current || current.score < score) { candidates.set(folder, { score, reason }); }
+  };
+  const countFolders = names => {
+    const counts = new Map();
+    for (const name of names) {
+      const folder = resFolderOf(cachedCharacterPaths.get(name));
+      counts.set(folder, (counts.get(folder) || 0) + 1);
+    }
+    return counts;
+  };
+  const allCounts = countFolders(cachedCharacterPaths.keys());
+  const timelinePath = toResPath(document.uri);
+  const timelineFolders = timelinePath ? resFolderOf(timelinePath).replace(/^res:\/\//, '').split('/').filter(Boolean) : [];
+
+  for (const folder of allCounts.keys()) {
+    const folderName = folder.slice(folder.lastIndexOf('/') + 1);
+    if (timelineFolders.some(segment => segment.toLowerCase() === folderName.toLowerCase())) {
+      add(folder, 4000, `named like this timeline's folder "${folderName}"`);
+    }
+  }
+  const castNames = new Set();
+  for (let line = 0; line < document.lineCount; line++) {
+    const name = findLineCharacter(document.lineAt(line).text);
+    if (name && cachedCharacterPaths.has(name)) { castNames.add(name); }
+  }
+  for (const [folder, count] of countFolders(castNames)) {
+    const inFolder = [...castNames].filter(name => resFolderOf(cachedCharacterPaths.get(name)) === folder);
+    const shown = inFolder.slice(0, 3).join(', ') + (inFolder.length > 3 ? '...' : '');
+    add(folder, 3000 + count, `with ${shown}, who ${count > 1 ? 'are' : 'is'} in this timeline`);
+  }
+  const total = cachedCharacterPaths.size;
+  for (const [folder, count] of allCounts) {
+    add(folder, 2000 + count, `where ${count} of the project's ${total} characters ${count > 1 ? 'are' : 'is'}`);
+  }
+  if (timelinePath) {
+    const timelineFolder = resFolderOf(timelinePath);
+    const beside = timelineFolder.match(/^(.*)\/timelines?(?:\/|$)/i);
+    if (beside) { add(`${beside[1]}/characters`, 1000, 'beside the timelines folder'); }
+    add(timelineFolder, 500, "this timeline's folder");
+  }
+  add('res://characters', 100, 'a characters folder at the root of the project');
+  return [...candidates].sort((a, b) => b[1].score - a[1].score).map(([folder, { reason }]) => ({ folder, reason }));
+}
+
+/** @returns {vscode.Uri} */
+function projectGodotUri() {
+  return vscode.Uri.joinPath(projectRootUri, 'project.godot');
+}
+
+/**
+ * A quick fix applying `edit`, then saving `saveUris` (so the project is
+ * re-read from disk and the problem goes away).
+ *
+ * @param {string} title
+ * @param {vscode.WorkspaceEdit} edit
+ * @param {vscode.Uri[]} saveUris
+ * @param {vscode.Diagnostic} diagnostic
+ * @returns {vscode.CodeAction}
+ */
+function createSavedEditFix(title, edit, saveUris, diagnostic) {
+  const action = new vscode.CodeAction(title, vscode.CodeActionKind.QuickFix);
+  action.edit = edit;
+  action.diagnostics = [diagnostic];
+  action.command = { command: 'dtlReader.saveAndRefresh', title: 'Save', arguments: [saveUris] };
+  return action;
+}
+
+/**
+ * Save the given files (after a quick fix changed them) and re-read the
+ * project. An internal command, not in the Command Palette.
+ *
+ * @param {vscode.Uri[]} uris
+ */
+async function saveAndRefreshCommand(uris) {
+  for (const uri of uris || []) {
+    const document = vscode.workspace.textDocuments.find(candidate => normalizeFsPath(candidate.uri.fsPath || '') === normalizeFsPath(uri.fsPath));
+    if (document && document.isDirty) { await document.save(); }
+  }
+  await refreshProjectGodotData();
+}
+
+/**
+ * "Add the variable to project.godot" for an unknown `{variable}`, one fix
+ * per Dialogic variable type - the type the line suggests first. Not for
+ * an autoload member, which lives in its script.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Diagnostic} diagnostic
+ * @returns {Promise<vscode.CodeAction[]>}
+ */
+async function createAddVariableFixes(document, diagnostic) {
+  if (!projectRootUri) { return []; }
+  const path = document.getText(diagnostic.range);
+  const segments = path.split('.');
+  if (cachedAutoloadNames.has(segments[0])) { return []; }
+  let projectDocument;
+  try { projectDocument = await vscode.workspace.openTextDocument(projectGodotUri()); } catch (error) { return []; }
+  const text = projectDocument.getText();
+  const likely = inferVariableType(document.lineAt(diagnostic.range.start.line).text, path);
+  const types = [...DIALOGIC_VARIABLE_TYPES].sort((a, b) => (b.type === likely) - (a.type === likely));
+  const fixes = [];
+  for (const { label, value } of types) {
+    const change = createAddVariableEdit(text, segments, value, documentEol(projectDocument));
+    if (!change) { return []; }
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(projectDocument.uri, new vscode.Range(projectDocument.positionAt(change.start), projectDocument.positionAt(change.end)), change.text);
+    fixes.push(createSavedEditFix(`Add the variable "${path}" to project.godot as ${label} (${value})`, edit, [projectDocument.uri], diagnostic));
+  }
+  return fixes;
+}
+
+/**
+ * The edit registering a character in project.godot's
+ * `directories/dch_directory` - and, for a new file, creating its .dch
+ * (with `mood`, if any, as its default portrait) - with the files to save.
+ *
+ * @param {string} name
+ * @param {string} resPath - the .dch file
+ * @param {boolean} exists - the .dch file is already there
+ * @param {string|null} mood
+ * @returns {Promise<{edit: vscode.WorkspaceEdit, saveUris: vscode.Uri[]} | null>}
+ */
+async function createAddCharacterEdit(name, resPath, exists, mood) {
+  let projectDocument;
+  try { projectDocument = await vscode.workspace.openTextDocument(projectGodotUri()); } catch (error) { return null; }
+  const text = projectDocument.getText();
+  const eol = documentEol(projectDocument);
+  const openIndex = findDialogicSettingDict(text, 'directories/dch_directory');
+  if (openIndex === -1) { return null; }
+  const change = appendGodotDictEntry(text, openIndex, `${godotString(name)}: ${godotString(resPath)}`, eol);
+  if (!change) { return null; }
+  const edit = new vscode.WorkspaceEdit();
+  edit.replace(projectDocument.uri, new vscode.Range(projectDocument.positionAt(change.start), projectDocument.positionAt(change.end)), change.text);
+  const saveUris = [projectDocument.uri];
+  if (!exists) {
+    const dchUri = resolveResourcePath(resPath);
+    edit.createFile(dchUri, { ignoreIfExists: true });
+    edit.insert(dchUri, new vscode.Position(0, 0), newCharacterFileText(name, mood ? [mood] : [], eol));
+    saveUris.push(dchUri);
+  }
+  return { edit, saveUris };
+}
+
+/**
+ * "Add the character to project.godot" for an unknown character. When the
+ * project already has an unregistered `<name>.dch`, it's registered
+ * directly; otherwise the fix asks which folder the new .dch goes in (see
+ * addCharacterCommand).
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Diagnostic} diagnostic
+ * @returns {Promise<vscode.CodeAction | null>}
+ */
+async function createAddCharacterFix(document, diagnostic) {
+  if (!projectRootUri || !declaredProjectData.characters) { return null; }
+  const name = stripCharacterNameQuotes(document.getText(diagnostic.range));
+  if (!name || /[\\/:*?"<>|]/.test(name)) { return null; } // not a valid file name
+  const existing = findUnregisteredCharacterFile(name);
+  if (existing) {
+    const change = await createAddCharacterEdit(name, existing, true, null);
+    return change ? createSavedEditFix(`Add the character "${name}" (${existing}) to project.godot`, change.edit, change.saveUris, diagnostic) : null;
+  }
+  const mood = (document.lineAt(diagnostic.range.start.line).text.slice(diagnostic.range.end.character).match(/^\s*\(([\p{L}_][\p{L}0-9_]*)\)/u) || [])[1] || null;
+  const action = new vscode.CodeAction(`Add the character "${name}" to project.godot, with a new ${name}.dch...`, vscode.CodeActionKind.QuickFix);
+  action.diagnostics = [diagnostic];
+  action.command = { command: 'dtlReader.addCharacter', title: action.title, arguments: [{ name, mood, timeline: document.uri.toString() }] };
+  return action;
+}
+
+/**
+ * Ask where a new character's .dch file goes - the folders of
+ * rankCharacterFolders, best first, or any other folder of the project -
+ * then create it, register it in project.godot and save both. An internal
+ * command, run by the "Add the character" quick fix.
+ *
+ * @param {{name: string, mood: string|null, timeline: string, folder?: string}} args - `folder` skips the question
+ */
+async function addCharacterCommand(args) {
+  if (!projectRootUri || !args) { return; }
+  const { name, mood } = args;
+  let folder = args.folder;
+  if (!folder) {
+    const timelineUri = vscode.Uri.parse(args.timeline);
+    const timeline = vscode.workspace.textDocuments.find(document => document.uri.toString() === timelineUri.toString())
+      || await vscode.workspace.openTextDocument(timelineUri);
+    const other = { label: '$(folder-opened) Other folder...', detail: 'Choose any folder of the project' };
+    const items = rankCharacterFolders(timeline).map(({ folder: candidate, reason }) => ({
+      label: `$(folder) ${candidate}/`,
+      description: cachedResourcePaths.some(resPath => resPath.startsWith(`${candidate}/`)) ? '' : 'new folder',
+      detail: reason,
+      folder: candidate,
+    }));
+    const picked = await vscode.window.showQuickPick([...items, other], {
+      title: `Where should ${name}.dch go?`,
+      placeHolder: 'Folder of the new character file - the most likely first',
+      matchOnDetail: true,
+    });
+    if (!picked) { return; }
+    if (picked === other) {
+      const chosen = await vscode.window.showOpenDialog({
+        canSelectFiles: false, canSelectFolders: true, canSelectMany: false,
+        defaultUri: resolveResourcePath(items[0].folder),
+        openLabel: `Put ${name}.dch here`,
+      });
+      if (!chosen || !chosen[0]) { return; }
+      folder = toResPath(chosen[0]) || (normalizeFsPath(chosen[0].fsPath) === normalizeFsPath(projectRootUri.fsPath) ? 'res://' : null);
+      if (!folder) {
+        vscode.window.showErrorMessage(`${name}.dch must be inside the Godot project (${projectRootUri.fsPath}).`);
+        return;
+      }
+    } else {
+      folder = picked.folder;
+    }
+  }
+  // The file name is the character's identifier for Dialogic, so it's
+  // always `<name>.dch`, whatever the folder.
+  const resPath = `${folder.replace(/\/+$/, '')}/${name}.dch`.replace(/^res:\/(?!\/)/, 'res://');
+  if (cachedResourcePaths.some(existing => existing.toLowerCase() === resPath.toLowerCase())) {
+    vscode.window.showErrorMessage(`${resPath} already exists.`);
+    return;
+  }
+  const change = await createAddCharacterEdit(name, resPath, false, mood);
+  if (!change) { return; }
+  await vscode.workspace.applyEdit(change.edit);
+  await saveAndRefreshCommand(change.saveUris);
+}
+
+/**
+ * Quick fixes for every DTL Reader diagnostic in the range the lightbulb
+ * was asked for. Translation fixes have their own provider
+ * (provideTranslationCodeActions).
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Range} range
+ * @param {vscode.CodeActionContext} context
+ * @returns {Promise<vscode.CodeAction[]>}
+ */
+async function provideDiagnosticCodeActions(document, range, context) {
+  const fixes = [];
+  for (const diagnostic of context.diagnostics) {
+    if (diagnostic.source !== 'DTL Reader') { continue; }
+    const typed = document.getText(diagnostic.range);
+    switch (diagnostic.code) {
+      case 'unresolvedJump':
+        fixes.push(...await createUnresolvedJumpFixes(document, diagnostic));
+        break;
+      case 'jumpTranslationId':
+        fixes.push(...createJumpTranslationIdFixes(document, diagnostic));
+        break;
+      case 'unknownCharacter':
+      case 'unknownSpeaker': {
+        fixes.push(...createDidYouMeanFixes(document, diagnostic, stripCharacterNameQuotes(typed), cachedCharacterNames, formatCharacterName));
+        const add = await createAddCharacterFix(document, diagnostic);
+        if (add) { fixes.push(add); }
+        break;
+      }
+      case 'unknownMood':
+        fixes.push(...await createUnknownMoodFixes(document, diagnostic));
+        break;
+      case 'unknownVariable': {
+        fixes.push(...createDidYouMeanFixes(document, diagnostic, typed, collectVariableReferencePaths()));
+        fixes.push(...await createAddVariableFixes(document, diagnostic));
+        break;
+      }
+      case 'unclosedBBCode':
+        fixes.push(...createUnclosedTagFixes(document, diagnostic));
+        break;
+      case 'dchDefaultPortrait':
+        fixes.push(...createDidYouMeanFixes(document, diagnostic, typed, parseDchPortraits(document.getText()).keys()));
+        break;
+      case 'dchMissingScene':
+        fixes.push(...createDidYouMeanFixes(document, diagnostic, typed,
+          cachedResourcePaths.filter(resPath => RESOURCE_EXTENSIONS.scene.includes(resPath.slice(resPath.lastIndexOf('.') + 1).toLowerCase()))));
+        break;
+    }
+  }
+  return fixes;
+}
+
+// =============================================================================
+// GO TO DEFINITION
+// =============================================================================
+// Ctrl+Click / F12 in a timeline: a jump leads to its label, a character to
+// their .dch file, a mood to its portrait there, a `res://` path to its file,
+// an autoload reference to its script (on the member's line) and a glossary
+// word to its entry. In a .dch file: paths, and `default_portrait` to that
+// portrait. Each result is a link, so the whole name (quotes, spaces, the
+// full path) is underlined, not only the word under the mouse.
+
+/**
+ * A definition link from `originRange` to a place in a file.
+ *
+ * @param {vscode.Range} originRange
+ * @param {vscode.Uri} uri
+ * @param {vscode.Range} [targetRange] - defaults to the start of the file
+ * @returns {vscode.LocationLink[]}
+ */
+function definitionLink(originRange, uri, targetRange = new vscode.Range(0, 0, 0, 0)) {
+  return [{ originSelectionRange: originRange, targetUri: uri, targetRange, targetSelectionRange: targetRange }];
+}
+
+/**
+ * The `res://` path under the cursor, if any - in quotes, in a `[img]`
+ * tag, or inside a .dch image override (`"\"res://...\""`).
+ *
+ * @param {string} line
+ * @param {number} character
+ * @returns {{path: string, start: number, end: number} | null}
+ */
+function findResourcePathAtPosition(line, character) {
+  const pattern = /res:\/\/[^"'\s[\]\\]+/g;
+  let match;
+  while ((match = pattern.exec(line)) !== null) {
+    const end = match.index + match[0].length;
+    if (character >= match.index && character <= end) { return { path: match[0], start: match.index, end }; }
+  }
+  return null;
+}
+
+/**
+ * Definition of a `res://` path: the file, when it exists in the project.
+ *
+ * @param {number} line
+ * @param {{path: string, start: number, end: number}} resource
+ * @returns {vscode.LocationLink[] | undefined}
+ */
+function resourceDefinition(line, resource) {
+  if (!projectRootUri) { return undefined; }
+  if (cachedResourcePaths.length > 0 && !cachedResourcePaths.includes(resource.path)) { return undefined; }
+  return definitionLink(new vscode.Range(line, resource.start, line, resource.end), resolveResourcePath(resource.path));
+}
+
+/**
+ * The portrait name of a `[portrait=name]` text effect under the cursor,
+ * with the line's speaker.
+ *
+ * @param {string} line
+ * @param {number} character
+ * @returns {{characterName: string, mood: string, range: {start: number, end: number}} | null}
+ */
+function findPortraitEffectAtPosition(line, character) {
+  const speaker = findLineSpeaker(line);
+  if (!speaker) { return null; }
+  const pattern = /\[portrait=([^\]\s]+)\]/g;
+  let match;
+  while ((match = pattern.exec(line)) !== null) {
+    const start = match.index + '[portrait='.length;
+    const end = start + match[1].length;
+    if (character >= start && character <= end) { return { characterName: speaker.name, mood: match[1], range: { start, end } }; }
+  }
+  return null;
+}
+
+/**
+ * Definition of a mood: its portrait in the character's .dch file.
+ *
+ * @param {vscode.Range} originRange
+ * @param {string} characterName
+ * @param {string} mood
+ * @returns {Promise<vscode.LocationLink[] | undefined>}
+ */
+async function portraitDefinition(originRange, characterName, mood) {
+  const dchPath = cachedCharacterPaths.get(characterName);
+  if (!dchPath) { return undefined; }
+  try {
+    const dchDocument = await vscode.workspace.openTextDocument(resolveResourcePath(dchPath));
+    const range = findDchPortraitRange(dchDocument, mood);
+    return range ? definitionLink(originRange, dchDocument.uri, range) : undefined;
+  } catch (error) {
+    return undefined;
+  }
+}
+
+/**
+ * Definition of an autoload reference: the autoload's script (or scene),
+ * on the member's declaration line - for an enum value, the value's own
+ * line inside the enum.
+ *
+ * @param {NonNullable<ReturnType<typeof locateAutoloadReferenceAtPosition>>} reference
+ * @returns {Promise<vscode.LocationLink[] | undefined>}
+ */
+async function autoloadDefinition(reference) {
+  const { symbols, part, memberName, subName, range } = reference;
+  if (part === 'global') {
+    return definitionLink(range, resolveResourcePath(symbols.scenePath || symbols.scriptPath));
+  }
+  const member = findAutoloadMember(symbols, memberName);
+  if (!member || typeof member.info.line !== 'number') { return undefined; }
+  const uri = resolveResourcePath(symbols.scriptPath);
+  let line = member.info.line;
+  let character = 0;
+  try {
+    const script = await vscode.workspace.openTextDocument(uri);
+    const name = part === 'value' ? subName : memberName;
+    const namePattern = new RegExp(`\\b${name}\\b`);
+    // An enum value may sit on a later line than `enum Name {`.
+    for (let candidate = line; candidate < Math.min(script.lineCount, line + (part === 'value' ? 200 : 1)); candidate++) {
+      const found = script.lineAt(candidate).text.search(namePattern);
+      if (found !== -1) { line = candidate; character = found; break; }
+    }
+    const nameRange = new vscode.Range(line, character, line, character + name.length);
+    return definitionLink(range, uri, nameRange);
+  } catch (error) {
+    return definitionLink(range, uri, new vscode.Range(line, 0, line, 0));
+  }
+}
+
+/**
+ * Definition of a `jump` target: the label (in this timeline or another
+ * one), or the other timeline itself for its `Timeline/` part.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Position} position
+ * @param {NonNullable<ReturnType<typeof parseJumpLine>>} jump
+ * @returns {vscode.LocationLink[] | undefined}
+ */
+function jumpDefinition(document, position, jump) {
+  if (jump.target.includes('{') || position.character < jump.targetStart) { return undefined; }
+  const target = resolveJumpTarget(document, jump);
+  if (!target) { return undefined; }
+  const line = position.line;
+  // On the timeline part, or `jump Timeline/` with no label: open the
+  // timeline itself.
+  if (position.character < jump.labelStart || !jump.label) {
+    return definitionLink(new vscode.Range(line, jump.targetStart, line, jump.labelStart - (jump.timeline === null ? 0 : 1)), target.uri);
+  }
+  const labelInfo = target.labels.get(jump.label);
+  if (!labelInfo) { return undefined; }
+  const labelRange = new vscode.Range(labelInfo.line, labelInfo.nameStart, labelInfo.line, labelInfo.nameStart + jump.label.length);
+  return definitionLink(new vscode.Range(line, jump.labelStart, line, jump.labelStart + jump.label.length), target.uri, labelRange);
+}
+
+/**
+ * Go to Definition (Ctrl+Click / F12) in a timeline.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Position} position
+ * @returns {Promise<vscode.LocationLink[] | vscode.Location | undefined>}
+ */
+async function provideTimelineDefinition(document, position) {
+  const line = position.line;
+  const text = document.lineAt(line).text;
+  // Only a real `jump` command line (anchored to line start), not the word
+  // "jump" inside a comment or spoken dialogue text.
+  const jump = parseJumpLine(text);
+  if (jump) { return jumpDefinition(document, position, jump); }
+  const resource = findResourcePathAtPosition(text, position.character);
+  if (resource) { return resourceDefinition(line, resource); }
+  const mood = findMoodTagAtPosition(text, position.character) || findPortraitEffectAtPosition(text, position.character);
+  if (mood) { return portraitDefinition(new vscode.Range(line, mood.range.start, line, mood.range.end), mood.characterName, mood.mood); }
+  const character = findCharacterNameAtPosition(document, position);
+  if (character) {
+    const dchPath = cachedCharacterPaths.get(character.name);
+    return dchPath && projectRootUri ? definitionLink(character.range, resolveResourcePath(dchPath)) : undefined;
+  }
+  const autoload = locateAutoloadReferenceAtPosition(document, position);
+  if (autoload) { return autoloadDefinition(autoload); }
+  // Anywhere else in text: a glossary word leads to its entry.
+  return provideGlossaryDefinition(document, position);
+}
+
+/**
+ * Go to Definition in a .dch file: a `res://` path to its file, and the
+ * `default_portrait` value to that portrait.
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Position} position
+ * @returns {vscode.LocationLink[] | undefined}
+ */
+function provideDchDefinition(document, position) {
+  const line = position.line;
+  const text = document.lineAt(line).text;
+  const resource = findResourcePathAtPosition(text, position.character);
+  if (resource) { return resourceDefinition(line, resource); }
+  const defaultMatch = text.match(/^(\s*&?"default_portrait"\s*:\s*")([^"]+)"/);
+  if (!defaultMatch) { return undefined; }
+  const start = defaultMatch[1].length;
+  const end = start + defaultMatch[2].length;
+  if (position.character < start || position.character > end) { return undefined; }
+  const range = findDchPortraitRange(document, defaultMatch[2]);
+  return range ? definitionLink(new vscode.Range(line, start, line, end), document.uri, range) : undefined;
+}
+
+// =============================================================================
+// WORKSPACE SYMBOLS
+// =============================================================================
+// Go to Symbol in Workspace (Ctrl+T): every timeline, every label of every
+// timeline, and every character.
+
+/**
+ * Whether the letters of `query` appear in `name` in order (VS Code's own
+ * loose matching, which it then ranks) - case-insensitive.
+ *
+ * @param {string} query
+ * @param {string} name
+ * @returns {boolean}
+ */
+function matchesSymbolQuery(query, name) {
+  const lowerName = name.toLowerCase();
+  let index = 0;
+  for (const ch of query.toLowerCase()) {
+    if (ch === ' ') { continue; }
+    index = lowerName.indexOf(ch, index);
+    if (index === -1) { return false; }
+    index++;
+  }
+  return true;
+}
+
+/**
+ * @param {string} query
+ * @returns {Promise<vscode.SymbolInformation[]>}
+ */
+async function provideWorkspaceSymbols(query) {
+  const symbols = [];
+  for (const timeline of await readAllTimelines()) {
+    const fileName = timeline.uri.path.split('/').pop().replace(/\.dtl$/i, '');
+    const container = timeline.identifier || fileName;
+    if (matchesSymbolQuery(query, container)) {
+      symbols.push(new vscode.SymbolInformation(container, vscode.SymbolKind.File, 'timeline', new vscode.Location(timeline.uri, new vscode.Position(0, 0))));
+    }
+    timeline.lines.forEach((text, line) => {
+      const label = parseLabelLine(text);
+      if (!label || !matchesSymbolQuery(query, label.name)) { return; }
+      const range = new vscode.Range(line, label.nameStart, line, label.nameStart + label.name.length);
+      symbols.push(new vscode.SymbolInformation(label.name, vscode.SymbolKind.Module, container, new vscode.Location(timeline.uri, range)));
+    });
+  }
+  if (projectRootUri) {
+    for (const [name, dchPath] of cachedCharacterPaths) {
+      if (!matchesSymbolQuery(query, name)) { continue; }
+      symbols.push(new vscode.SymbolInformation(name, vscode.SymbolKind.Class, 'character', new vscode.Location(resolveResourcePath(dchPath), new vscode.Position(0, 0))));
+    }
+  }
+  return symbols;
+}
+
+// =============================================================================
 // ACTIVATE
 // =============================================================================
 function activate(context) {
@@ -7392,38 +9097,20 @@ function activate(context) {
     vscode.languages.registerDocumentSemanticTokensProvider('dtl', { provideDocumentSemanticTokens: provideAutoloadSemanticTokens }, SEMANTIC_TOKENS_LEGEND)
   );
   // ===========================================================================
-  // DEFINITION PROVIDER (ctrl+click / F12 on a `jump NAME` target)
+  // GO TO DEFINITION, QUICK FIXES AND WORKSPACE SYMBOLS
   // ===========================================================================
-  const definitionProvider =
-    vscode.languages.registerDefinitionProvider(
-      'dtl',
-      {
-        provideDefinition(document, position) {
-          // Only a real `jump` command line (anchored to line start), not
-          // the word "jump" inside a comment or spoken dialogue text.
-          const jump = parseJumpLine(document.lineAt(position.line).text);
-          if (!jump) {
-            // Anywhere else in text: a glossary word leads to its entry.
-            return provideGlossaryDefinition(document, position);
-          }
-          if (jump.target.includes('{') || position.character < jump.targetStart) {
-            return undefined;
-          }
-          const target = resolveJumpTarget(document, jump);
-          if (!target) {
-            return undefined;
-          }
-          // On the timeline part, or `jump Timeline/` with no label: open
-          // the timeline itself.
-          if (position.character < jump.labelStart || !jump.label) {
-            return new vscode.Location(target.uri, new vscode.Position(0, 0));
-          }
-          const labelInfo = target.labels.get(jump.label);
-          return labelInfo ? new vscode.Location(target.uri, new vscode.Position(labelInfo.line, labelInfo.nameStart)) : undefined;
-        }
-      }
-    );
-  context.subscriptions.push(definitionProvider);
+  const quickFixMetadata = { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] };
+  context.subscriptions.push(
+    vscode.languages.registerDefinitionProvider('dtl', { provideDefinition: provideTimelineDefinition }),
+    vscode.languages.registerDefinitionProvider('dch', { provideDefinition: provideDchDefinition }),
+    vscode.languages.registerCodeActionsProvider('dtl', { provideCodeActions: provideDiagnosticCodeActions }, quickFixMetadata),
+    vscode.languages.registerCodeActionsProvider('dch', { provideCodeActions: provideDiagnosticCodeActions }, quickFixMetadata),
+    vscode.languages.registerWorkspaceSymbolProvider({ provideWorkspaceSymbols }),
+    vscode.commands.registerCommand('dtlReader.saveAndRefresh', saveAndRefreshCommand),
+    vscode.commands.registerCommand('dtlReader.addCharacter', addCharacterCommand),
+    vscode.commands.registerCommand('dtlReader.playTimeline', playTimelineCommand),
+    { dispose: () => { if (godotOutputChannel) { godotOutputChannel.dispose(); } } }
+  );
   context.subscriptions.push(
     vscode.languages.registerReferenceProvider('dtl', { provideReferences: provideLabelReferences }),
     vscode.languages.registerRenameProvider('dtl', labelRenameProvider),
@@ -7894,6 +9581,11 @@ function activate(context) {
                 items.push(createCommandCompletion(entry));
               }
             }
+            // Whole blocks (choice, condition, loop...), only on an empty line
+            // being started - not in front of existing text.
+            if (line.slice(position.character).trim() === '') {
+              items.push(...createBlockSnippets().filter(item => item.label.label.startsWith(prefix)));
+            }
             return items;
           }
           // =========================================================================
@@ -7921,6 +9613,9 @@ function activate(context) {
         }
     , ' ', '[', '=', '(', '/', '"', "'", '{', '.');
   context.subscriptions.push(completionProvider);
+  // Internals the test suite checks directly (`extension.exports`) - not an
+  // API for other extensions.
+  return { forTests: { rankCharacterFolders, godotUserDataDir, setConfigFileValues, parseCustomEventScript, findGodotExecutable, scriptStrings: () => cachedScriptStrings, refreshScriptStrings, resourcePaths: () => cachedResourcePaths } };
 }
 // =============================================================================
 // DEACTIVATE

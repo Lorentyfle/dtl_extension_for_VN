@@ -345,8 +345,12 @@
     "end_timeline" : {
       "patterns": [
         {
-          "name" : "meta.endtimeline.dtl",
-          "match": "\\[end_timeline\\]"
+          "match": "(\\[)(end_timeline)(\\])",
+          "captures": {
+            "1": { "name": "punctuation.definition.tag.begin.dtl" },
+            "2": { "name": "meta.endtimeline.dtl" },
+            "3": { "name": "punctuation.definition.tag.end.dtl" }
+          }
         }
       ]
     },
@@ -356,8 +360,8 @@
       "patterns": [
         {
           "name": "meta.options.dtl",
-          "begin": "\\[\\b(wait|wait_input)\\b\\b",
-          "beginCaptures": { "0": { "name": "meta.wait.dtl" } },
+          "begin": "(\\[)(wait|wait_input)\\b",
+          "beginCaptures": { "1": { "name": "punctuation.definition.tag.begin.dtl" }, "2": { "name": "meta.wait.dtl" } },
           "end": "\\]",
           "endCaptures": { "0": { "name": "punctuation.definition.tag.end.dtl" } },
           "patterns": [
@@ -378,8 +382,8 @@
       "patterns": [
         {
           "name": "meta.text_input.dtl",
-          "begin": "\\[text_input\\b",
-          "beginCaptures": { "0": { "name": "meta.text_input.dtl" } },
+          "begin": "(\\[)(text_input)\\b",
+          "beginCaptures": { "1": { "name": "punctuation.definition.tag.begin.dtl" }, "2": { "name": "meta.text_input.dtl" } },
           "end": "\\]",
           "endCaptures": { "0": { "name": "punctuation.definition.tag.end.dtl" } },
           "patterns": [
@@ -400,8 +404,8 @@
       "patterns": [
         {
           "name": "meta.options.dtl",
-          "begin": "\\[\\b(audio|voice)\\b\\b",
-          "beginCaptures": { "0": { "name": "support.type.audio-kind.dtl" } },
+          "begin": "(\\[)(audio|voice)\\b",
+          "beginCaptures": { "1": { "name": "punctuation.definition.tag.begin.dtl" }, "2": { "name": "support.type.audio-kind.dtl" } },
           "end": "\\]",
           "endCaptures": { "0": { "name": "punctuation.definition.tag.end.dtl" } },
           "patterns": [
@@ -422,8 +426,8 @@
       "patterns": [
         {
           "name": "meta.options.dtl",
-          "begin": "\\[clear\\b",
-          "beginCaptures": { "0": { "name": "meta.clear.dtl" } },
+          "begin": "(\\[)(clear)\\b",
+          "beginCaptures": { "1": { "name": "punctuation.definition.tag.begin.dtl" }, "2": { "name": "meta.clear.dtl" } },
           "end": "\\]",
           "endCaptures": { "0": { "name": "punctuation.definition.tag.end.dtl" } },
           "patterns": [
@@ -444,8 +448,8 @@
       "patterns": [
         {
           "name": "meta.images.dtl",
-          "begin": "\\[\\b(background|style)\\b\\b",
-          "beginCaptures": { "0": { "name": "meta.images.dtl" } },
+          "begin": "(\\[)(background|style)\\b",
+          "beginCaptures": { "1": { "name": "punctuation.definition.tag.begin.dtl" }, "2": { "name": "meta.images.dtl" } },
           "end": "\\]",
           "endCaptures": { "0": { "name": "punctuation.definition.tag.end.dtl" } },
           "patterns": [

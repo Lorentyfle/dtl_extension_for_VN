@@ -2,7 +2,7 @@
   "name": "dtl-reader",
   "displayName": "DTL Reader",
   "description": "Dialogic 2 timeline (.dtl) and character (.dch) support: highlighting, autocomplete, documentation, error checking, outline, BBCode preview and translation tools.",
-  "version": "1.5.1",
+  "version": "1.7.0",
   "publisher": "lorentyfle",
   "icon": "./icons/favicon.png",
   "engines": {
@@ -153,6 +153,12 @@
         "command": "dtlReader.selectTranslationLanguage",
         "title": "Select Translation Language",
         "category": "DTL"
+      },
+      {
+        "command": "dtlReader.playTimeline",
+        "title": "Play Timeline in Godot",
+        "category": "DTL",
+        "icon": "$(play)"
       }
     ],
     "menus": {
@@ -171,6 +177,10 @@
         {
           "command": "dtlReader.nextUntranslated",
           "when": "editorLangId == dtl"
+        },
+        {
+          "command": "dtlReader.playTimeline",
+          "when": "editorLangId == dtl"
         }
       ],
       "editor/context": [
@@ -188,9 +198,19 @@
           "command": "dtlReader.nextUntranslated",
           "when": "editorLangId == dtl && config.dtlReader.translation.language",
           "group": "dtl@2"
+        },
+        {
+          "command": "dtlReader.playTimeline",
+          "when": "editorLangId == dtl",
+          "group": "dtl@3"
         }
       ],
       "editor/title": [
+        {
+          "command": "dtlReader.playTimeline",
+          "when": "resourceLangId == dtl && config.dtlReader.playButton",
+          "group": "navigation"
+        },
         {
           "command": "dtlReader.openTranslationView",
           "when": "dtlReader.showTranslationGlobe",
@@ -254,6 +274,19 @@
             "default": true,
             "order": 3,
             "markdownDescription": "Color the words of your Dialogic glossaries in dialogue, narration and choices, like Dialogic does in the game, with a dotted underline. Hovering one shows its glossary entry either way."
+          },
+          "dtlReader.godotPath": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "Path to the Godot 4 executable, for **DTL: Play Timeline in Godot**. Empty: the one set for the godot-tools extension (`godotTools.editorPath.godot4`), else `godot` from the PATH.",
+            "order": 100
+          },
+          "dtlReader.playButton": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Show the **Play Timeline in Godot** button at the top right of a timeline.",
+            "order": 101
           }
         }
       },
@@ -488,6 +521,86 @@
             "default": "error",
             "description": "A .dch portrait `scene` that doesn't exist in the project.",
             "order": 10
+          },
+          "dtlReader.diagnostics.unreachableCode": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "information",
+              "hint",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Error (red squiggle, in Problems)",
+              "Warning (yellow squiggle, in Problems)",
+              "Information (blue squiggle, in Problems)",
+              "Hint (faint dots, not in Problems)",
+              "Hidden"
+            ],
+            "default": "hint",
+            "description": "Events that never run: after a top-level `[end_timeline]`, `jump` or `return`, until the next label. Shown faded.",
+            "order": 11
+          },
+          "dtlReader.diagnostics.unreachableLabel": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "information",
+              "hint",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Error (red squiggle, in Problems)",
+              "Warning (yellow squiggle, in Problems)",
+              "Information (blue squiggle, in Problems)",
+              "Hint (faint dots, not in Problems)",
+              "Hidden"
+            ],
+            "default": "warning",
+            "description": "A label that nothing leads to: no `jump` to it (in any timeline), no `Dialogic.start(...)` with its name in a script, and the flow ends right before it.",
+            "order": 12
+          },
+          "dtlReader.diagnostics.unusedCharacter": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "information",
+              "hint",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Error (red squiggle, in Problems)",
+              "Warning (yellow squiggle, in Problems)",
+              "Information (blue squiggle, in Problems)",
+              "Hint (faint dots, not in Problems)",
+              "Hidden"
+            ],
+            "default": "hint",
+            "description": "In a `.dch` file: a character that no timeline uses (and no script names).",
+            "order": 13
+          },
+          "dtlReader.diagnostics.unusedPortrait": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "information",
+              "hint",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Error (red squiggle, in Problems)",
+              "Warning (yellow squiggle, in Problems)",
+              "Information (blue squiggle, in Problems)",
+              "Hint (faint dots, not in Problems)",
+              "Hidden"
+            ],
+            "default": "hint",
+            "description": "In a `.dch` file: a portrait that no timeline uses (and no script names), other than the default portrait. Shown faded.",
+            "order": 14
           }
         }
       },
