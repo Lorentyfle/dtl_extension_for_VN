@@ -3453,6 +3453,8 @@ function createVariableCompletion(name, entry) {
   const item = new vscode.CompletionItem(name, hasChildren ? vscode.CompletionItemKind.Folder : vscode.CompletionItemKind.Variable);
   item.detail = hasChildren ? 'Dialogic variable group' : entry.value === null ? 'Variable used in this timeline' : `Dialogic variable - default: ${entry.value}`;
   if (hasChildren) {
+    // Straight into the group: `chapter` -> `chapter.`, with its variables.
+    item.insertText = `${name}.`;
     item.command = { command: 'editor.action.triggerSuggest', title: 'Show DTL child variables' };
   }
   return item;
