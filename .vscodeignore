@@ -6,3 +6,4 @@ node_modules/**
 test-room/**
 assets/**
 test/**
+.github/**
