@@ -2,7 +2,7 @@
   "name": "dtl-reader",
   "displayName": "DTL Reader",
   "description": "Dialogic 2 timeline (.dtl) and character (.dch) support: highlighting, autocomplete, documentation, error checking, outline, BBCode preview and translation tools.",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "publisher": "lorentyfle",
   "icon": "./icons/favicon.png",
   "engines": {
@@ -158,8 +158,7 @@
     "menus": {
       "commandPalette": [
         {
-          "command": "dtlReader.openTranslationView",
-          "when": "editorLangId == dtl"
+          "command": "dtlReader.openTranslationView"
         },
         {
           "command": "dtlReader.changeTranslationViewLanguages",
@@ -194,7 +193,7 @@
       "editor/title": [
         {
           "command": "dtlReader.openTranslationView",
-          "when": "editorLangId == dtl",
+          "when": "editorLangId == dtl || editorLangId == dch || resourceExtname == .tres",
           "group": "navigation"
         },
         {
@@ -223,8 +222,8 @@
               "dialogic"
             ],
             "enumDescriptions": [
-              "Flow of time: each label as a section, with its if/elif/else/while blocks and choices nested by indentation, and every jump/return/end_timeline saying where it leads (back, ahead, another timeline).",
-              "Indentation: the timeline's structure by indentation only - labels, if/elif/else/while blocks and choices, each nested under the block it is indented in. No jumps.",
+              "Flow of time: each label as a section, with its if/elif/else blocks and choices nested by indentation, and every jump/return/end_timeline saying where it leads (back, ahead, another timeline).",
+              "Indentation: the timeline's structure by indentation only - labels, if/elif/else blocks and choices, each nested under the block it is indented in. No jumps.",
               "Dialogic: only the labels, like Dialogic organizes a timeline."
             ],
             "default": "flow",
@@ -234,7 +233,7 @@
           "dtlReader.outline.showFlow": {
             "type": "boolean",
             "default": true,
-            "description": "In the Outline view, list each label's flow (if/elif/else/while blocks, choices, jump/return/end_timeline), nested by indentation. When off, the outline only lists the labels.",
+            "description": "In the Outline view, list each label's flow (if/elif/else blocks, choices, jump/return/end_timeline), nested by indentation. When off, the outline only lists the labels.",
             "order": 99,
             "markdownDeprecationMessage": "Replaced by `#dtlReader.outline.style#` (`dialogic` = labels only)."
           },

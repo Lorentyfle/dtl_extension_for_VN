@@ -2279,7 +2279,8 @@ async function refreshProjectGodotData() {
     cachedTimelinePaths = new Map();
     cachedTimelineLabels = new Map();
     cachedGlossaryEntries = [];
-    glossaryPatterns = [];
+    cachedGlossaryFiles = [];
+    glossaryPatternsKey = null;
     declaredProjectData = { characters: false, variables: false, timelines: false };
     projectRootUri = null;
     cachedResourcePaths = [];
@@ -2668,7 +2669,7 @@ function isBareNarrationLine(beforeCursor) {
   if (/^\s*\[/.test(beforeCursor)) {
     return false; // standalone bracket command, e.g. [wait 1]
   }
-  if (/^\s*(if|else|elif|set|label|jump|while|join|leave|update|audio|do|return)\b/.test(beforeCursor)) {
+  if (/^\s*(if|else|elif|set|label|jump|join|leave|update|audio|do|return)\b/.test(beforeCursor)) {
     return false; // flow/command keyword line
   }
   return true;
@@ -3048,7 +3049,7 @@ function createAudioPathCompletion() {
  * @type {Set<string>}
  */
 const RESERVED_LINE_KEYWORDS = new Set([
-  'if', 'else', 'elif', 'set', 'label', 'jump', 'while', 'join', 'update', 'leave', 'audio', 'do', 'return'
+  'if', 'else', 'elif', 'set', 'label', 'jump', 'join', 'update', 'leave', 'audio', 'do', 'return'
 ]);
 
 /**
@@ -3409,7 +3410,7 @@ function createVariableSuggestions(typedPath) {
  * Matches the start of a line up to where a GDScript-style expression
  * begins - i.e. where an autoload reference like `Global.foo()` or
  * `Global.State.IDLE` could meaningfully appear:
- * - after `do`, `if`, `elif` or `while` (group 1 is the keyword);
+ * - after `do`, `if` or `elif` (group 1 is the keyword);
  * - after the assignment operator of `set {variable} = ` (also `+=`,
  *   `-=`, `*=`, `/=`), where group 1 is undefined.
  * Requires whitespace after the keyword (or the `=`, for set) so
@@ -3418,7 +3419,7 @@ function createVariableSuggestions(typedPath) {
  *
  * @type {RegExp}
  */
-const EXPRESSION_START_PATTERN = /^\s*(?:(do|if|elif|while)\s+|set\s+\{[^}]*\}\s*[-+*/]?=\s*)/;
+const EXPRESSION_START_PATTERN = /^\s*(?:(do|if|elif)\s+|set\s+\{[^}]*\}\s*[-+*/]?=\s*)/;
 
 /**
  * True when `text` - either what's been typed so far on a line, or a full
@@ -3561,7 +3562,162 @@ function createEnumValueSuggestions(symbols, enumName, prefix) {
 }
 
 /**
- * Build completions for an expression - after `do`/`if`/`elif`/`while`,
+ * Every Dialogic variable of project.godot as a full path ("chapter",
+ * "variable.test"...), with its default value - folders are walked, only
+ * values are listed.
+ *
+ * @returns {{path: string, value: string}[]}
+ */
+function collectVariableLeaves() {
+  const leaves = [];
+  const walk = (tree, prefix) => {
+    for (const [name, entry] of tree) {
+      const path = prefix ? `${prefix}.${name}` : name;
+      if (entry.children) { walk(entry.children, path); } else { leaves.push({ path, value: entry.value }); }
+    }
+  };
+  walk(cachedVariablesTree, '');
+  return leaves;
+}
+
+/**
+ * Completion items for `{variable}` references typed without their `{`,
+ * e.g. in `if cha|` or after `set `. Inserted with their braces; an
+ * auto-closed "}" after the cursor is replaced, not doubled.
+ *
+ * @param {string} prefix - the identifier typed so far
+ * @param {vscode.Range} range - that identifier
+ * @returns {vscode.CompletionItem[]}
+ */
+function createVariableReferenceItems(prefix, range) {
+  const lower = prefix.toLowerCase();
+  const items = [];
+  for (const { path, value } of collectVariableLeaves()) {
+    if (!path.toLowerCase().startsWith(lower)) { continue; }
+    const type = inferGdValueType(value);
+    const item = new vscode.CompletionItem({ label: `{${path}}`, description: type || '' }, vscode.CompletionItemKind.Variable);
+    item.detail = `Dialogic variable - default: ${value}`;
+    item.insertText = `{${path}}`;
+    item.filterText = path;
+    item.range = range;
+    item.sortText = `1_${path}`;
+    items.push(item);
+  }
+  // Autoload variables can be set and read as {Autoload.variable} too.
+  for (const [globalName, symbols] of cachedAutoloadSymbols) {
+    for (const [name, info] of symbols.variables) {
+      const path = `${globalName}.${name}`;
+      if (!path.toLowerCase().startsWith(lower)) { continue; }
+      const item = new vscode.CompletionItem({ label: `{${path}}`, description: info.type || '' }, vscode.CompletionItemKind.Field);
+      item.detail = formatAutoloadMemberSignature(globalName, name, 'variable', info);
+      item.documentation = new vscode.MarkdownString(info.doc || NO_GD_DOC_MESSAGE);
+      item.insertText = `{${path}}`;
+      item.filterText = path;
+      item.range = range;
+      item.sortText = `3_${path}`;
+      items.push(item);
+    }
+  }
+  return items;
+}
+
+/** Operators, as Dialogic's conditions (Godot Expression) and set events accept them. */
+const CONDITION_OPERATORS = [
+  ['==', 'is equal to'], ['!=', 'is not equal to'], ['>', 'is greater than'], ['<', 'is less than'],
+  ['>=', 'is greater than or equal to'], ['<=', 'is less than or equal to'],
+  ['and', 'both conditions must be true'], ['or', 'at least one condition must be true'],
+];
+const ARITHMETIC_OPERATORS = [['+', 'plus (or joins two texts)'], ['-', 'minus'], ['*', 'times'], ['/', 'divided by'], ['%', 'remainder of the division']];
+const SET_OPERATORS = [
+  ['=', 'Set: the variable becomes the value.'], ['+=', 'Add the value to the variable.'], ['-=', 'Subtract the value from the variable.'],
+  ['*=', 'Multiply the variable by the value.'], ['/=', 'Divide the variable by the value.'],
+];
+
+/**
+ * Completion items for operators. Each inserts itself plus a space and
+ * re-opens the suggestions, ready for the next operand.
+ *
+ * @param {[string, string][]} operators
+ * @param {string} group - for sorting
+ * @returns {vscode.CompletionItem[]}
+ */
+function createOperatorItems(operators, group) {
+  return operators.map(([operator, doc], index) => {
+    const item = new vscode.CompletionItem({ label: operator, description: doc }, /^[a-z]/.test(operator) ? vscode.CompletionItemKind.Keyword : vscode.CompletionItemKind.Operator);
+    item.insertText = `${operator} `;
+    item.sortText = `${group}_${String(index).padStart(2, '0')}`;
+    item.command = { command: 'editor.action.triggerSuggest', title: 'Suggest the next value' };
+    return item;
+  });
+}
+
+/**
+ * Suggestions on a `set` line before its operator (see Dialogic's set
+ * event: `set {variable} <operator> value`): the variable to set, then
+ * the operators `=`, `+=`, `-=`, `*=`, `/=`.
+ *
+ * @param {string} beforeCursor
+ * @param {vscode.Position} position
+ * @returns {vscode.CompletionItem[] | null} null if this isn't that part of a set line
+ */
+function createSetTargetSuggestions(beforeCursor, position) {
+  const setMatch = beforeCursor.match(/^\s*set\s+(.*)$/);
+  if (!setMatch || isGlobalScriptExpressionLine(beforeCursor)) { return null; }
+  const rest = setMatch[1];
+  const targetMatch = rest.match(/^([A-Za-z_][A-Za-z0-9_.]*)?$/);
+  if (targetMatch) {
+    const typed = targetMatch[1] || '';
+    return createVariableReferenceItems(typed, new vscode.Range(position.line, position.character - typed.length, position.line, position.character));
+  }
+  if (/^\{[^}]*\}\s+$/.test(rest)) {
+    return SET_OPERATORS.map(([operator, doc], index) => {
+      const item = createOperatorItems([[operator, doc]], `0${index}`)[0];
+      item.documentation = new vscode.MarkdownString(`${doc}\n\n\`set {variable} ${operator} value\``);
+      return item;
+    });
+  }
+  return null;
+}
+
+/**
+ * Value suggestions after `set {variable} = `, from the variable's type:
+ * true/false for a bool, a random number for a number, "" for a text.
+ *
+ * @param {string} beforeCursor
+ * @returns {vscode.CompletionItem[]}
+ */
+function createSetValueItems(beforeCursor) {
+  const targetMatch = beforeCursor.match(/^\s*set\s+\{([^}]*)\}/);
+  if (!targetMatch) { return []; }
+  const segments = targetMatch[1].split('.');
+  let level = cachedVariablesTree;
+  let entry = null;
+  for (const segment of segments) { entry = level && level.get(segment); if (!entry) { break; } level = entry.children; }
+  let type = entry && !entry.children ? inferGdValueType(entry.value) : null;
+  if (!type && cachedAutoloadSymbols.has(segments[0]) && segments.length === 2) {
+    const info = cachedAutoloadSymbols.get(segments[0]).variables.get(segments[1]);
+    type = info ? (info.type || inferGdValueType(info.defaultValue || '')) : null;
+  }
+  const items = [];
+  const add = (label, insert, doc, kind) => {
+    const item = new vscode.CompletionItem({ label, description: doc }, kind);
+    item.insertText = insert;
+    item.sortText = `0_${label}`;
+    items.push(item);
+  };
+  if (type === 'bool') {
+    add('true', 'true', 'bool', vscode.CompletionItemKind.Keyword);
+    add('false', 'false', 'bool', vscode.CompletionItemKind.Keyword);
+  } else if (type === 'int' || type === 'float') {
+    add('random number', new vscode.SnippetString('range(${1:1}, ${2:10}).pick_random()'), 'Dialogic\'s random number: range(min, max).pick_random()', vscode.CompletionItemKind.Snippet);
+  } else if (type === 'String') {
+    add('"text"', new vscode.SnippetString('"$1"'), 'a text value', vscode.CompletionItemKind.Snippet);
+  }
+  return items;
+}
+
+/**
+ * Build completions for an expression - after `do`/`if`/`elif`,
  * or on the right-hand side of `set {variable} = ...` (see
  * EXPRESSION_START_PATTERN): either autoload names, a specific autoload's
  * members (once `Name.` has been typed), or a named enum's values (once
@@ -3573,7 +3729,7 @@ function createEnumValueSuggestions(symbols, enumName, prefix) {
  * - never inside a string literal, e.g. `Global.foo("intro`;
  * - `do` only runs a method, so it offers autoload names only as its
  *   first token, and only functions as members;
- * - `if`/`elif`/`while` conditions and `set` values can use anything, so
+ * - `if`/`elif` conditions and `set` values can use anything, so
  *   they offer every member - but a bare name list is only popped open by
  *   a trigger character (space, `=`, ...) right after the keyword/`=` or after
  *   `and`/`or`/`not`, not after every space in the expression; typing a
@@ -3605,12 +3761,25 @@ function createGlobalScriptSuggestions(beforeCursor, triggerCharacter) {
   }
 
   if (isDo && !/^[A-Za-z_][A-Za-z0-9_]*$|^$/.test(expression)) { return []; }
+  const isSet = keywordMatch[1] === undefined;
+
+  // Right after a complete value ({variable}, number, text, true/false,
+  // a call...): what can follow it - comparisons and and/or in a
+  // condition, arithmetic in a set value.
+  const afterOperand = !isDo && /(?:\}|\)|\]|\d|"|'|\btrue|\bfalse|[A-Za-z_][A-Za-z0-9_]*)\s+$/.test(expression)
+    && !/(?:\b(?:and|or|not|in)|[=!<>+\-*/%(,&|])\s*$/.test(expression);
+  if (afterOperand) {
+    return isSet ? createOperatorItems(ARITHMETIC_OPERATORS, '0') : createOperatorItems(CONDITION_OPERATORS, '0');
+  }
+
   const nameMatch = expression.match(/(?:^|[\s(=!<>+\-*/%,&|])([A-Za-z_][A-Za-z0-9_]*)?$/);
   if (!nameMatch) { return []; }
   const typedName = nameMatch[1] || '';
   if (triggerCharacter && typedName === '') {
     const beforeName = expression.trimEnd();
-    if (beforeName !== '' && !/(?:\b(?:and|or|not)|&&|\|\||!)$/.test(beforeName)) { return []; }
+    // Pop the list open only where a value is expected: the start, after
+    // and/or/not, an operator, "(" or ",".
+    if (beforeName !== '' && !/(?:\b(?:and|or|not|in)|&&|\|\||[!=<>+\-*/%(,])$/.test(beforeName)) { return []; }
   }
   const prefix = typedName.toLowerCase();
   const items = [];
@@ -3619,7 +3788,25 @@ function createGlobalScriptSuggestions(beforeCursor, triggerCharacter) {
       items.push(createGlobalNameCompletion(name));
     }
   }
-  return items;
+  if (isDo) { return items; }
+  const cursor = beforeCursor.length;
+  items.push(...createVariableReferenceItems(typedName, new vscode.Range(0, cursor - typedName.length, 0, cursor)));
+  if (isSet && expression.trim() === '') { items.push(...createSetValueItems(beforeCursor)); }
+  for (const [keyword, doc] of [['not', 'negates the condition after it'], ['true', 'bool'], ['false', 'bool']]) {
+    if (keyword.startsWith(prefix) && (keyword !== 'not' || !isSet)) {
+      const item = new vscode.CompletionItem({ label: keyword, description: doc }, vscode.CompletionItemKind.Keyword);
+      item.sortText = `4_${keyword}`;
+      items.push(item);
+    }
+  }
+  // true/false can come both from the set target's type and as keywords.
+  const seen = new Set();
+  return items.filter(item => {
+    const label = typeof item.label === 'string' ? item.label : item.label.label;
+    if (seen.has(label)) { return false; }
+    seen.add(label);
+    return true;
+  });
 }
 
 // =============================================================================
@@ -4016,11 +4203,11 @@ function describeJumpDirection(target, line, labels) {
  * - "flow" (default): the flow of time. One entry per `label`, as Dialogic
  *   organizes a timeline, each spanning until the next label, listing the
  *   timeline's branching nested by indentation - `if`/`elif`/`else`/
- *   `while` blocks and choices - and the events that leave the current
+ *   blocks and choices - and the events that leave the current
  *   flow (`jump`, `return`, `[end_timeline]`), each jump saying where it
  *   leads (back, ahead, another timeline).
  * - "indentation": the timeline's structure by indentation only - labels,
- *   `if`/`elif`/`else`/`while` blocks and choices, each nested under the
+ *   `if`/`elif`/`else` blocks and choices, each nested under the
  *   block it's indented in, and labels being plain entries rather than
  *   sections. No jumps.
  * - "dialogic": only the labels, like Dialogic's own timeline organization.
@@ -4040,7 +4227,7 @@ function provideTimelineOutline(document) {
   const labelDocs = collectLabelsFromLines(lines);
   const rootSymbols = [];
   let currentLabel = null;
-  // Open flow blocks (if/elif/else/while/choice), innermost last.
+  // Open flow blocks (if/elif/else/choice), innermost last.
   let openBlocks = [];
   let lastContentLine = 0;
 
@@ -4093,7 +4280,7 @@ function provideTimelineOutline(document) {
     lastContentLine = line;
     if (!showFlow) { continue; }
 
-    const flowMatch = trimmed.match(/^(if|elif|else|while)\b\s*(.*?)\s*:?\s*$/);
+    const flowMatch = trimmed.match(/^(if|elif|else)\b\s*(.*?)\s*:?\s*$/);
     const choiceMatch = trimmed.match(/^-\s+(.*)$/);
     const jumpMatch = trimmed.match(/^(jump)\s+(.*)$|^(return)\b|^(\[end_timeline\])/);
     if (flowMatch) {
@@ -4897,6 +5084,7 @@ async function refreshTranslations() {
   cachedTranslationLocales = [...locales];
   cachedTranslationFiles = files;
   cachedCsvOriginalLocale = firstLocale;
+  translationsVersion++;
   updateAllTranslationDecorations();
   if (translationViewFileSystem) { translationViewFileSystem.refresh(); }
 }
@@ -5081,8 +5269,16 @@ async function selectTranslationLanguage() {
  */
 function findTranslationFileFor(key, document) {
   if (cachedTranslationFileOfKey.has(key)) { return cachedTranslationFileOfKey.get(key); }
-  const timelineName = (document.uri.fsPath || '').replace(/\\/g, '/').split('/').pop().replace(/\.dtl$/i, '');
   const byName = name => cachedTranslationFiles.find(uri => uri.fsPath.replace(/\\/g, '/').split('/').pop().toLowerCase() === name.toLowerCase());
+  // Characters: Dialogic keeps them in one project-wide CSV.
+  if (key.startsWith('Character/')) { return byName('dialogic_character_translations.csv') || null; }
+  // Glossaries: the CSV that already has this glossary's keys, else the project-wide one.
+  if (key.startsWith('Glossary/')) {
+    const prefix = key.split('/').slice(0, 2).join('/') + '/';
+    for (const [existingKey, uri] of cachedTranslationFileOfKey) { if (existingKey.startsWith(prefix)) { return uri; } }
+    return byName('dialogic_glossary_translations.csv') || null;
+  }
+  const timelineName = ((document && document.uri && document.uri.fsPath) || '').replace(/\\/g, '/').split('/').pop().replace(/\.dtl$/i, '');
   return byName(`dialogic_${timelineName}_translation.csv`) || byName('dialogic_timeline_translations.csv') || null;
 }
 
@@ -5109,7 +5305,8 @@ async function writeTranslations(entries, language, timelineUri) {
   for (const entry of entries) {
     const uri = findTranslationFileFor(entry.key, { uri: timelineUri });
     if (!uri) {
-      throw new Error('No Dialogic translation CSV found for this timeline. Enable translation in Dialogic\'s settings and click "Update CSV files" first.');
+      const what = entry.key.startsWith('Character/') ? 'characters' : entry.key.startsWith('Glossary/') ? 'glossaries' : 'this timeline';
+      throw new Error(`No Dialogic translation CSV found for ${what}. Enable translation in Dialogic's settings and click "Update CSV files" first.`);
     }
     if (!byFile.has(uri.fsPath)) { byFile.set(uri.fsPath, { uri, entries: [] }); }
     byFile.get(uri.fsPath).entries.push(entry);
@@ -5284,9 +5481,22 @@ const TRANSLATION_VIEW_SCHEME = 'dtl-translation';
  * @param {string[]} languages
  * @returns {vscode.Uri}
  */
-function translationViewUri(timelineUri, languages) {
-  const name = timelineUri.path.split('/').pop().replace(/\.dtl$/i, '');
-  const query = `timeline=${encodeURIComponent(timelineUri.toString())}&languages=${encodeURIComponent(languages.join(','))}`;
+function translationViewUri(target, languages) {
+  // A plain Uri is a timeline (the original, and most common, source).
+  const source = target instanceof Object && target.source ? target : { source: 'timeline', uri: target };
+  const params = { source: source.source, languages: languages.join(',') };
+  let name;
+  if (source.source === 'characters') {
+    name = 'Characters';
+    if (source.focus) { params.focus = source.focus; }
+  } else if (source.source === 'glossary') {
+    name = `${source.file.split('/').pop().replace(/\.tres$/i, '')} glossary`;
+    params.glossary = source.file;
+  } else {
+    name = source.uri.path.split('/').pop().replace(/\.dtl$/i, '');
+    params.timeline = source.uri.toString();
+  }
+  const query = Object.entries(params).map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join('&');
   return vscode.Uri.from({ scheme: TRANSLATION_VIEW_SCHEME, path: `/${name} (${languages.join(', ')}).dtltr`, query });
 }
 
@@ -5301,7 +5511,91 @@ function parseTranslationViewUri(uri) {
     params[name] = decodeURIComponent(value);
   }
   const languages = (params.languages || params.language || '').split(',').map(language => language.trim()).filter(Boolean);
-  return { timelineUri: vscode.Uri.parse(params.timeline), languages };
+  const source = params.source || 'timeline';
+  return {
+    source,
+    timelineUri: source === 'timeline' && params.timeline ? vscode.Uri.parse(params.timeline) : null,
+    glossary: params.glossary || null,
+    focus: params.focus || null,
+    languages,
+  };
+}
+
+/**
+ * The same view source, as translationViewUri expects it.
+ *
+ * @param {ReturnType<typeof parseTranslationViewUri>} parsed
+ */
+function translationViewTarget(parsed) {
+  if (parsed.source === 'characters') { return { source: 'characters', focus: parsed.focus }; }
+  if (parsed.source === 'glossary') { return { source: 'glossary', file: parsed.glossary }; }
+  return { source: 'timeline', uri: parsed.timelineUri };
+}
+
+/**
+ * A file's current text: from its editor if it's open, else from disk.
+ *
+ * @param {vscode.Uri} uri
+ * @returns {Promise<string>}
+ */
+async function readDocumentText(uri) {
+  const open = vscode.workspace.textDocuments.find(document => document.uri.fsPath && normalizeFsPath(document.uri.fsPath) === normalizeFsPath(uri.fsPath));
+  return open ? open.getText() : Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
+}
+
+/**
+ * What a Translation View lists, whatever its source: a title, notes for
+ * the header, and one item per translatable text - its CSV key, original
+ * text, and where it comes from.
+ *
+ * - timeline: every line with a translation id (see parseTranslatableLine);
+ * - characters: every character's name and nicknames (keys
+ *   Character/<id>/name and /nicknames, nicknames comma-separated), the
+ *   focused character first;
+ * - glossary: every entry's name, alternatives, text and extra (keys
+ *   Glossary/<glossary id>/<entry id>/<property>) - the properties Dialogic
+ *   exports to its CSV.
+ *
+ * @param {ReturnType<typeof parseTranslationViewUri>} parsed
+ * @returns {Promise<{title: string, notes: string[], items: {key: string, original: string, header: string}[]}>}
+ */
+async function collectTranslationViewItems(parsed) {
+  const idHint = '"Update CSV files" in Dialogic\'s translation settings adds them.';
+  if (parsed.source === 'characters') {
+    const names = [...cachedCharacterPaths.keys()].sort((a, b) => (a === parsed.focus ? -1 : b === parsed.focus ? 1 : 0));
+    const items = [];
+    let withoutId = 0;
+    for (const name of names) {
+      let info;
+      try { info = parseDchCharacterInfo(await readDocumentText(resolveResourcePath(cachedCharacterPaths.get(name)))); } catch (error) { continue; }
+      if (!info.translationId) { withoutId++; continue; }
+      items.push({ key: `Character/${info.translationId}/name`, original: info.displayName || name, header: `${name} - name` });
+      if (info.nicknames.length > 0) { items.push({ key: `Character/${info.translationId}/nicknames`, original: info.nicknames.join(', '), header: `${name} - nicknames (comma-separated)` }); }
+    }
+    return { title: 'the characters', notes: withoutId > 0 ? [`${withoutId} character(s) have no translation id yet - ${idHint}`] : [], items };
+  }
+  if (parsed.source === 'glossary') {
+    let entries = [];
+    try { entries = parseGlossaryResource(await readDocumentText(resolveResourcePath(parsed.glossary)), parsed.glossary); } catch (error) { entries = []; }
+    const items = [];
+    let withoutId = 0;
+    for (const entry of entries) {
+      if (!entry.glossaryId || !entry.entryId) { withoutId++; continue; }
+      const base = `Glossary/${entry.glossaryId}/${entry.entryId}`;
+      const properties = [['name', entry.name], ['alternatives', entry.alternatives.join(', ')], ['text', entry.text], ['extra', entry.extra]];
+      for (const [property, original] of properties) {
+        if (original) { items.push({ key: `${base}/${property}`, original, header: `${entry.name} - ${property}${property === 'alternatives' ? ' (comma-separated)' : ''}` }); }
+      }
+    }
+    return { title: `the glossary ${parsed.glossary}`, notes: withoutId > 0 ? [`${withoutId} entr(ies) have no translation id yet - ${idHint}`] : [], items };
+  }
+  const timelineText = await readTimelineText(parsed.timelineUri);
+  const withoutId = timelineText.split(/\r?\n/).filter(text => isPlayerFacingTextLine(text) && !/#id:\S+\s*$/.test(text)).length;
+  return {
+    title: parsed.timelineUri.path.split('/').pop(),
+    notes: withoutId > 0 ? [`${withoutId} line(s) of the timeline have no translation id yet - ${idHint}`] : [],
+    items: collectTranslatableLines(timelineText).map(({ line, text, entry }) => ({ key: entry.key, original: entry.original, header: `line ${line + 1} - ${describeTranslatableLine(text, entry.key)}` })),
+  };
 }
 
 /**
@@ -5360,31 +5654,27 @@ function collectTranslatableLines(timelineText) {
  * @param {string[]} languages
  * @returns {Promise<string>}
  */
-async function buildTranslationView(timelineUri, languages) {
-  const timelineText = await readTimelineText(timelineUri);
-  const timelineName = timelineUri.path.split('/').pop();
+async function buildTranslationView(parsed) {
+  const { languages } = parsed;
+  const { title, notes, items } = await collectTranslationViewItems(parsed);
   const original = getOriginalLocale() || 'original';
-  const items = collectTranslatableLines(timelineText);
-  const withoutId = timelineText.split(/\r?\n/).filter(text => isPlayerFacingTextLine(text) && !/#id:\S+\s*$/.test(text)).length;
-  const progress = languages.map(language => `${language} ${items.filter(item => getTranslation(item.entry.key, language)).length}/${items.length}`).join(', ');
+  const progress = languages.map(language => `${language} ${items.filter(item => getTranslation(item.key, language)).length}/${items.length}`).join(', ');
   const lines = [
-    `# Translation of ${timelineName} - ${progress} lines translated.`,
+    `# Translation of ${title} - ${progress} translated.`,
     `# Write the translations after ${languages.map(language => `"${language}:"`).join(', ')} and save (Ctrl+S) to put them in Dialogic's CSV.`,
     `# The "${original}:" lines are the original text, for reference: editing them changes nothing. Unchanged lines are never rewritten.`,
     '# To show other languages, use the globe button at the top right of this editor.',
   ];
-  if (withoutId > 0) {
-    lines.push(`# ${withoutId} line(s) of the timeline have no translation id yet - "Update CSV files" in Dialogic's translation settings adds them.`);
-  }
+  for (const note of notes) { lines.push(`# ${note}`); }
   if (cachedTranslationFiles.length === 0) {
     lines.push('# No Dialogic translation CSV found yet - saving will fail until "Update CSV files" has been run in Dialogic.');
   }
-  for (const { line, text, entry } of items) {
+  for (const item of items) {
     lines.push('');
-    lines.push(`[${entry.key}]  line ${line + 1} - ${describeTranslatableLine(text, entry.key)}`);
-    lines.push(`${original}: ${escapeViewText(entry.original)}`);
+    lines.push(`[${item.key}]  ${item.header}`);
+    lines.push(`${original}: ${escapeViewText(item.original)}`);
     for (const language of languages) {
-      lines.push(`${language}: ${escapeViewText(getTranslation(entry.key, language))}`);
+      lines.push(`${language}: ${escapeViewText(getTranslation(item.key, language))}`);
     }
   }
   return lines.join('\n') + '\n';
@@ -5444,30 +5734,29 @@ class TranslationViewFileSystem {
   }
 
   async readFile(uri) {
-    const { timelineUri, languages } = parseTranslationViewUri(uri);
     try {
-      return Buffer.from(await buildTranslationView(timelineUri, languages), 'utf8');
+      return Buffer.from(await buildTranslationView(parseTranslationViewUri(uri)), 'utf8');
     } catch (error) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
   }
 
   async writeFile(uri, content) {
-    const { timelineUri, languages } = parseTranslationViewUri(uri);
-    const written = parseTranslationView(Buffer.from(content).toString('utf8'), languages);
+    const parsed = parseTranslationViewUri(uri);
+    const written = parseTranslationView(Buffer.from(content).toString('utf8'), parsed.languages);
     const changes = [];
-    for (const item of collectTranslatableLines(await readTimelineText(timelineUri))) {
-      const byLanguage = written.get(item.entry.key);
+    for (const item of (await collectTranslationViewItems(parsed)).items) {
+      const byLanguage = written.get(item.key);
       if (!byLanguage) { continue; }
       for (const [language, translation] of byLanguage) {
-        if (translation !== getTranslation(item.entry.key, language)) {
-          changes.push({ ...item.entry, translation, language });
+        if (translation !== getTranslation(item.key, language)) {
+          changes.push({ key: item.key, original: item.original, translation, language });
         }
       }
     }
     this._suppressRefresh = true;
     try {
-      const count = await writeTranslations(changes, null, timelineUri);
+      const count = await writeTranslations(changes, null, parsed.timelineUri || vscode.Uri.file(''));
       this._mtimes.set(uri.toString(), Date.now());
       const touched = [...new Set(changes.map(change => change.language))].join(', ');
       vscode.window.setStatusBarMessage(count > 0 ? `DTL Reader: ${count} translation(s) saved (${touched})` : 'DTL Reader: no translation changed', 4000);
@@ -5489,7 +5778,8 @@ class TranslationViewFileSystem {
     const events = [];
     for (const document of vscode.workspace.textDocuments) {
       if (document.uri.scheme !== TRANSLATION_VIEW_SCHEME) { continue; }
-      if (timelineUri && parseTranslationViewUri(document.uri).timelineUri.toString() !== timelineUri.toString()) { continue; }
+      const viewTimeline = parseTranslationViewUri(document.uri).timelineUri;
+      if (timelineUri && (!viewTimeline || viewTimeline.toString() !== timelineUri.toString())) { continue; }
       this._mtimes.set(document.uri.toString(), Date.now());
       events.push({ type: vscode.FileChangeType.Changed, uri: document.uri });
     }
@@ -5558,15 +5848,61 @@ async function pickTranslationViewLanguages(current) {
  * pickTranslationViewLanguages) and opens the active timeline's
  * Translation View beside it.
  */
-async function openTranslationViewCommand() {
+/**
+ * The res:// path of a file, if it's inside the Godot project.
+ *
+ * @param {vscode.Uri} uri
+ * @returns {string | null}
+ */
+function toResPath(uri) {
+  if (!projectRootUri || !uri.fsPath) { return null; }
+  const root = normalizeFsPath(projectRootUri.fsPath).replace(/\/+$/, '');
+  const file = normalizeFsPath(uri.fsPath);
+  if (!file.startsWith(root + '/')) { return null; }
+  const relative = uri.fsPath.replace(/\\/g, '/').slice(root.length + 1);
+  return `res://${relative}`;
+}
+
+/**
+ * Which Translation View source the active file points to: its timeline,
+ * the characters (from a .dch file, that character first), its glossary
+ * (from a glossary .tres listed in project.godot) - else ask.
+ *
+ * @returns {Promise<object | null>}
+ */
+async function pickTranslationViewSource() {
   const editor = vscode.window.activeTextEditor;
-  if (!editor || editor.document.languageId !== 'dtl') {
-    vscode.window.showInformationMessage('DTL Reader: open a timeline (.dtl) first.');
-    return;
+  const document = editor && editor.document;
+  if (document && document.languageId === 'dtl' && document.uri.scheme !== TRANSLATION_VIEW_SCHEME) {
+    return { source: 'timeline', uri: document.uri };
   }
+  if (document && document.languageId === 'dch') {
+    return { source: 'characters', focus: findCharacterForDocument(document) };
+  }
+  const resPath = document ? toResPath(document.uri) : null;
+  if (resPath && cachedGlossaryFiles.some(file => file.toLowerCase() === resPath.toLowerCase())) {
+    return { source: 'glossary', file: cachedGlossaryFiles.find(file => file.toLowerCase() === resPath.toLowerCase()) };
+  }
+  const items = [{ label: '$(person) Characters', description: 'every character\'s name and nicknames', target: { source: 'characters' } }];
+  for (const file of cachedGlossaryFiles) { items.push({ label: `$(book) ${file.split('/').pop()}`, description: `glossary - ${file}`, target: { source: 'glossary', file } }); }
+  items.push({ label: '$(file) Open a timeline...', description: 'then run this command again from it', timeline: true });
+  const picked = await vscode.window.showQuickPick(items, { title: 'DTL: What to translate', placeHolder: 'Timelines are translated from their own editor (globe button)' });
+  if (!picked || picked.timeline) { return null; }
+  return picked.target;
+}
+
+/**
+ * "DTL: Open Translation View" - asks which languages to show (see
+ * pickTranslationViewLanguages) and opens the Translation View of the
+ * active timeline, of the characters (from a .dch file) or of a glossary
+ * (from its .tres file) - or asks which one - beside the current editor.
+ */
+async function openTranslationViewCommand() {
+  const target = await pickTranslationViewSource();
+  if (!target) { return; }
   const languages = await pickTranslationViewLanguages();
   if (!languages) { return; }
-  const document = await vscode.workspace.openTextDocument(translationViewUri(editor.document.uri, languages));
+  const document = await vscode.workspace.openTextDocument(translationViewUri(target, languages));
   await vscode.window.showTextDocument(document, { viewColumn: vscode.ViewColumn.Beside, preview: false });
 }
 
@@ -5580,10 +5916,10 @@ async function changeTranslationViewLanguagesCommand() {
   const editor = vscode.window.activeTextEditor;
   if (!editor || editor.document.uri.scheme !== TRANSLATION_VIEW_SCHEME) { return; }
   const oldDocument = editor.document;
-  const { timelineUri, languages: current } = parseTranslationViewUri(oldDocument.uri);
-  const languages = await pickTranslationViewLanguages(current);
+  const parsed = parseTranslationViewUri(oldDocument.uri);
+  const languages = await pickTranslationViewLanguages(parsed.languages);
   if (!languages) { return; }
-  const document = await vscode.workspace.openTextDocument(translationViewUri(timelineUri, languages));
+  const document = await vscode.workspace.openTextDocument(translationViewUri(translationViewTarget(parsed), languages));
   await vscode.window.showTextDocument(document, { viewColumn: editor.viewColumn, preview: false });
   if (!oldDocument.isDirty && vscode.window.tabGroups) {
     for (const group of vscode.window.tabGroups.all) {
@@ -5618,8 +5954,11 @@ function syncTranslationScroll(event) {
     const entry = parseTranslatableLine(document.lineAt(cursorLine).text);
     if (!entry) { return; }
     key = entry.key;
-    targets = vscode.window.visibleTextEditors.filter(other => other.document.uri.scheme === TRANSLATION_VIEW_SCHEME
-      && parseTranslationViewUri(other.document.uri).timelineUri.toString() === document.uri.toString());
+    targets = vscode.window.visibleTextEditors.filter(other => {
+      if (other.document.uri.scheme !== TRANSLATION_VIEW_SCHEME) { return false; }
+      const viewTimeline = parseTranslationViewUri(other.document.uri).timelineUri;
+      return !!viewTimeline && viewTimeline.toString() === document.uri.toString();
+    });
     findLine = other => {
       for (let line = 0; line < other.document.lineCount; line++) {
         if (other.document.lineAt(line).text.startsWith(`[${key}]`)) { return line; }
@@ -5632,7 +5971,9 @@ function syncTranslationScroll(event) {
       if (headerMatch) { key = headerMatch[1]; }
     }
     if (!key) { return; }
-    const timelineUri = parseTranslationViewUri(document.uri).timelineUri.toString();
+    const viewTimeline = parseTranslationViewUri(document.uri).timelineUri;
+    if (!viewTimeline) { return; } // character / glossary views have no single file to follow
+    const timelineUri = viewTimeline.toString();
     targets = vscode.window.visibleTextEditors.filter(other => other.document.uri.toString() === timelineUri);
     findLine = other => {
       for (let line = 0; line < other.document.lineCount; line++) {
@@ -6218,8 +6559,45 @@ let glossaryDefaultColor = 'rgba(176, 224, 230, 1)';
 /** project.godot's `dialogic/glossary/default_case_sensitive` (true by default). @type {boolean} */
 let glossaryDefaultCaseSensitive = true;
 
-/** One regular expression per entry (its name and alternatives), rebuilt with the entries. @type {{entry: GlossaryEntry, pattern: RegExp}[]} */
+/** The glossary files listed in project.godot. @type {string[]} */
+let cachedGlossaryFiles = [];
+
+/** One regular expression per entry (its name and alternatives, plus their translation in translation mode). @type {{entry: GlossaryEntry, pattern: RegExp}[]} */
 let glossaryPatterns = [];
+
+/** What glossaryPatterns were built for ("<language>|<translations version>"). @type {string|null} */
+let glossaryPatternsKey = null;
+
+/** Bumped whenever the translation CSVs are re-read, so glossary patterns follow them. @type {number} */
+let translationsVersion = 0;
+
+/**
+ * The glossary patterns for the current translation language: like
+ * Dialogic in a translated game, an entry is also recognized by its
+ * translated name and alternatives (CSV keys .../name and .../alternatives,
+ * comma-separated).
+ *
+ * @returns {{entry: GlossaryEntry, pattern: RegExp}[]}
+ */
+function getGlossaryPatterns() {
+  const language = getTranslationLanguage() || '';
+  const key = `${language}|${translationsVersion}`;
+  if (key === glossaryPatternsKey) { return glossaryPatterns; }
+  const escapeRegex = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  glossaryPatterns = cachedGlossaryEntries.filter(entry => entry.name).map(entry => {
+    const words = [entry.name, ...entry.alternatives];
+    if (language && entry.glossaryId && entry.entryId) {
+      const base = `Glossary/${entry.glossaryId}/${entry.entryId}`;
+      words.push(getTranslation(`${base}/name`, language), ...getTranslation(`${base}/alternatives`, language).split(',').map(word => word.trim()));
+    }
+    const unique = [...new Set(words.filter(Boolean))].sort((a, b) => b.length - a.length).map(escapeRegex);
+    const caseSensitive = entry.caseSensitive === null ? glossaryDefaultCaseSensitive : entry.caseSensitive;
+    // Whole words, like Dialogic's (?<=\W|^)(?<!\\)(word)(?!])(?=\W|$)
+    return { entry, pattern: new RegExp(`(?<![\\p{L}\\p{N}_\\\\])(?:${unique.join('|')})(?![\\p{L}\\p{N}_\\]])`, caseSensitive ? 'gu' : 'giu') };
+  });
+  glossaryPatternsKey = key;
+  return glossaryPatterns;
+}
 
 /**
  * Read a GDScript literal value as text: a quoted string (unescaped), or
@@ -6310,13 +6688,8 @@ async function refreshGlossaries(dialogicSection) {
     }
   }
   cachedGlossaryEntries = entries;
-  const escapeRegex = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  glossaryPatterns = entries.map(entry => {
-    const words = [entry.name, ...entry.alternatives].filter(Boolean).sort((a, b) => b.length - a.length).map(escapeRegex);
-    const caseSensitive = entry.caseSensitive === null ? glossaryDefaultCaseSensitive : entry.caseSensitive;
-    // Whole words, like Dialogic's (?<=\W|^)(?<!\\)(word)(?!])(?=\W|$)
-    return { entry, pattern: new RegExp(`(?<![\\p{L}\\p{N}_\\\\])(?:${words.join('|')})(?![\\p{L}\\p{N}_\\]])`, caseSensitive ? 'gu' : 'giu') };
-  }).filter(item => item.entry.name);
+  cachedGlossaryFiles = gdArrayToStrings(filesMatch ? filesMatch[1] : '');
+  glossaryPatternsKey = null; // rebuilt on next use
 }
 
 /**
@@ -6328,7 +6701,8 @@ async function refreshGlossaries(dialogicSection) {
  * @returns {{entry: GlossaryEntry, start: number, end: number}[]}
  */
 function findGlossaryWords(document, text) {
-  if (glossaryPatterns.length === 0) { return []; }
+  const patterns = getGlossaryPatterns();
+  if (patterns.length === 0) { return []; }
   const from = bbcodePreviewStart(document, text);
   if (from === -1) { return []; }
   const blocked = new Array(text.length).fill(false);
@@ -6337,7 +6711,7 @@ function findGlossaryWords(document, text) {
   while ((block = blockPattern.exec(text)) !== null) { for (let i = block.index; i < block.index + block[0].length; i++) { blocked[i] = true; } }
   const found = [];
   const taken = new Array(text.length).fill(false);
-  for (const { entry, pattern } of glossaryPatterns) {
+  for (const { entry, pattern } of patterns) {
     pattern.lastIndex = from;
     let match;
     while ((match = pattern.exec(text)) !== null) {
@@ -6372,7 +6746,7 @@ function provideGlossaryHover(document, position) {
     return getTranslation(`Glossary/${entry.glossaryId}/${entry.entryId}/${property}`, language);
   };
   const markdown = new vscode.MarkdownString();
-  const title = translated('title') || entry.title || entry.name;
+  const title = translated('title') || (language ? translated('name') : '') || entry.title || entry.name;
   markdown.appendMarkdown(entry.color || glossaryDefaultColor ? `${createColoredTitleMarkdown(title, entry.color || glossaryDefaultColor)}\n\n` : `**${title}**\n\n`);
   const body = translated('text') || entry.text;
   if (body) { markdown.appendMarkdown(`${body}\n\n`); }
@@ -6539,7 +6913,9 @@ function activate(context) {
     vscode.workspace.registerFileSystemProvider(TRANSLATION_VIEW_SCHEME, translationViewFileSystem = new TranslationViewFileSystem()),
     vscode.window.onDidChangeTextEditorSelection(syncTranslationScroll),
     vscode.workspace.onDidSaveTextDocument(document => {
-      if (document.languageId === 'dtl' && translationViewFileSystem) { translationViewFileSystem.refresh(document.uri); }
+      if (!translationViewFileSystem) { return; }
+      if (document.languageId === 'dtl') { translationViewFileSystem.refresh(document.uri); }
+      else if (document.languageId === 'dch' || /\.tres$/i.test(document.uri.fsPath || '')) { translationViewFileSystem.refresh(); }
     }),
     vscode.languages.registerHoverProvider('dtl', { provideHover: provideTranslationHover }),
     vscode.languages.registerCodeActionsProvider('dtl', { provideCodeActions: provideTranslationCodeActions }, { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }),
@@ -6918,8 +7294,18 @@ function activate(context) {
           // expression line, and falling through used to dump every
           // character name and dialogue word into the list instead.
           // ===================================================================
+          const setTargetItems = createSetTargetSuggestions(beforeCursor, position);
+          if (setTargetItems) {
+            return setTargetItems;
+          }
           if (isGlobalScriptExpressionLine(beforeCursor)) {
-            return createGlobalScriptSuggestions(beforeCursor, triggerCharacter);
+            return createGlobalScriptSuggestions(beforeCursor, triggerCharacter).map(item => {
+              // Ranges are built on line 0 inside the helper - move them to this line.
+              if (item.range && item.range.start.line === 0 && position.line !== 0) {
+                item.range = new vscode.Range(position.line, item.range.start.character, position.line, item.range.end.character);
+              }
+              return item;
+            });
           }
           // ===================================================================
           // MOOD TAG: "John (happy" or "join John (happy" - checked first

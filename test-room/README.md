@@ -55,7 +55,7 @@ every DTL Reader feature without risking real project data.
   choices with conditions, `{variables}`, all four BBCode balises plus a
   custom one, every bracket command (`wait`, `wait_input`, `signal`,
   `voice`, `audio`, `clear`, `background`, `style`, `text_input`,
-  `end_timeline`), flow control (`set`/`if`/`elif`/`else`/`while`),
+  `end_timeline`), flow control (`set`/`if`/`elif`/`else`, and a loop made of a condition jumping back to a label),
   `label`/`jump`, a quoted character name (`"John Smith"`), and a
   single-quoted attribute value (`[wait time='1.5']`).
 
@@ -105,7 +105,7 @@ every DTL Reader feature without risking real project data.
 - **Autoload colors in `{}`**: `{Global.hearts}` should be colored like
   `Global.hearts` on an `if` line; `{variable.test}` should not change.
 - **Outline**: open the Outline view - `loop_start` should list the
-  `while` block and both choices with their jumps, `jump loop_start`
+  `if` block and both choices with their jumps, `jump loop_start`
   saying "back to line 69". Set `DTL Reader > Outline: Style` to
   `indentation` (no jumps, labels not grouping) or `dialogic` (labels
   only), then edit the file or reopen it to refresh the Outline view.
@@ -155,6 +155,15 @@ every DTL Reader feature without risking real project data.
   and underlined (from `glossaries/world_glossary.tres`); hover them. With
   the translation language set to `fr`, "mana" shows its French text.
   Hover `TestCharacter` to see "Super Jean", its French name.
+- **Character / glossary translation**: open `characters/TestCharacter.dch`
+  (or `glossaries/world_glossary.tres`) and click the globe button, pick
+  `fr` - the characters' names and nicknames (or the glossary entries)
+  are listed. Fill one in, Ctrl+S, and check
+  `translations/dialogic_character_translations.csv` (or `_glossary_`).
+  In `fr` mode, "PM" (the French "MP") is recognized as a glossary word.
+- **Expressions**: type `set ` (variables), `set {chapter} ` (operators),
+  `set {variable.Ttttt} = ` (true/false), `if {chapter} ` (comparisons),
+  `if {chapter} == ` (values).
 - **No stray suggestions in dialogue**: typing `.` or a space at the end
   of a dialogue sentence should NOT open a suggestion list.
 - **BBCode**: in dialogue type `[co` - `code` and `color` should appear;

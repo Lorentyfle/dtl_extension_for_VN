@@ -66,10 +66,11 @@ audio music "res://assets/theme.ogg"
 [style name="default"]
 [text_input text="Type something" var="{answer}" placeholder="..."]
 
-## Loops back here until the chapter reaches 3.
+## Loops back here until the chapter reaches 3 (Dialogic has no while:
+## a loop is a condition jumping back to a label).
 ## Hover "loop_start" in the jump below to read this.
 label loop_start
-while {chapter} < 3
+if {chapter} < 3:
     set {chapter} += 1
     jump loop_start
 

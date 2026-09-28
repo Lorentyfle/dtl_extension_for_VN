@@ -1,4 +1,17 @@
 # Changelog
+## [1.5.0]
+- Removed `while`: Dialogic has no `while` (nor `for`) - its condition event only knows `if`, `elif` and `else`, and a loop is a condition jumping back to a label. `while` is no longer highlighted as a keyword, indented as a block, listed in the outline or given suggestions; a `while` line is now shown as what Dialogic makes of it, text.
+- Translation View for characters and glossaries, not only timelines:
+    - From a `.dch` file, the globe button (or "DTL: Open Translation View") opens the **characters** translation view: every character's name and nicknames (Dialogic keeps them in one project-wide CSV), the character being edited first.
+    - From a glossary `.tres` file, it opens that **glossary**'s translation view: each entry's name, alternatives, text and extra - the properties Dialogic exports.
+    - From anywhere else, it asks what to translate (the characters or a glossary).
+    - Saving writes into the right CSV (`dialogic_character_translations.csv`, the glossary's CSV) with the keys Dialogic uses (`Character/<id>/name`, `Glossary/<glossary id>/<entry id>/<property>`), adding the rows that are missing.
+- In translation mode, glossary words are also recognized by their translated name and alternatives, like Dialogic does in a translated game.
+- Expressions, following Dialogic's syntax, on `set`, `if` and `elif` lines:
+    - `{variable}` suggestions without having to type the `{` - Dialogic variables (with their type) and autoload variables (`{Global.hearts}`).
+    - After `set {variable} `: the operators `=`, `+=`, `-=`, `*=`, `/=`. After `=`: values fitting the variable (`true`/`false` for a bool, a random number `range(1, 10).pick_random()` for a number, `""` for a text).
+    - After a value: comparisons (`==`, `!=`, `>`, `<`, `>=`, `<=`) and `and`/`or` in conditions, arithmetic (`+`, `-`, `*`, `/`, `%`) in set values - each re-opening the suggestions for the next value.
+    - `not`, `true`, `false` where a value is expected, including right after a comparison.
 ## [1.4.0]
 - Dialogic's own text effects and modifiers, inside dialogue, narration and choices:
     - Autocomplete after `[` (with Dialogic's commands, before the BBCode tags) and documentation on hover: `[pause=x]`, `[speed=x]`, `[lspeed=x]`, `[signal=arg]`, `[portrait=name]`, `[mood=name]`, `[extra_data=value]`, `[aa]`, `[ns]`, `[nrs]`, `[input]`, `[n]`, `[n+]` and conditional text `[if {condition} yes/no]`.

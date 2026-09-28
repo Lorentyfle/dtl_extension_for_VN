@@ -52,7 +52,7 @@ Suggestions appear where they make sense, and only there - no list pops up while
 
 ![DTL autocomplete](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/demo_autocomplete.gif)
 
-Hover any event, parameter or position to read its documentation. Indentation follows `if`/`elif`/`else`/`while` blocks and choices when you press Enter.
+Hover any event, parameter or position to read its documentation. Indentation follows `if`/`elif`/`else` blocks and choices when you press Enter.
 
 ## Characters, moods and portraits
 
@@ -67,7 +67,8 @@ Hover any event, parameter or position to read its documentation. Indentation fo
 ## Variables and autoloads
 
 - **Dialogic variables**: `{` suggests the variables of your project, folder by folder (`{chapter.` lists `chapter`'s variables). Hover one to see its default value and type.
-- **Autoloads** (scripts and scenes from Project Settings > Autoload) after `do`, `if`, `elif`, `while`, in `set` values and inside `{}`: their functions, variables, constants and enums (`VnLibrary.TimeId.CHAP2_R1`), with the `##` documentation comments of your GDScript code on hover. `do` only suggests functions, since it can only call one.
+- **Expressions** on `set`, `if` and `elif` lines follow Dialogic's syntax: `{variables}` are suggested without typing the `{`, `set {x} ` suggests `=`, `+=`, `-=`, `*=`, `/=`, then values fitting the variable (`true`/`false`, a random number...), and after a value come the comparisons and `and`/`or` (or `+ - * / %` in a `set`).
+- **Autoloads** (scripts and scenes from Project Settings > Autoload) after `do`, `if`, `elif`, in `set` values and inside `{}`: their functions, variables, constants and enums (`VnLibrary.TimeId.CHAP2_R1`), with the `##` documentation comments of your GDScript code on hover. `do` only suggests functions, since it can only call one.
 - Autoloads, enums, constants and properties each get their own color, inside `{}` too.
 - Autoloads from addons (like Dialogic's own `Dialogic`) are hidden by default, as they expose hundreds of members - see `dtlReader.includeAddonAutoloads`.
 
@@ -108,7 +109,7 @@ Tags can be nested and combined in any way (`[b][i][rainbow][wave]...`). Hex col
 
 ## Glossary
 
-The words of your Dialogic glossaries (listed in Dialogic's Glossary settings) are recognized in dialogue, narration and choices, the way Dialogic finds them in the game: whole words, the entry's name and alternatives, with its case sensitivity. They get their glossary color with a dotted underline, and hovering one shows its title, text and extra info - translated in translation mode. Glossary words are also suggested first while writing dialogue.
+The words of your Dialogic glossaries (listed in Dialogic's Glossary settings) are recognized in dialogue, narration and choices, the way Dialogic finds them in the game: whole words, the entry's name and alternatives, with its case sensitivity - and their translated forms in translation mode. They get their glossary color with a dotted underline, and hovering one shows its title, text and extra info - translated in translation mode. Glossary words are also suggested first while writing dialogue.
 
 ## Navigation and outline
 
@@ -146,7 +147,7 @@ Nothing is reported about characters, variables or timelines when your project d
 DTL Reader works with the translation CSV files Dialogic generates (**Update CSV files** in Dialogic's Translation settings). After adding a new language, open Godot and click **Collect translation** so the game can use it.
 
 - **Hover a line's `#id:`** to see it in every language. Hover a character to see their translated names, and a glossary word in translation mode to see its translated entry.
-- **Translation View** - **DTL: Open Translation View**, or the globe button at the top right of a timeline: the whole timeline as a translation sheet beside it, with each line's original text and an editable line for each language you pick (one or several, to translate or to compare). Type freely, then save with **Ctrl+S** to write every change into the CSV. Both editors scroll together; the view's own globe button changes its languages.
+- **Translation View** - **DTL: Open Translation View**, or the globe button at the top right of a timeline, a character (`.dch`) or a glossary (`.tres`): for a timeline, the whole timeline as a translation sheet beside it, with each line's original text and an editable line for each language you pick (one or several, to translate or to compare). Type freely, then save with **Ctrl+S** to write every change into the CSV. Both editors scroll together; the view's own globe button changes its languages. From a `.dch` file it lists every character's name and nicknames, from a glossary every entry's name, alternatives, text and extra.
 - **Translation mode** - set `dtlReader.translation.language` (or run **DTL: Select Translation Language**): each translatable line shows its translation at its end, untranslated lines are marked, **DTL: Translate Line** (lightbulb or right-click) translates the current line, and **DTL: Go to Next Untranslated Line** finds the next one.
 
 ## Character files (.dch)
