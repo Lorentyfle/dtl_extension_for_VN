@@ -1,8 +1,13 @@
 # DTL Reader
 
+[![Marketplace version](https://vsmarketplacebadges.dev/version-short/lorentyfle.dtl-reader.svg)](https://marketplace.visualstudio.com/items?itemName=lorentyfle.dtl-reader)
+[![Installs](https://vsmarketplacebadges.dev/installs-short/lorentyfle.dtl-reader.svg)](https://marketplace.visualstudio.com/items?itemName=lorentyfle.dtl-reader)
+[![CI](https://github.com/Lorentyfle/dtl_extension_for_VN/actions/workflows/ci.yml/badge.svg)](https://github.com/Lorentyfle/dtl_extension_for_VN/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **VS Code language support for [Dialogic 2](https://github.com/dialogic-godot/dialogic): timelines (`.dtl`) and characters (`.dch`).**
 
-Write your Dialogic timelines outside the Godot editor with syntax highlighting, context-aware autocomplete, documentation on hover, error checking against your Godot project, an outline, a live preview of BBCode effects, and tools to translate your story.
+Write your Dialogic timelines outside the Godot editor with syntax highlighting, context-aware autocomplete, documentation on hover, error checking against your Godot project with quick fixes, navigation, an outline, a live preview of BBCode effects, tools to translate your story - and play any timeline in Godot, from its start or from the line you're on.
 
 ![A short screen recording scrolling through a highlighted `.dtl` file, showing the DTL Dark theme in action.](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/what_dtl_looks_like.gif)
 
@@ -11,6 +16,7 @@ Write your Dialogic timelines outside the Godot editor with syntax highlighting,
 - [Writing timelines](#writing-timelines)
 - [Characters, moods and portraits](#characters-moods-and-portraits)
 - [Variables and autoloads](#variables-and-autoloads)
+- [Custom events](#custom-events)
 - [Text effects](#text-effects)
 - [BBCode](#bbcode)
 - [Glossary](#glossary)
@@ -18,6 +24,7 @@ Write your Dialogic timelines outside the Godot editor with syntax highlighting,
 - [Error checking](#error-checking)
 - [Translation](#translation)
 - [Character files (.dch)](#character-files-dch)
+- [Playing a timeline](#playing-a-timeline)
 - [Themes](#themes)
 - [Settings](#settings)
 - [Commands](#commands)
@@ -28,13 +35,15 @@ Write your Dialogic timelines outside the Godot editor with syntax highlighting,
 | | |
 |---|---|
 | **Highlighting** | Dialogue, narration, choices, every Dialogic event, `{variables}`, BBCode, translation ids, signal dictionaries, autoload references |
-| **Autocomplete** | Events, characters, moods, positions, animations, `res://` paths, labels and other timelines, `{variables}`, autoloads, text effects, BBCode tags, glossary words |
+| **Autocomplete** | Events (your custom ones too), characters, moods, positions, animations, `res://` paths, labels and other timelines, `{variables}`, autoloads, text effects, BBCode tags, glossary words, whole blocks (choice, condition, loop...) |
 | **Hover documentation** | Events and their parameters, text effects, BBCode tags, glossary words, characters (with their translated names), moods, LayeredPortrait layers, variables, autoload members, labels |
-| **Navigation** | Ctrl+Click on a `jump` (also into another timeline), Find All References and Rename for labels, jump counts above labels, Outline view in three styles |
-| **Error checking** | Missing labels and timelines, unknown characters, moods and variables, unclosed BBCode tags - each one configurable |
+| **Navigation** | Ctrl+Click on a `jump`, a character, a mood, a `res://` path, an autoload member or a glossary word; Go to Symbol in Workspace (Ctrl+T) for labels, timelines and characters; Find All References and Rename for labels, jump counts above labels, Outline view in three styles |
+| **Error checking** | Missing labels and timelines, unknown characters, moods and variables, unclosed BBCode tags, events that never run, unused characters and portraits - each one configurable, most with a quick fix |
+| **Play in Godot** | Run the timeline in your game with one click - or from the cursor's line - like Dialogic's own play buttons |
 | **BBCode preview** | `[color]`, `[rainbow]`, `[fade]`, `[b][i]`... show their effect right in the editor, in any combination |
 | **Translation** | Translations next to the original text, a side-by-side Translation View for one or several languages, written into Dialogic's CSV |
 | **Character files** | `.dch` highlighting, autocomplete of every key and value Dialogic uses, color picker, portraits suggested from your timelines |
+| **Themes** | Seven themes made for timelines, from Godot-like to hacker green, warm and high contrast |
 
 Everything is read live from your Godot project (`project.godot`, `.dch`, `.tscn`, `.gd` and the translation CSVs), and updates as soon as those files change.
 
@@ -48,10 +57,12 @@ DTL Reader works in two ways, depending on whether it finds your Godot project's
 | Events, parameters, BBCode, text effects: autocomplete and documentation | yes | yes |
 | Characters, moods, `{variables}`, audio channels, `res://` paths | the project's (with their documentation) | the ones the timeline already uses |
 | Labels: jumps, Ctrl+Click, references, rename | every timeline, including `jump Timeline/label` | inside the timeline |
+| Ctrl+Click on characters, moods, `res://` paths | yes | - |
 | Autoloads (`do Global.foo()`...) | yes | - |
 | Glossary colors and hovers | yes | - |
 | Error checking | everything | missing labels and unclosed BBCode (nothing to check the rest against) |
 | Translation (mode, Translation View, hovers) | yes | - (it needs the project's CSV files) |
+| Custom events, unused characters and portraits, Play in Godot | yes | - |
 | `.dch` files | everything | keys, values and documentation of the file itself |
 
 Open the folder containing `project.godot` (or a parent folder of it) to get everything.
@@ -68,6 +79,7 @@ Suggestions appear where they make sense, and only there - no list pops up while
 - **`res://` paths**, filtered to what each command accepts: audio files for `[voice path=""]` and `audio music ""`, images and videos for `[background arg=""]`, scenes for `[background scene=""]`, images for `[img]`, fonts for `[font=]`. Godot's `.import` and `.uid` files are never suggested.
 - **Labels** after `jump`, **other timelines** (`jump chapter2/`), then that timeline's labels.
 - **Words already used** in the timeline while you write dialogue (can be turned off).
+- **Whole blocks** on an empty line, with the events: `choice` (two choices and what follows each), `if` (if / else, or if / elif / else), `loop` (a label and a condition jumping back to it - Dialogic has no `while`), `scene` (join, a line, leave) and `text_input` (a question and a check of the answer). Their character placeholders list your characters.
 
 ![DTL autocomplete](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/demo_autocomplete.gif)
 
@@ -86,10 +98,29 @@ Hover any event, parameter or position to read its documentation. Indentation fo
 ## Variables and autoloads
 
 - **Dialogic variables**: `{` suggests the variables of your project, folder by folder (`{chapter.` lists `chapter`'s variables). Hover one to see its default value and type.
-- **Expressions** on `set`, `if` and `elif` lines follow Dialogic's syntax: `{variables}` are suggested without typing the `{`, `set {x} ` suggests `=`, `+=`, `-=`, `*=`, `/=`, then values fitting the variable (`true`/`false`, a random number...), and after a value come the comparisons and `and`/`or` (or `+ - * / %` in a `set`).
+- **Expressions** on `set`, `if` and `elif` lines follow Dialogic's syntax, with a short list where a value starts: after `if`, `elif`, `and`/`or` or a comparison, `{}`, the autoloads, `true`, `false` and `not`; after `set`, `{}` and the autoloads (`{VnManager.current_vn_time}`). Picking `{}` opens the variables inside it, folder by folder (`{_tmp_var.random_var.rdm_var1}`). `set {x} ` suggests `=`, `+=`, `-=`, `*=`, `/=`, then values fitting the variable (`true`/`false`, a random number...), and after a value come the comparisons and `and`/`or` (or `+ - * / %` in a `set`).
 - **Autoloads** (scripts and scenes from Project Settings > Autoload) after `do`, `if`, `elif`, in `set` values and inside `{}`: their functions, variables, constants and enums (`VnLibrary.TimeId.CHAP2_R1`), with the `##` documentation comments of your GDScript code on hover. `do` only suggests functions, since it can only call one.
 - Autoloads, enums, constants and properties each get their own color, inside `{}` too.
 - Autoloads from addons (like Dialogic's own `Dialogic`) are hidden by default, as they expose hundreds of members - see `dtlReader.includeAddonAutoloads`.
+
+![Suggestions on set and if lines: {} opening the variables folder by folder, then an autoload's members, with their documentation on hover](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/expressions.gif)
+
+## Custom events
+
+The events you add to Dialogic yourself - scripts extending `DialogicEvent` in Dialogic's extensions folder (**Project Settings > Dialogic > Extensions folder**, `res://addons/dialogic_additions/` by default) - work like the built-in ones: `[` suggests them, `[my_event ` suggests their parameters, and hovering shows their `event_name`, `event_description` and the `##` comment of each property a parameter sets, with its type and default. A `bool` parameter suggests `true`/`false`, and the `suggestions` of `get_shortcode_parameters()` are suggested as values.
+
+```gdscript
+## How strong the shake is.
+@export var strength: float = 1.0
+
+func get_shortcode() -> String:
+	return "screen_shake"
+
+func get_shortcode_parameters() -> Dictionary:
+	return {
+		"strength": {"property": "strength", "default": 1.0},
+	}
+```
 
 ## Text effects
 
@@ -126,13 +157,25 @@ An unknown `[portrait=...]` is reported like an unknown mood.
 
 Tags can be nested and combined in any way (`[b][i][rainbow][wave]...`). Hex colors get a **color picker**.
 
+![BBCode effects shown in the editor: red text, a wavy underline, rainbow letters, bold italic, an outline, letters fading away, a hint and a heart character](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/bbcode_preview.png)
+
 ## Glossary
 
 The words of your Dialogic glossaries (listed in Dialogic's Glossary settings) are recognized in dialogue, narration and choices, the way Dialogic finds them in the game: whole words, the entry's name and alternatives, with its case sensitivity - and their translated forms in translation mode. They get their glossary color with a dotted underline, hovering one shows its title, text and extra info - translated in translation mode - and Ctrl+click opens its entry in the glossary file. Glossary words are also suggested first while writing dialogue.
 
+![A glossary word colored in the text, its entry shown on hover, and Ctrl+Click opening it in the glossary file](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/glossary.gif)
+
 ## Navigation and outline
 
-- **Ctrl+Click** (or F12) a `jump` target to go to its label - `jump OtherTimeline/label` opens the other timeline. Ctrl+Click a glossary word to open its glossary entry.
+- **Ctrl+Click** (or F12) to open what a name refers to:
+  - a `jump` target: its label - `jump OtherTimeline/label` opens the other timeline;
+  - a character (speaker or `join`/`update`/`leave`): their `.dch` file;
+  - a mood - `(happy)` or `[portrait=happy]`: that portrait in the character's `.dch` file;
+  - a `res://` path: the file;
+  - an autoload (`Global`, `Global.apply_tint`, `Global.State.IDLE`, also inside `{}`): its script, on that member's line;
+  - a glossary word: its glossary entry.
+  In a `.dch` file, Ctrl+Click a `res://` path, or the `default_portrait` value to go to that portrait.
+- **Go to Symbol in Workspace** (Ctrl+T) finds any label of any timeline, a timeline, or a character.
 - **Find All References** (Shift+F12) on a label or a jump lists every jump to it, in every timeline. **Rename** (F2) renames a label and every jump to it at once.
 - Above each label, **"N jumps here"** (click to list them) - or "no jump here" for the labels nothing leads to.
 - **Document a label** with `##` comment lines right above it: the documentation shows when hovering the label or a `jump` to it, and in the `jump` suggestions.
@@ -158,8 +201,37 @@ Checked against your Godot project as you type. Each check can be set to error, 
 | A BBCode tag without its closing tag | warning |
 | A line not translated yet (in translation mode) | hint |
 | `.dch`: a default portrait or a portrait scene that doesn't exist | error |
+| Events that never run: after a top-level `[end_timeline]`, `jump` or `return`, until the next label a jump leads to (shown faded) | hint |
+| A label nothing leads to: no `jump` to it in any timeline, no script naming it (`Dialogic.start("chapter1", "intro")`), and the timeline stops right before it | warning |
+| `.dch`: a character no timeline uses | hint |
+| `.dch`: a portrait no timeline uses, other than the default one (shown faded) | hint |
 
-Nothing is reported about characters, variables or timelines when your project doesn't declare them.
+Nothing is reported about characters, variables or timelines when your project doesn't declare them. A `jump {variable}` could lead to any label, so labels aren't reported in a timeline it may jump to.
+
+**Quick fixes** (the lightbulb, or Ctrl+.):
+
+| Problem | Fixes |
+|---|---|
+| A misspelled label, timeline, character, mood, `{variable}`, `default_portrait` or portrait scene | **Change to "..."** - the closest existing names (a swapped letter or a wrong case counts as a typo) |
+| An unknown character | **Add the character to project.godot** - registered in Dialogic's character directory, with a new `Name.dch` file (its portrait is the mood the line gives them, if any), in the folder you pick - or the existing `Name.dch` if the project already has one |
+| An unknown `{variable}` | **Add the variable to project.godot** - in Dialogic's variables, creating its folders (`{chapter1.met_john}`), as any of Dialogic's types: a text (`""`), a whole number (`0`), a decimal number (`0.0`) or a bool (`false`). The type fitting how the line uses it comes first |
+| `jump` to a missing label | **Create "label ..."** at the end of the timeline it points to, after an `[end_timeline]` if the timeline didn't end there |
+| A `(mood)` the character doesn't have | **Add the portrait** to the character's `.dch` file, then opens it on the new portrait's image path |
+| A `jump` with a `#id:` | **Remove the translation id** |
+| An unclosed BBCode tag | **Close [tag]** at the end of the line's text (before the `#id:` and a choice's condition) |
+
+For a new character, the folders most likely to fit come first, each saying why:
+
+1. a character folder named like the timeline's folder (`timelines/chapter2/market.dtl` suggests `characters/chapter2/`);
+2. the folder of the characters this timeline already uses - a new character usually belongs with the scene's cast;
+3. the project's other character folders, the most used first;
+4. with no character yet, a `characters` folder beside your timelines folder, or the timeline's own folder.
+
+Press Enter for the first one, or pick **Other folder...** for any folder of the project. The file is always named after the character, since Dialogic uses the file name as the character's identifier.
+
+The fixes adding to project.godot save it right away - unless it's open with unsaved changes of your own, which are then left for you to save. If the Godot editor is open, reload the project there afterwards (**Project > Reload Current Project**), so Godot doesn't write its older settings over them.
+
+![Quick fixes: a misspelled jump corrected, and an unknown character added to project.godot in the chosen folder](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/quick_fixes.gif)
 
 ## Translation
 
@@ -168,6 +240,8 @@ DTL Reader works with the translation CSV files Dialogic generates (**Update CSV
 - **Hover a line's `#id:`** to see it in every language. Hover a character to see their translated names, and a glossary word in translation mode to see its translated entry.
 - **Translation View** - **DTL: Open Translation View**, or the globe button at the top right of a timeline, a character (`.dch`) or a glossary (`.tres`): for a timeline, the whole timeline as a translation sheet beside it, with each line's original text and an editable line for each language you pick (one or several, to translate or to compare). Type freely, then save with **Ctrl+S** to write every change into the CSV. Both editors scroll together; the view's own globe button changes its languages. From a `.dch` file it lists every character's name and nicknames, from a glossary every entry's name, alternatives, text and extra; from anywhere else, it asks what to translate - the characters, a glossary or any timeline.
 - **Translation mode** - set `dtlReader.translation.language` (or run **DTL: Select Translation Language**): each translatable line shows its translation at its end, untranslated lines are marked, **DTL: Translate Line** (lightbulb or right-click) translates the current line, and **DTL: Go to Next Untranslated Line** finds the next one.
+
+![The Translation View opened with the globe button, a translation typed and saved into the CSV with Ctrl+S](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/translation_view.gif)
 
 ## Character files (.dch)
 
@@ -180,15 +254,29 @@ Dialogic character files get their own support:
 - **Color picker** on `Color(...)` values.
 - **Hover** documentation for every key, and hovering a portrait shows it like in a timeline.
 - **Errors** for a default portrait or a portrait scene that doesn't exist.
+- **Unused**: a hint when no timeline uses the character, and portraits no timeline uses are faded.
+
+## Playing a timeline (beta)
+
+The **play** button at the top right of a timeline (or **DTL: Play Timeline in Godot**, also in the right-click menu) runs it in your game, the way Dialogic's own play button does: the timeline is saved, set as the one to play in Dialogic's editor settings, and Godot starts Dialogic's test scene on it. Godot's output goes to the **DTL Reader: Godot** output panel.
+
+**Play from this line** - **Ctrl+Shift+F6** (Cmd+Shift+F6 on macOS), Alt+click on the play button, or **DTL: Play Timeline from This Line** in the right-click menu - starts the timeline at the event of the cursor's line, like Dialogic's own "Play from here": the events above are skipped, to test a condition or a variable change without replaying the whole timeline.
+
+It uses the Godot executable set in `dtlReader.godotPath`, else the one of the [godot-tools](https://marketplace.visualstudio.com/items?itemName=geequlim.godot-tools) extension, else `godot` from the PATH. `dtlReader.playButton` hides the button.
 
 ## Themes
 
-Four themes made for DTL (they also color the rest of VS Code):
+Seven themes made for DTL - they also color the rest of VS Code (**Preferences: Color Theme**):
 
-- DTL Dark
-- DTL Light
-- DTL Dracula (based on Derek S. extension)
-- DTL Godot-like
+| Theme | |
+|---|---|
+| DTL Dark | The default look: a neutral dark background, each kind of event in its own color |
+| DTL Light | The same, light |
+| DTL Dracula | Based on Derek S.'s Dracula theme |
+| DTL Godot-like | The colors of Godot's own script editor |
+| DTL Hacker | Green on black, like an old terminal - with a few amber, violet and red accents so each kind of token stays recognizable |
+| DTL Warm | Browns, ambers, corals and olives, easy on the eyes in the evening |
+| DTL High Contrast | Black and white with bright, strongly separated colors and visible borders, for anyone who needs to see the differences clearly. Every color is at least 7.6:1 against the background |
 
 ## Settings
 
@@ -207,6 +295,8 @@ Four themes made for DTL (they also color the rest of VS Code):
 | `dtlReader.translation.language` | empty | Translation mode language (e.g. `fr`) |
 | `dtlReader.translation.showInline` | on | In translation mode, show translations at the end of the lines |
 | `dtlReader.translation.globeButton` | `dialogic` | Where the translation globe button shows: `dialogic` files, `everywhere` or `off` |
+| `dtlReader.godotPath` | empty | The Godot 4 executable for **Play Timeline in Godot** (empty: godot-tools' one, else `godot` from the PATH) |
+| `dtlReader.playButton` | on | Show the play button at the top right of a timeline |
 
 ## Commands
 
@@ -219,6 +309,8 @@ From the Command Palette (Ctrl+Shift+P):
 | **DTL: Translate Line** | Translate the current line |
 | **DTL: Go to Next Untranslated Line** | Jump to the next line to translate |
 | **DTL: Select Translation Language** | Choose (or turn off) the translation mode language |
+| **DTL: Play Timeline in Godot** | Run the current timeline in Godot, with Dialogic's test scene |
+| **DTL: Play Timeline from This Line** | The same, starting at the cursor's line (Ctrl+Shift+F6) |
 
 ## Getting started
 
@@ -244,7 +336,7 @@ label ending
 
 ## Contributing
 
-Issues and pull requests are welcome at the [GitHub repository](https://github.com/Lorentyfle/dtl_extension_for_VN). The `test-room/` folder is a small fake Godot project with a timeline touching every feature - open it as a workspace to try everything (see its `README.md`).
+Issues and pull requests are welcome at the [GitHub repository](https://github.com/Lorentyfle/dtl_extension_for_VN) - see [CONTRIBUTING.md](CONTRIBUTING.md) for how the code is organized, how to run it and how to test it. The `test-room/` folder is a small fake Godot project with a timeline touching every feature - open it as a workspace to try everything (see its `README.md`). `npm test` runs the automated tests in VS Code on a copy of it (see [`test/README.md`](test/README.md)).
 
 ## Credits
 

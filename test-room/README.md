@@ -28,6 +28,9 @@ every DTL Reader feature without risking real project data.
   `elif` `Global.member` and `{Global.property}` autocomplete and hover.
 - `scripts/SoundManager.tscn` + `scripts/SoundManager.gd` - an autoload
   that points at a scene: its members come from the root node's script.
+- `addons/dialogic_additions/ScreenShake/event_screen_shake.gd` - a fake
+  custom Dialogic event, `[screen_shake]`, in Dialogic's default
+  extensions folder.
 - `scripts/Global.gd.uid`, `assets/bg.png.import` - Godot metadata files,
   which must NOT show up in `res://` path autocomplete.
 - `characters/TestCharacter.dch` - one plain portrait (`Default`, no scene)
@@ -174,11 +177,55 @@ every DTL Reader feature without risking real project data.
   `[wait ...]`, `pos=` on the `update` line, and `left`/`center`-style
   position keywords.
 - **Go to Definition**: Ctrl+click `loop_start` in `jump loop_start` - it
-  should jump to `label loop_start`.
+  should jump to `label loop_start`. Ctrl+click `TestCharacter` (opens
+  `TestCharacter.dch`), `LayeredPortrait` in `(LayeredPortrait)` (its
+  portrait in that file), `apply_tint` in `Global.apply_tint` (its line in
+  `Global.gd`), `TALKING` in `Global.State.TALKING`, and a `res://` path.
+  Ctrl+T and type `Ending` - `Ending With Spaces` of `chapter2` is listed.
 - **Diagnostics**: temporarily rename `label loop_start` to something else
   - `jump loop_start` should get a warning. Temporarily remove a closing
   `[/b]` - the narration/dialogue line should get an "unclosed balise"
   warning.
+- **Quick fixes**: on each problem, open the lightbulb (Ctrl+.):
+  - `jump loop_strat` offers "Change to "loop_start"" and "Create "label
+    loop_strat"";
+  - `join TestCharactr` offers "Change to "TestCharacter"" and "Add the
+    character "TestCharactr" to project.godot, with a new
+    TestCharactr.dch...", which asks for the folder: `res://characters/`
+    comes first, "with TestCharacter, John Smith, who are in this
+    timeline" (delete the new file and its project.godot line
+    afterwards);
+  - `TestCharacter (Defualt): hi` offers "Change to "Default"" and "Add
+    the portrait "Defualt" to TestCharacter" (which opens the `.dch` on
+    the new portrait's image path - undo it there afterwards);
+  - `set {chapte} = 2` offers "Change to "chapter"", then "Add the
+    variable "chapte" to project.godot as ..." once per type - a whole
+    number first, then a text, a decimal number and a bool (undo it in
+    project.godot afterwards);
+  - an unclosed `[b]` offers "Close [b] at the end of the line";
+  - `jump loop_start #id:x` offers "Remove the translation id".
+- **Unreachable events**: at the end of `test_timeline.dtl`, the lines after
+  `[end_timeline]` are faded and `label forgotten` gets a warning. Add
+  `jump forgotten` anywhere above: both go away. In `chapter2.dtl`,
+  `label choice A1` is reported the same way - only a line of text
+  mentions it, no jump leads there.
+- **Unused characters and portraits**: open `characters/Test Character3.dch`
+  - no timeline uses that character (a faint hint on `display_name`). In
+  `characters/TestCharacter2.dch`, `LayeredPortrait` is faded: add
+  `TestCharacter2 (LayeredPortrait): hi` to a timeline and it isn't anymore.
+- **Custom events**: `addons/dialogic_additions/ScreenShake/` declares a
+  `[screen_shake]` event. On an empty line type `[scr` - it's suggested;
+  inside `[screen_shake ` its parameters are, with their `##` docs on
+  hover; `wait=` suggests `true`/`false` and `mode=` `soft`/`hard`.
+- **Block snippets**: on an empty line type `cho`, `if`, `loop`, `scene` or
+  `text_input` - whole blocks are suggested (the character placeholders
+  list the project's characters). Typing the same words inside dialogue
+  suggests nothing.
+- **Play in Godot**: the play button at the top right of a timeline runs
+  it in Godot, like Dialogic's own play button; Ctrl+Shift+F6 (or
+  Alt+click on it) plays from the cursor's line. This test room has no
+  Dialogic addon, so it only says the test scene is missing - try it in a
+  real project (set `dtlReader.godotPath` if `godot` isn't on your PATH).
 - **Quoted character names**: on a blank line type `join "John` - `John
   Smith` should be suggested and inserted fully quoted. Same for typing
   `"Joh` at the start of a line for a dialogue speaker. The resulting
