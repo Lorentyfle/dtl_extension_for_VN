@@ -1,5 +1,6 @@
 # Changelog
 ## [Unreleased] (2.0.0)
+- Bug: a narration line starting with a BBCode tag or a text effect (`[rainbow]Hello[/rainbow] there`, `[pause=1]...`) was taken for a bracket event like `[wait]`: its first tag wasn't highlighted as BBCode, and its tags weren't checked. Like in Dialogic, only a known event name (`[wait ...]`, `[background ...]`, a custom event) makes a line an event - anything else is text. A line starting with a `{variable}` is narration too.
 - Faster while typing in a big project: re-checking the open timelines and characters reads the project's timelines once per round instead of once per document, saving a script only re-reads that script (unless it's an autoload's or a custom event's), and Go to Symbol in Workspace (Ctrl+T) no longer re-reads every timeline on each key typed.
 - A custom event's hover example uses its first parameter's default value.
 - For contributors: the code is split into modules by feature (`src/`), with automated tests run in VS Code on copies of `test-room/` (`npm test`, 146 checks), CI on Linux and Windows, and a [CONTRIBUTING.md](CONTRIBUTING.md) guide.

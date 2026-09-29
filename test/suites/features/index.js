@@ -89,6 +89,20 @@ exports.run = suite(async () => {
   check('completion: audio channels after "audio "', labels.includes('music'), labels);
   check('scratch file untouched by completion', scratch.getText().startsWith('jo\n'), scratch.getText().slice(0, 20));
 
+  // ---- A text starting with a BBCode tag is narration, not a bracket event
+  const narrationUri = at('timelines', 'narration.dtl');
+  fs.writeFileSync(narrationUri.fsPath, '[rainbow]Rainbow![/rainbow] then text\n[b]Never closed\n[wait]\n[pause=1]Paused first.\n');
+  await open(narrationUri);
+  await waitFor(() => vscode.languages.getDiagnostics(narrationUri).length > 0, 5000);
+  const narrationCodes = vscode.languages.getDiagnostics(narrationUri).map(diagnostic => `${diagnostic.range.start.line}:${diagnostic.code}`);
+  check('a narration line starting with BBCode is checked like text', narrationCodes.includes('1:unclosedBBCode') && !narrationCodes.some(code => code.startsWith('2:')), narrationCodes);
+  const narrationTokens = await vscode.commands.executeCommand('_workbench.captureSyntaxTokens', narrationUri);
+  const firstToken = narrationTokens[0];
+  check('highlighting: [rainbow] starting a line is a BBCode tag in narration', /string\.unquoted\.dialogue\.dtl/.test(firstToken.t) && /markup\.custom-balise\.dtl/.test(firstToken.t), firstToken);
+  const waitToken = narrationTokens.find(token => token.c === 'wait');
+  check('highlighting: [wait] is still an event', !!waitToken && /meta\.wait\.dtl/.test(waitToken.t) && !/dialogue/.test(waitToken.t), waitToken);
+  check('event index: [b]... and [pause=1]... are text events', JSON.stringify(internals.computeDialogicEventIndices(['[b]Never closed', 'A: next', '[pause=1]Paused first.', 'A: last'])) === '[0,1,2,3]', internals.computeDialogicEventIndices(['[b]Never closed', 'A: next', '[pause=1]Paused first.', 'A: last']));
+
   // ---- .dch files
   const dch = await open(dchUri);
   text = await hoverText(dchUri, find(dch, 'display_name', 1));

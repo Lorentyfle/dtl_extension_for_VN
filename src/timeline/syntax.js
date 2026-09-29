@@ -185,9 +185,35 @@ function isInsideDialogueText(beforeCursor) {
 }
 
 /**
+ * The event a line is, when it's a bracket event - `[wait 1]`,
+ * `[background arg="..."]`, a custom event - recognized the way Dialogic
+ * does: `[name ` or `[name]` with the name of a known event. Any other line
+ * starting with `[` (`[b]Hello[/b] there`, `[pause=1]...`) is text.
+ *
+ * @param {string} text - a line, or the start of one
+ * @returns {string | null} the event's name
+ */
+function bracketEventName(text) {
+  const match = text.match(/^\s*\[([A-Za-z_][A-Za-z0-9_]*)(?=[ \]])/);
+  return match && isBracketEventName(match[1]) ? match[1] : null;
+}
+
+/**
+ * Whether `name` is a bracket event: one of Dialogic's (`wait`, `clear`...)
+ * or one of the project's custom events (added to DTL_ENTRIES).
+ *
+ * @param {string} name
+ * @returns {boolean}
+ */
+function isBracketEventName(name) {
+  return RESERVED_BRACKET_NAMES.has(name) || events.DTL_ENTRIES.some(entry => entry.type === 'bracket' && entry.name === name);
+}
+
+/**
  * A line with no `Character:` prefix still counts as spoken/narrated text
  * in Dialogic, unless it's actually something else: blank, a comment, a
- * choice, a standalone bracket command, or a flow/command keyword line.
+ * choice, a bracket event (see bracketEventName), or a flow/command
+ * keyword line.
  * Mirrors the `#narration` rule in the TextMate grammar so the editor and
  * the syntax highlighting agree on what counts as dialogue text.
  *
@@ -210,8 +236,8 @@ function isBareNarrationLine(beforeCursor) {
   if (/^\s*-\s/.test(beforeCursor)) {
     return false; // choice
   }
-  if (/^\s*\[/.test(beforeCursor)) {
-    return false; // standalone bracket command, e.g. [wait 1]
+  if (bracketEventName(beforeCursor)) {
+    return false; // a bracket event, e.g. [wait 1] - not "[b]Hello[/b]", which is text
   }
   if (/^\s*(if|else|elif|set|label|jump|join|leave|update|audio|do|return)\b/.test(beforeCursor)) {
     return false; // flow/command keyword line
@@ -398,9 +424,6 @@ function computeDialogicEventIndices(lines) {
   let indentFormat = '';
   let previousWasOpener = false;
   const stripLeft = text => text.replace(/^[\x00-\x20]+/, ''); // Godot's strip_edges(true, false)
-  // Only a known shortcode event (built-in or custom) is one - `[b]Hi[/b]`
-  // starting a narration line is text.
-  const shortcodes = new Set([...RESERVED_BRACKET_NAMES, ...events.DTL_ENTRIES.filter(entry => entry.type === 'bracket').map(entry => entry.name)]);
   for (let line = 0; line < lines.length; line++) {
     indices[line] = count;
     const stripped = stripLeft(lines[line]);
@@ -413,8 +436,7 @@ function computeDialogicEventIndices(lines) {
     if (previousWasOpener && indent.length <= previousIndent.length) { count++; }
     previousIndent = indent;
     // An event may continue over the next lines (until an empty line).
-    const shortcodeMatch = stripped.match(/^\[([A-Za-z_][A-Za-z0-9_]*)(?=[ \]])/); // Dialogic: begins with "[name " or "[name]"
-    const isShortcode = !!shortcodeMatch && shortcodes.has(shortcodeMatch[1]);
+    const isShortcode = !!bracketEventName(stripped); // `[b]Hi[/b]` starting a text is not one
     // Dialogic's condition event: "if"/"elif" alone or followed by a space, or anything starting with "else".
     const isCondition = /^(?:(?:if|elif)(?: |$)|else)/.test(stripped);
     const keyword = (stripped.match(/^([a-z_]+)(?: |$)/) || [])[1];
@@ -501,6 +523,7 @@ function findUnclosedTag(text) {
 }
 
 Object.assign(module.exports, {
+  bracketEventName,
   CHARACTER_NAME_SOURCE,
   stripCharacterNameQuotes,
   splitCommandArguments,

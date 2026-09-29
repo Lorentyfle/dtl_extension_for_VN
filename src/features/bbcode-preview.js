@@ -242,11 +242,6 @@ function bbcodePreviewStart(document, text) {
     const localeMatch = text.match(/^[A-Za-z]{2,3}(?:[_-][A-Za-z0-9]+)*:/);
     return localeMatch ? localeMatch[0].length : -1;
   }
-  // A narration line can start with a BBCode tag ("[b]Hello[/b]"), which
-  // isPlayerFacingTextLine treats as a bracket command line - it's text
-  // unless that first tag is one of Dialogic's own commands.
-  const leadingTag = text.match(/^\s*\[\/?([A-Za-z_][A-Za-z0-9_]*)/);
-  if (leadingTag) { return syntax.RESERVED_BRACKET_NAMES.has(leadingTag[1]) ? -1 : 0; }
   if (!syntax.isPlayerFacingTextLine(text)) { return -1; }
   const speakerMatch = text.match(new RegExp(`^\\s*${syntax.CHARACTER_NAME_SOURCE}\\s*(?:\\([^)]*\\))?\\s*:`, 'u'));
   return speakerMatch ? speakerMatch[0].length : 0;

@@ -12,12 +12,12 @@
     { "include": "#images"},
     { "include": "#text_input"},
     { "include": "#end_timeline"},
+    { "include": "#dialogue" },
+    { "include": "#narration" },
     { "include": "#options" },
     { "include": "#commands" },
     { "include": "#flow" },
     { "include": "#variables" },
-    { "include": "#dialogue" },
-    { "include": "#narration" },
     { "include": "#choices" },
     { "include": "#global_references" },
     { "include": "#strings" },
@@ -214,11 +214,11 @@
     },
 
     "narration": {
-      "comment": "A line with no 'Character:' prefix is still spoken/narrated text in Dialogic - a nameless speaker gets the same treatment as a named one. Reuses #dialogue's text scope and nested patterns. The negative lookaheads exclude anything that is actually a comment, choice, bracket command, or flow/command keyword line, so those keep their own dedicated highlighting instead of being swallowed as narration.",
+      "comment": "A line with no 'Character:' prefix is still spoken/narrated text in Dialogic - a nameless speaker gets the same treatment as a named one. Reuses #dialogue's text scope and nested patterns. The negative lookaheads exclude anything that is actually a comment, choice, bracket event ([wait], [background]... - not a text starting with a BBCode tag like [b]Hello[/b], which is narration, as in Dialogic), or flow/command keyword line, so those keep their own dedicated highlighting instead of being swallowed as narration.",
       "patterns": [
         {
           "name": "string.unquoted.dialogue.dtl",
-          "begin": "^(?!\\s*$)(?!\\s*#)(?!\\s*-\\s)(?!\\s*\\[)(?!\\s*(if|else|elif|set|label|jump|join|leave|update|audio|do|return)\\b)(?!\\s*(?:\"[^\"\\r\\n]+\"|'[^'\\r\\n]+'|[\\p{L}_][\\p{L}0-9_]*)\\s*:)",
+          "begin": "^(?!\\s*$)(?!\\s*#)(?!\\s*-\\s)(?!\\s*\\[(?:wait|wait_input|audio|voice|clear|background|style|signal|text_input|end_timeline)[\\s\\]])(?!\\s*(if|else|elif|set|label|jump|join|leave|update|audio|do|return)\\b)(?!\\s*(?:\"[^\"\\r\\n]+\"|'[^'\\r\\n]+'|[\\p{L}_][\\p{L}0-9_]*)\\s*:)",
           "end": "(?=#id:|$)",
           "patterns": [
             { "include": "#text_effects" },
