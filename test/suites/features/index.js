@@ -3,7 +3,7 @@
 // rename, completion, .dch support, glossary and translation.
 
 const vscode = require('vscode');
-const { check, suite, start, open, sleep, waitFor, fs } = require('../../harness');
+const { check, info, suite, start, open, sleep, waitFor, fs } = require('../../harness');
 
 /** The position of `text` (its `offset`-th character) in a document. */
 function find(document, text, offset = 0) {
@@ -88,6 +88,21 @@ exports.run = suite(async () => {
   labels = await completionLabels(scratchUri, new vscode.Position(5, 6), ' ');
   check('completion: audio channels after "audio "', labels.includes('music'), labels);
   check('scratch file untouched by completion', scratch.getText().startsWith('jo\n'), scratch.getText().slice(0, 20));
+
+  // ---- Themes: each one applies, with the kind it declares. Each is
+  // switched to from a built-in theme of another kind, so one that doesn't
+  // apply is seen (the setting takes the theme's id when it has one).
+  const themes = [['dtl-dark', 'Dark'], ['dtl-light', 'Light'], ['dtl-dracula', 'Dark'], ['dtl-godot', 'Dark'], ['dtl-hacker', 'Dark'], ['dtl-warm', 'Dark'], ['dtl-high-contrast', 'HighContrast']];
+  const workbench = () => vscode.workspace.getConfiguration('workbench');
+  const applied = [];
+  for (const [id, kind] of themes) {
+    await workbench().update('colorTheme', kind === 'Light' ? 'Default Dark Modern' : 'Default Light Modern', vscode.ConfigurationTarget.Global);
+    await waitFor(() => vscode.window.activeColorTheme.kind !== vscode.ColorThemeKind[kind], 3000);
+    await workbench().update('colorTheme', id, vscode.ConfigurationTarget.Global);
+    if (await waitFor(() => vscode.window.activeColorTheme.kind === vscode.ColorThemeKind[kind], 3000)) { applied.push(id); }
+  }
+  await workbench().update('colorTheme', undefined, vscode.ConfigurationTarget.Global);
+  check('themes: all seven apply, DTL High Contrast as a high-contrast theme', applied.length === themes.length, applied);
 
   // ---- A text starting with a BBCode tag is narration, not a bracket event
   const narrationUri = at('timelines', 'narration.dtl');

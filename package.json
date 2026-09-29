@@ -2,7 +2,7 @@
   "name": "dtl-reader",
   "displayName": "DTL Reader",
   "description": "Dialogic 2 timeline (.dtl) and character (.dch) support for Godot: highlighting, autocomplete, documentation, error checking with quick fixes, navigation, BBCode preview, translation tools and Play in Godot.",
-  "version": "1.7.0",
+  "version": "2.0.0",
   "publisher": "lorentyfle",
   "license": "MIT",
   "icon": "./icons/favicon.png",
@@ -127,6 +127,24 @@
         "label": "DTL Godot-like",
         "uiTheme": "vs-dark",
         "path": "./themes/dtl-color-theme-godot.json"
+      },
+      {
+        "id": "dtl-hacker",
+        "label": "DTL Hacker",
+        "uiTheme": "vs-dark",
+        "path": "./themes/dtl-color-theme-hacker.json"
+      },
+      {
+        "id": "dtl-warm",
+        "label": "DTL Warm",
+        "uiTheme": "vs-dark",
+        "path": "./themes/dtl-color-theme-warm.json"
+      },
+      {
+        "id": "dtl-high-contrast",
+        "label": "DTL High Contrast",
+        "uiTheme": "hc-black",
+        "path": "./themes/dtl-color-theme-high-contrast.json"
       }
     ],
     "semanticTokenScopes": [

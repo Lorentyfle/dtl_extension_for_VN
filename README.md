@@ -43,6 +43,7 @@ Write your Dialogic timelines outside the Godot editor with syntax highlighting,
 | **BBCode preview** | `[color]`, `[rainbow]`, `[fade]`, `[b][i]`... show their effect right in the editor, in any combination |
 | **Translation** | Translations next to the original text, a side-by-side Translation View for one or several languages, written into Dialogic's CSV |
 | **Character files** | `.dch` highlighting, autocomplete of every key and value Dialogic uses, color picker, portraits suggested from your timelines |
+| **Themes** | Seven themes made for timelines, from Godot-like to hacker green, warm and high contrast |
 
 Everything is read live from your Godot project (`project.godot`, `.dch`, `.tscn`, `.gd` and the translation CSVs), and updates as soon as those files change.
 
@@ -156,7 +157,7 @@ An unknown `[portrait=...]` is reported like an unknown mood.
 
 Tags can be nested and combined in any way (`[b][i][rainbow][wave]...`). Hex colors get a **color picker**.
 
-<!-- Picture (assets/bbcode_preview.png): type `[rainbow]`, `[color=red]` and `[wave]` around a word, the preview changing as you type. -->
+![BBCode effects shown in the editor: red text, a wavy underline, rainbow letters, bold italic, an outline, letters fading away, a hint and a heart character](https://raw.githubusercontent.com/Lorentyfle/dtl_extension_for_VN/main/assets/bbcode_preview.png)
 
 ## Glossary
 
@@ -265,12 +266,17 @@ It uses the Godot executable set in `dtlReader.godotPath`, else the one of the [
 
 ## Themes
 
-Four themes made for DTL (they also color the rest of VS Code):
+Seven themes made for DTL - they also color the rest of VS Code (**Preferences: Color Theme**):
 
-- DTL Dark
-- DTL Light
-- DTL Dracula (based on Derek S. extension)
-- DTL Godot-like
+| Theme | |
+|---|---|
+| DTL Dark | The default look: a neutral dark background, each kind of event in its own color |
+| DTL Light | The same, light |
+| DTL Dracula | Based on Derek S.'s Dracula theme |
+| DTL Godot-like | The colors of Godot's own script editor |
+| DTL Hacker | Green on black, like an old terminal - with a few amber, violet and red accents so each kind of token stays recognizable |
+| DTL Warm | Browns, ambers, corals and olives, easy on the eyes in the evening |
+| DTL High Contrast | Black and white with bright, strongly separated colors and visible borders, for anyone who needs to see the differences clearly. Every color is at least 7.6:1 against the background |
 
 ## Settings
 
