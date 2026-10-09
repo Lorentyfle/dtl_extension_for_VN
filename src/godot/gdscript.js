@@ -44,6 +44,32 @@ function stripGdComment(line) {
 }
 
 /**
+ * The trailing `## doc` of a code line (`var speed := 3.0 ## How fast.`), or
+ * '' when its comment (if any) is a plain `#` one. Quote-aware, like
+ * stripGdComment.
+ *
+ * @param {string} line
+ * @returns {string}
+ */
+function trailingGdDoc(line) {
+  const code = stripGdComment(line);
+  const docMatch = line.slice(code.length).match(/^##\s?(.*)$/);
+  return docMatch && code.trim() !== '' ? docMatch[1].trim() : '';
+}
+
+/**
+ * A member's doc: its `##` lines above, then its trailing `##` (both are
+ * GDScript documentation comments).
+ *
+ * @param {string} above
+ * @param {string} trailing
+ * @returns {string}
+ */
+function joinGdDocs(above, trailing) {
+  return [above, trailing].filter(Boolean).join('\n');
+}
+
+/**
  * Starting at `lines[startIndex]`, join as many lines as needed (comments
  * stripped) for the bracket opened at `openIndex` of the first line to be
  * closed again, tracking nested `()`/`[]`/`{}` depth so e.g. a parameter's
@@ -107,7 +133,7 @@ function parseGdEnumBody(bodyLines) {
         value = nextValue === null ? '?' : String(nextValue);
         if (nextValue !== null) { nextValue++; }
       }
-      values.push({ name: itemMatch[1], value, doc: pendingDoc.join('\n').trim() });
+      values.push({ name: itemMatch[1], value, doc: joinGdDocs(pendingDoc.join('\n').trim(), trailingGdDoc(rawLine)) });
       pendingDoc = [];
     }
   }
@@ -206,7 +232,7 @@ function parseGdScript(text) {
     const varMatch = code.match(/^(static\s+)?var\s+([A-Za-z_][A-Za-z0-9_]*)\s*(.*)$/);
     if (varMatch) {
       seenMember = true;
-      const doc = takeDoc();
+      const doc = joinGdDocs(takeDoc(), trailingGdDoc(rawLine));
       if (varMatch[2].startsWith('_')) { continue; }
       // A trailing ':' opens a setter/getter block - not part of the value.
       const rest = varMatch[3].replace(/:\s*$/, '').trim();
@@ -225,7 +251,7 @@ function parseGdScript(text) {
     const constMatch = code.match(/^const\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*([^=]+?))?\s*:?=\s*(.*)$/);
     if (constMatch) {
       seenMember = true;
-      const doc = takeDoc();
+      const doc = joinGdDocs(takeDoc(), trailingGdDoc(rawLine));
       if (constMatch[1].startsWith('_')) { continue; }
       symbols.constants.set(constMatch[1], { type: constMatch[2] ? constMatch[2].trim() : null, value: constMatch[3].trim(), doc, line: i });
       continue;

@@ -143,9 +143,12 @@ exports.run = suite(async () => {
     check('bool parameter values', items.includes('true') && items.includes('false'), items);
     items = await labelsAt(customUri, 4, 19);
     check('suggested parameter values', items.includes('soft') && items.includes('hard'), items);
+    items = await labelsAt(customUri, 5, 21);
+    check('file parameter: res:// paths of its file_filter', items.includes('res://assets/bg.png') && items.every(label => !label.startsWith('res://') || label.endsWith('.png')), items);
     const hovers = await vscode.commands.executeCommand('vscode.executeHoverProvider', customUri, new vscode.Position(0, 4)) || [];
     const hoverText = hovers.map(h => h.contents.map(c => c.value || '').join('')).join('');
     check('custom event hover', /Screen Shake/.test(hoverText) && /Shakes the whole screen/.test(hoverText) && /How strong the shake is/.test(hoverText) && /event_screen_shake\.gd/.test(hoverText) && /\[screen_shake strength=1\.0\]/.test(hoverText), hoverText);
+    check('trailing ## comment documents a parameter', /A picture flashed while shaking/.test(hoverText), hoverText);
     check('parameter doc has type and default, not the ### title', /How strong the shake is\. \(`float`, default `1\.0`\)/.test(hoverText) && !/Settings/.test(hoverText), hoverText);
 
     // ---- Block snippets
