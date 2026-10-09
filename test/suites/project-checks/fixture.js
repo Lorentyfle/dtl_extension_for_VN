@@ -33,6 +33,7 @@ const CUSTOM = [
   '[screen_shake ', // the trailing space matters: parameters are suggested after it
   '[screen_shake wait=',
   '[screen_shake mode=',
+  '[screen_shake flash="',
 ];
 
 const STARTER = [

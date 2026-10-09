@@ -1,4 +1,7 @@
 # Changelog
+## [2.1.0]
+- Trailing `##` documentation comments (`var speed := 3.0 ## How fast.`) document a variable, constant or enum value, like `##` lines above it (both are GDScript documentation comments): custom event parameters and autoload members get their hover / completion docs from them.
+- Custom events: a file parameter (`"ext_file": true` in `get_shortcode_parameters()`, or a `ValueType.FILE` field in `build_event_editor()`) suggests the project's `res://` paths after `param="`, limited to the extensions of the field's `file_filter` (`"*.png, *.jpg; Images"`) when it has one.
 ## [2.0.0]
 - Three new themes: **DTL Hacker** (green on black, with a few accents to tell the tokens apart), **DTL Warm** (browns, ambers, corals and olives) and **DTL High Contrast** (black and white, bright separated colors, visible borders - every color at least 7.6:1 against the background).
 - Bug: a narration line starting with a BBCode tag or a text effect (`[rainbow]Hello[/rainbow] there`, `[pause=1]...`) was taken for a bracket event like `[wait]`: its first tag wasn't highlighted as BBCode, and its tags weren't checked. Like in Dialogic, only a known event name (`[wait ...]`, `[background ...]`, a custom event) makes a line an event - anything else is text. A line starting with a `{variable}` is narration too.

@@ -216,7 +216,9 @@ every DTL Reader feature without risking real project data.
 - **Custom events**: `addons/dialogic_additions/ScreenShake/` declares a
   `[screen_shake]` event. On an empty line type `[scr` - it's suggested;
   inside `[screen_shake ` its parameters are, with their `##` docs on
-  hover; `wait=` suggests `true`/`false` and `mode=` `soft`/`hard`.
+  hover (`flash`'s doc is a trailing `##` comment); `wait=` suggests
+  `true`/`false`, `mode=` `soft`/`hard`, and `flash="` the project's
+  `.png` files (its `file_filter`).
 - **Block snippets**: on an empty line type `cho`, `if`, `loop`, `scene` or
   `text_input` - whole blocks are suggested (the character placeholders
   list the project's characters). Typing the same words inside dialogue

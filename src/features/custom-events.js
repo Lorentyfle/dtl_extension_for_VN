@@ -17,8 +17,9 @@ const project = require('../project');
 // `get_shortcode()` returning its name and `get_shortcode_parameters()` its
 // parameters - is written `[name param=value]` in a timeline, like the
 // built-in bracket events. Each one found is added to DTL_ENTRIES (and its
-// values to DTL_ATTRIBUTE_VALUE_SUGGESTIONS), so completion, parameters,
-// values and hover treat it exactly like a built-in event.
+// values to DTL_ATTRIBUTE_VALUE_SUGGESTIONS, its file parameters to
+// DTL_PATH_ATTRIBUTES), so completion, parameters, values, `res://` paths and
+// hover treat it exactly like a built-in event.
 
 /** Names of the custom events currently in DTL_ENTRIES. @type {string[]} */
 let customEventNames = [];
@@ -32,7 +33,7 @@ let customEventNames = [];
  *
  * @param {string} text - the .gd file
  * @param {string} resPath - where it is, shown in the documentation
- * @returns {{entry: object, values: Record<string, string[]>} | null} null if it isn't a shortcode event
+ * @returns {{entry: object, values: Record<string, string[]>, paths: Record<string, string[]>} | null} null if it isn't a shortcode event (paths: file parameters -> allowed extensions)
  */
 function parseCustomEventScript(text, resPath) {
   if (!/^\s*extends\s+DialogicEvent\b/m.test(text)) { return null; }
@@ -44,6 +45,14 @@ function parseCustomEventScript(text, resPath) {
   const variables = {};
   const values = {};
   const defaults = {};
+  const paths = {};
+  // File parameters: the extensions of their `ValueType.FILE` editor field's
+  // file_filter ("*.png, *.jpg; Images"), when there is one.
+  const fileFilters = {};
+  for (const edit of text.matchAll(/add_(?:header|body)_edit\(\s*["']([A-Za-z_][A-Za-z0-9_]*)["']\s*,\s*ValueType\.FILE\b([^\n]*)/g)) {
+    const filter = (edit[2].match(/["']file_filter["']\s*:\s*["']([^"']*)["']/) || [])[1] || '';
+    fileFilters[edit[1]] = [...filter.matchAll(/\*\.([A-Za-z0-9]+)/g)].map(match => match[1].toLowerCase());
+  }
   const header = text.match(/func\s+get_shortcode_parameters\s*\([^)]*\)[^:\n]*:/);
   const openIndex = header ? text.indexOf('{', header.index + header[0].length) : -1;
   const body = openIndex === -1 ? null : resources.extractBalancedBraces(text, openIndex);
@@ -58,6 +67,10 @@ function parseCustomEventScript(text, resPath) {
     variables[key] = `${doc || `Sets \`${property}\`.`}${details ? ` (${details})` : ''}`;
     defaults[key] = defaultValue;
     const suggested = [...parameter.matchAll(/["']value["']\s*:\s*([^,}\n]+)/g)].map(match => match[1].trim().replace(/^["']|["']$/g, ''));
+    // `"ext_file": true` (or a FILE editor field): a `res://` path.
+    if (/["']ext_file["']\s*:\s*true/.test(parameter) || property in fileFilters) {
+      paths[key] = fileFilters[property] && fileFilters[property].length > 0 ? fileFilters[property] : Object.values(events.RESOURCE_EXTENSIONS).flat();
+    }
     if (suggested.length > 0) { values[key] = suggested; }
     else if (type === 'bool' || /^(?:true|false)$/.test(defaultValue) || (info && /^(?:true|false)$/.test(info.defaultValue || ''))) { values[key] = ['true', 'false']; }
   }
@@ -75,6 +88,7 @@ function parseCustomEventScript(text, resPath) {
       custom: true,
     },
     values,
+    paths,
   };
 }
 
@@ -90,6 +104,7 @@ async function refreshCustomEvents(dialogicSection) {
     const index = events.DTL_ENTRIES.findIndex(entry => entry.custom && entry.name === name);
     if (index !== -1) { events.DTL_ENTRIES.splice(index, 1); }
     delete events.DTL_ATTRIBUTE_VALUE_SUGGESTIONS[name];
+    delete events.DTL_PATH_ATTRIBUTES[name];
   }
   customEventNames = [];
   if (!state.projectRootUri) { return; }
@@ -102,6 +117,7 @@ async function refreshCustomEvents(dialogicSection) {
     if (!parsed || events.DTL_ENTRIES.some(entry => entry.name === parsed.entry.name)) { continue; }
     events.DTL_ENTRIES.push(parsed.entry);
     if (Object.keys(parsed.values).length > 0) { events.DTL_ATTRIBUTE_VALUE_SUGGESTIONS[parsed.entry.name] = parsed.values; }
+    if (Object.keys(parsed.paths).length > 0) { events.DTL_PATH_ATTRIBUTES[parsed.entry.name] = parsed.paths; }
     customEventNames.push(parsed.entry.name);
   }
 }

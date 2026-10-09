@@ -13,6 +13,7 @@ extends DialogicEvent
 @export var wait := false
 ## How the screen moves.
 @export var mode := "soft"
+@export var flash := "" ## A picture flashed while shaking (documented by a trailing comment).
 
 
 func _init() -> void:
@@ -30,4 +31,9 @@ func get_shortcode_parameters() -> Dictionary:
 		"strength" : {"property": "strength", "default": 1.0},
 		"wait" : {"property": "wait", "default": false},
 		"mode" : {"property": "mode", "default": "soft", "suggestions": func(): return {"Soft": {"value": "soft"}, "Hard": {"value": "hard"}}},
+		"flash" : {"property": "flash", "default": "", "ext_file": true},
 	}
+
+
+func build_event_editor() -> void:
+	add_body_edit("flash", ValueType.FILE, {"file_filter": "*.png; Images"})
