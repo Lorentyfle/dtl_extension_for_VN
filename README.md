@@ -107,7 +107,7 @@ Hover any event, parameter or position to read its documentation. Indentation fo
 
 ## Custom events
 
-The events you add to Dialogic yourself - scripts extending `DialogicEvent` in Dialogic's extensions folder (**Project Settings > Dialogic > Extensions folder**, `res://addons/dialogic_additions/` by default) - work like the built-in ones: `[` suggests them, `[my_event ` suggests their parameters, and hovering shows their `event_name`, `event_description` and the `##` comment of each property a parameter sets, with its type and default. A `bool` parameter suggests `true`/`false`, and the `suggestions` of `get_shortcode_parameters()` are suggested as values.
+The events you add to Dialogic yourself - scripts extending `DialogicEvent` in Dialogic's extensions folder (**Project Settings > Dialogic > Extensions folder**, `res://addons/dialogic_additions/` by default) - work like the built-in ones: `[` suggests them, `[my_event ` suggests their parameters, and hovering shows their `event_name`, `event_description` and the `##` comment of each property a parameter sets (above it, or at the end of its line), with its type and default. A `bool` parameter suggests `true`/`false`, the `suggestions` of `get_shortcode_parameters()` are suggested as values, and a file parameter (`"ext_file": true`, or a `ValueType.FILE` field in `build_event_editor()`) suggests the project's `res://` paths - only the extensions of the field's `file_filter` when it has one.
 
 ```gdscript
 ## How strong the shake is.

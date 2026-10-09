@@ -1,5 +1,5 @@
 # Changelog
-## [Unreleased]
+## [2.1.0]
 - Trailing `##` documentation comments (`var speed := 3.0 ## How fast.`) document a variable, constant or enum value, like `##` lines above it (both are GDScript documentation comments): custom event parameters and autoload members get their hover / completion docs from them.
 - Custom events: a file parameter (`"ext_file": true` in `get_shortcode_parameters()`, or a `ValueType.FILE` field in `build_event_editor()`) suggests the project's `res://` paths after `param="`, limited to the extensions of the field's `file_filter` (`"*.png, *.jpg; Images"`) when it has one.
 ## [2.0.0]
