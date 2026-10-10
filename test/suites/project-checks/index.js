@@ -146,8 +146,19 @@ exports.run = suite(async () => {
     items = await labelsAt(customUri, 5, 21);
     check('file parameter: res:// paths of its file_filter', items.includes('res://assets/bg.png') && items.every(label => !label.startsWith('res://') || label.endsWith('.png')), items);
     items = await labelsAt(customUri, 4, 19);
-    check('ids file values suggested', items.includes('wild'), items);
-    const idDiag = vscode.languages.getDiagnostics(customUri).find(x => x.code === 'unknownId');
+    check('ids file values suggested (path from project.godot), with the event\'s own', items.includes('wild') && items.includes('soft') && items.includes('hard'), items);
+    const detailed = (await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', customUri, new vscode.Position(4, 19))).items.find(item => (item.label.label || item.label) === 'wild');
+    check('ids file title shown as detail', detailed !== undefined && detailed.detail === 'The wild shake', detailed && detailed.detail);
+    const emptyDiag = vscode.languages.getDiagnostics(customUri).find(x => x.code === 'unknownId' && x.range.start.line === 7);
+    check('empty id list: still reported, says it is empty', emptyDiag !== undefined && /No screen_shake\.label ids/.test(emptyDiag.message), vscode.languages.getDiagnostics(customUri).map(d => [d.code, d.range.start.line, d.message]));
+    const farDiag = vscode.languages.getDiagnostics(customUri).find(x => x.code === 'unknownId' && x.range.start.line === 8);
+    if (farDiag) {
+      const farTitles = (await vscode.commands.executeCommand('vscode.executeCodeActionProvider', customUri, farDiag.range) || []).map(a => a.title);
+      check('nothing close: the nearest ids offered', farTitles.includes('Change to "wild"'), farTitles);
+    } else {
+      check('far typo reported', false, vscode.languages.getDiagnostics(customUri).map(d => [d.code, d.range.start.line]));
+    }
+    const idDiag = vscode.languages.getDiagnostics(customUri).find(x => x.code === 'unknownId' && x.range.start.line === 6);
     check('unknown id reported', idDiag !== undefined && idDiag.range.start.line === 6 && /wildd/.test(idDiag.message), vscode.languages.getDiagnostics(customUri).map(d => d.code));
     if (idDiag) {
       const actions = await vscode.commands.executeCommand('vscode.executeCodeActionProvider', customUri, idDiag.range) || [];
@@ -157,9 +168,9 @@ exports.run = suite(async () => {
       check('unknown id: add-to-ids fix offered', add !== undefined, titles);
       if (add && add.command) {
         await vscode.commands.executeCommand(add.command.command, ...add.command.arguments);
-        const written = JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(at('dialogic', 'ids.json'))).toString('utf8'));
+        const written = JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(at('data', 'project_ids.json'))).toString('utf8'));
         check('add-to-ids writes values and requested', written.values['screen_shake.mode'].includes('wildd') && written.requested['screen_shake.mode'].includes('wildd'), written);
-        const still = vscode.languages.getDiagnostics(customUri).some(x => x.code === 'unknownId');
+        const still = vscode.languages.getDiagnostics(customUri).some(x => x.code === 'unknownId' && x.range.start.line === 6);
         check('unknown id gone after adding it', !still, vscode.languages.getDiagnostics(customUri).map(d => d.code));
       }
     }

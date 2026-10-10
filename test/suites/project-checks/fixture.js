@@ -34,7 +34,9 @@ const CUSTOM = [
   '[screen_shake wait=',
   '[screen_shake mode=',
   '[screen_shake flash="',
-  '[screen_shake mode="wildd"]', // not in dialogic/ids.json: unknownId (closest: wild)
+  '[screen_shake mode="wildd"]', // not in the ids file: unknownId (closest: wild)
+  '[screen_shake label="anything"]', // "screen_shake.label" is an empty list in the ids file: unknownId too
+  '[screen_shake mode="zzzzzzzz"]', // nothing close: the nearest ids are offered anyway
 ];
 
 const STARTER = [
@@ -53,9 +55,13 @@ exports.prepare = root => {
   fs.writeFileSync(at('timelines', 'custom.dtl'), CUSTOM.join('\n') + '\n');
   fs.writeFileSync(at('scripts', 'starter.gd'), STARTER.join('\n') + '\n');
   // The custom event is test-room's own (addons/dialogic_additions/ScreenShake/).
-  // The project's ids file (dtlReader.idsFile default): suggestions + unknownId.
-  fs.mkdirSync(at('dialogic'), { recursive: true });
-  fs.writeFileSync(at('dialogic', 'ids.json'), JSON.stringify({ values: { 'screen_shake.mode': ['soft', 'hard', 'wild'] } }));
+  // The project's ids file, where project.godot's dialogic/ids_file says
+  // (not the default place): suggestions (with the event's own) + unknownId.
+  fs.mkdirSync(at('data'), { recursive: true });
+  fs.writeFileSync(at('data', 'project_ids.json'), JSON.stringify({
+    values: { 'screen_shake.mode': ['wild'], 'screen_shake.label': [] },
+    titles: { 'screen_shake.mode': { wild: 'The wild shake' } },
+  }));
 
   let project = fs.readFileSync(at('project.godot'), 'utf8');
   const eol = project.includes('\r\n') ? '\r\n' : '\n';
@@ -67,5 +73,7 @@ exports.prepare = root => {
   replace(lastTimeline, [lastTimeline, '"flow": "res://timelines/flow.dtl"', '"dynamic": "res://timelines/dynamic.dtl"', '"custom": "res://timelines/custom.dtl"'].join(`,${eol}`));
   const name = 'config/name="DTL Reader Test Room"';
   replace(name, [name, 'config/use_custom_user_dir=true', 'config/custom_user_dir_name="dtl_reader_test_run"'].join(eol));
+  const dialogic = '[dialogic]';
+  replace(dialogic, [dialogic, '', 'ids_file="res://data/project_ids.json"'].join(eol));
   fs.writeFileSync(at('project.godot'), project);
 };

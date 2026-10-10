@@ -102,13 +102,10 @@ function activate(context) {
   // Timelines feed cross-timeline `jump Timeline/label` - re-read their
   // labels when one changes on disk, then re-check every open timeline.
   context.subscriptions.push(vscode.commands.registerCommand('dtlReader.addProjectId', (key, id) => customEvents.addProjectId(key, id)));
-  // The project's ids file (dtlReader.idsFile): suggestions and unknown-id checks follow it.
+  // The project's ids file (project.godot: dialogic/ids_file): suggestions and unknown-id checks follow it.
   const idsWatcher = vscode.workspace.createFileSystemWatcher('**/*.json');
   const onIdsChanged = uri => {
-    const idsFile = vscode.workspace.getConfiguration('dtlReader').get('idsFile', 'res://dialogic/ids.json');
-    if (uri.fsPath.replace(/\\/g, '/').toLowerCase().endsWith(idsFile.replace('res://', '/').toLowerCase())) {
-      customEvents.refreshIds().then(problems.refreshAllDiagnostics);
-    }
+    if (customEvents.isIdsFile(uri)) { customEvents.refreshIds().then(problems.refreshAllDiagnostics); }
   };
   idsWatcher.onDidChange(onIdsChanged);
   idsWatcher.onDidCreate(onIdsChanged);
@@ -123,7 +120,6 @@ function activate(context) {
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(event => {
       if (event.affectsConfiguration('dtlReader.includeAddonAutoloads')) { project.refreshProjectGodotData(); }
-      if (event.affectsConfiguration('dtlReader.idsFile')) { customEvents.refreshIds().then(problems.refreshAllDiagnostics); }
       if (event.affectsConfiguration('dtlReader.customEvents')) {
         customEvents.resetCustomEventDecoration();
         vscode.window.visibleTextEditors.forEach(customEvents.updateCustomEventDecorations);

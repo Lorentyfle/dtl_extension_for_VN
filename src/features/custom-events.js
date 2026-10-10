@@ -120,31 +120,62 @@ async function refreshCustomEvents(dialogicSection) {
     if (Object.keys(parsed.paths).length > 0) { events.DTL_PATH_ATTRIBUTES[parsed.entry.name] = parsed.paths; }
     customEventNames.push(parsed.entry.name);
   }
-  await refreshIds();   // after the events: ids replace their suggestions
+  await refreshIds(dialogicSection);   // after the events: ids join their suggestions (path: project.godot's ids_file)
 }
 
 // =============================================================================
-// PROJECT IDS (ids.json): suggestions and unknown ids
+// PROJECT IDS (ids file): suggestions and unknown ids
 // =============================================================================
-// A project can list the ids its timelines may use in a JSON file
-// (`dtlReader.idsFile`, `res://dialogic/ids.json` by default):
-//   { "values": { "cg.id": ["beach", ...], "achievement.name": [...] } }
-// Each "shortcode.param" key gets those values as suggestions after
-// `[shortcode param="`, and a value not in the list is reported
-// (`dtlReader.diagnostics.unknownId`). Works for built-in and custom events.
-// Quick fixes: the closest ids, or adding the id to the file (its "values",
-// and "requested" so the tool writing the file can create the entry).
+// A project can list the ids its timelines may use in a JSON file. Where it
+// is: project.godot's `dialogic/ids_file` ([dialogic] section, `ids_file=`),
+// `res://dialogic/ids.json` when not set - the tool writing the file (e.g.
+// Laripo's Characters dock > IDs tab) writes that setting too:
+//   { "values": { "cg.id": ["beach", ...], "achievement.name": [...] },
+//     "titles": { "cg.id": { "beach": "Beach at night" } } }
+// Each "shortcode.param" key gets those ids as suggestions after
+// `[shortcode param="` (with the event's own suggested values, and the title
+// as detail), and a value not in the list is reported
+// (`dtlReader.diagnostics.unknownId`), also when the list is still empty.
+// Quick fixes: the closest ids, or adding the id to the file's "requested"
+// (and "values"), so the tool writing the file can create the entry.
 
+/** Where the ids file is when project.godot doesn't say. */
+const DEFAULT_IDS_FILE = 'res://dialogic/ids.json';
+/** The ids file of the project (from project.godot, refreshed with it). */
+let idsResPath = DEFAULT_IDS_FILE;
 /** "shortcode.param" -> the ids allowed there. @type {Map<string, Set<string>>} */
 const cachedIds = new Map();
-/** Suggestions replaced by the ids file, to put back on the next refresh: "shortcode.param" -> previous values (or undefined). */
+/** "shortcode.param" -> id -> its title (completion detail). @type {Map<string, Map<string, string>>} */
+const cachedIdTitles = new Map();
+/** Suggestions changed by the ids file, to put back on the next refresh: "shortcode.param" -> previous values (or undefined). */
 let overriddenSuggestions = new Map();
 
 /**
- * Read the ids file into cachedIds and the value suggestions (replacing
- * what the event declared for those parameters).
+ * The ids file's res:// path: `ids_file` of project.godot's [dialogic]
+ * section, else res://dialogic/ids.json.
+ *
+ * @param {string} dialogicSection - project.godot's [dialogic] section
+ * @returns {string}
  */
-async function refreshIds() {
+function idsFileFromProject(dialogicSection) {
+  const match = (dialogicSection || '').match(/(?:^|\n)ids_file\s*=\s*"([^"]*)"/);
+  return match && match[1].startsWith('res://') ? match[1] : DEFAULT_IDS_FILE;
+}
+
+/** The ids file in use (res:// path). */
+function idsFile() {
+  return idsResPath;
+}
+
+/**
+ * Read the ids file into cachedIds and the value suggestions: the ids are
+ * added to what the event itself suggests for that parameter (never replace
+ * it: an empty list must not hide the event's own values).
+ *
+ * @param {string} [dialogicSection] - project.godot's [dialogic] section (omitted: keep the path known)
+ */
+async function refreshIds(dialogicSection) {
+  if (dialogicSection !== undefined) { idsResPath = idsFileFromProject(dialogicSection); }
   for (const [key, previous] of overriddenSuggestions) {
     const [shortcode, param] = key.split('.');
     const values = events.DTL_ATTRIBUTE_VALUE_SUGGESTIONS[shortcode];
@@ -153,27 +184,50 @@ async function refreshIds() {
   }
   overriddenSuggestions = new Map();
   cachedIds.clear();
+  cachedIdTitles.clear();
   if (!state.projectRootUri) { return; }
-  const resPath = vscode.workspace.getConfiguration('dtlReader').get('idsFile', 'res://dialogic/ids.json');
   let parsed;
   try {
-    parsed = JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(project.resolveResourcePath(resPath))).toString('utf8'));
-  } catch (error) { return; } // no ids file: nothing to suggest or check
-  const values = parsed && typeof parsed.values === 'object' ? parsed.values : {};
+    parsed = JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(project.resolveResourcePath(idsResPath))).toString('utf8'));
+  } catch (error) { return; } // no ids file (or not JSON): nothing to suggest or check
+  const values = parsed && typeof parsed.values === 'object' && parsed.values !== null ? parsed.values : {};
+  const titles = parsed && typeof parsed.titles === 'object' && parsed.titles !== null ? parsed.titles : {};
   for (const key of Object.keys(values)) {
-    if (!Array.isArray(values[key]) || !key.includes('.')) { continue; }
-    const ids = values[key].map(String);
+    if (!Array.isArray(values[key]) || !/^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$/.test(key)) { continue; }
+    const ids = values[key].map(String).filter(id => id !== '');
     cachedIds.set(key, new Set(ids));
+    const keyTitles = new Map();
+    if (titles[key] && typeof titles[key] === 'object') {
+      for (const id of ids) {
+        if (titles[key][id]) { keyTitles.set(id, String(titles[key][id])); }
+      }
+    }
+    cachedIdTitles.set(key, keyTitles);
     const [shortcode, param] = key.split('.');
     const suggestions = events.DTL_ATTRIBUTE_VALUE_SUGGESTIONS[shortcode] || (events.DTL_ATTRIBUTE_VALUE_SUGGESTIONS[shortcode] = {});
-    overriddenSuggestions.set(key, suggestions[param]);
-    suggestions[param] = ids;
+    const own = suggestions[param];
+    overriddenSuggestions.set(key, own);
+    suggestions[param] = [...new Set([...ids, ...(own || [])])];
   }
 }
 
 /**
- * Unknown ids in a timeline: `[shortcode param="value"]` where
- * "shortcode.param" is in the ids file and the value is not.
+ * The title of [param id] for "shortcode.param" in the ids file ('' if none).
+ *
+ * @param {string} shortcode
+ * @param {string} param
+ * @param {string} id
+ * @returns {string}
+ */
+function idTitle(shortcode, param, id) {
+  const titles = cachedIdTitles.get(`${shortcode}.${param}`);
+  return titles ? titles.get(id) || '' : '';
+}
+
+/**
+ * Unknown ids in a timeline: `[shortcode param="value"]` (the event at the
+ * start of its line) where "shortcode.param" is in the ids file and the value
+ * is not - also when that list is still empty.
  *
  * @param {vscode.TextDocument} document
  * @returns {vscode.Diagnostic[]}
@@ -182,60 +236,68 @@ function findUnknownIdDiagnostics(document) {
   const diagnostics = [];
   if (cachedIds.size === 0) { return diagnostics; }
   const problems = require('../diagnostics/index');
-  const eventPattern = /^\s*\[([A-Za-z_][A-Za-z0-9_]*)\b([^\]]*)/;
-  const paramPattern = /([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"/g;
   for (let line = 0; line < document.lineCount; line++) {
-    const text = document.lineAt(line).text;
-    const match = eventPattern.exec(text);
-    if (!match) { continue; }
-    const paramsStart = text.indexOf(match[2], match.index + 1 + match[1].length);
-    paramPattern.lastIndex = 0;
-    let param;
-    while ((param = paramPattern.exec(match[2])) !== null) {
-      const ids = cachedIds.get(`${match[1]}.${param[1]}`);
-      if (!ids || param[2] === '' || ids.has(param[2]) || param[2].startsWith('{')) { continue; }
-      const start = paramsStart + param.index + param[0].indexOf('"') + 1;
-      problems.pushDiagnostic(diagnostics, 'unknownId', new vscode.Range(line, start, line, start + param[2].length),
-        `Unknown ${match[1]} ${param[1]} "${param[2]}": not in the project's ids (${vscode.workspace.getConfiguration('dtlReader').get('idsFile', 'res://dialogic/ids.json')}).`);
+    for (const found of idsOnLine(document.lineAt(line).text)) {
+      const ids = cachedIds.get(found.key);
+      if (!ids || found.id === '' || ids.has(found.id) || found.id.startsWith('{')) { continue; }
+      const message = ids.size === 0
+        ? `No ${found.key} ids in the project's ids file yet (${idsResPath}): "${found.id}" is unknown.`
+        : `Unknown ${found.key} "${found.id}": not in the project's ids file (${idsResPath}).`;
+      problems.pushDiagnostic(diagnostics, 'unknownId', new vscode.Range(line, found.start, line, found.start + found.id.length), message);
     }
   }
   return diagnostics;
 }
 
 /**
+ * The `param="value"` of the event starting [param text]: [{key, id, start}]
+ * (key "shortcode.param", start: column of the value).
+ *
+ * @param {string} text - one line
+ * @returns {{key: string, id: string, start: number}[]}
+ */
+function idsOnLine(text) {
+  const out = [];
+  const match = /^(\s*\[)([A-Za-z_][A-Za-z0-9_]*)\b([^\]]*)/.exec(text);
+  if (!match) { return out; }
+  const paramsStart = match[1].length + match[2].length;
+  const paramPattern = /([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"/g;
+  let param;
+  while ((param = paramPattern.exec(match[3])) !== null) {
+    out.push({ key: `${match[2]}.${param[1]}`, id: param[2], start: paramsStart + param.index + param[0].indexOf('"') + 1 });
+  }
+  return out;
+}
+
+/**
  * The "shortcode.param" key and the typed id of an unknownId diagnostic,
- * re-read from its line (null if the line changed).
+ * read again from its line (null if the line changed since).
  *
  * @param {vscode.TextDocument} document
  * @param {vscode.Diagnostic} diagnostic
  * @returns {{key: string, id: string} | null}
  */
 function findIdAt(document, diagnostic) {
-  const text = document.lineAt(diagnostic.range.start.line).text;
-  const match = /^\s*\[([A-Za-z_][A-Za-z0-9_]*)\b/.exec(text);
-  if (!match) { return null; }
-  const before = text.slice(0, diagnostic.range.start.character);
-  const param = /([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"$/.exec(before);
-  if (!param) { return null; }
-  return { key: `${match[1]}.${param[1]}`, id: document.getText(diagnostic.range) };
+  const start = diagnostic.range.start.character;
+  const found = idsOnLine(document.lineAt(diagnostic.range.start.line).text).find(entry => entry.start === start);
+  return found ? { key: found.key, id: found.id } : null;
 }
 
 /**
  * Adds [param id] to "values" (the warning goes away) and "requested" (the
- * tool that writes the ids file - e.g. Laripo's IDs tab - can create the real
+ * tool that writes the ids file - e.g. Laripo's IDs tab - creates the real
  * entry) of the project's ids file, for [param key].
  *
  * @param {string} key - "shortcode.param"
  * @param {string} id
  */
 async function addProjectId(key, id) {
-  const resPath = vscode.workspace.getConfiguration('dtlReader').get('idsFile', 'res://dialogic/ids.json');
-  const uri = project.resolveResourcePath(resPath);
+  const uri = project.resolveResourcePath(idsResPath);
   let parsed = {};
   try { parsed = JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8')); } catch (error) { parsed = {}; }
-  if (typeof parsed !== 'object' || parsed === null) { parsed = {}; }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) { parsed = {}; }
   for (const part of ['values', 'requested']) {
-    if (typeof parsed[part] !== 'object' || parsed[part] === null) { parsed[part] = {}; }
+    if (typeof parsed[part] !== 'object' || parsed[part] === null || Array.isArray(parsed[part])) { parsed[part] = {}; }
     const list = Array.isArray(parsed[part][key]) ? parsed[part][key] : [];
     if (!list.includes(id)) { list.push(id); }
     parsed[part][key] = list;
@@ -243,7 +305,18 @@ async function addProjectId(key, id) {
   await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(parsed, null, '\t'), 'utf8'));
   await refreshIds();
   require('../diagnostics/index').refreshAllDiagnostics();
-  vscode.window.setStatusBarMessage(`DTL Reader: "${id}" added to ${resPath} (requested: create its entry in your tool).`, 5000);
+  vscode.window.setStatusBarMessage(`DTL Reader: "${id}" added to ${idsResPath} (requested: create its entry in your tool).`, 5000);
+}
+
+/**
+ * True if [param uri] is the project's ids file (it is re-read when it changes).
+ *
+ * @param {vscode.Uri} uri
+ * @returns {boolean}
+ */
+function isIdsFile(uri) {
+  if (!state.projectRootUri) { return false; }
+  return uri.toString().toLowerCase() === project.resolveResourcePath(idsResPath).toString().toLowerCase();
 }
 
 // =============================================================================
@@ -303,6 +376,10 @@ Object.assign(module.exports, {
   refreshCustomEvents,
   refreshIds,
   cachedIds,
+  idsFile,
+  idsFileFromProject,
+  idTitle,
+  isIdsFile,
   findUnknownIdDiagnostics,
   findIdAt,
   addProjectId,

@@ -99,11 +99,12 @@ function findBracketOrBbcodeEntry(name) {
  *
  * @param {string} value
  * @param {boolean} alreadyQuoted
+ * @param {string} [detail] - shown beside it (an id's title from the ids file)
  * @returns {vscode.CompletionItem}
  */
-function createValueCompletion(value, alreadyQuoted) {
+function createValueCompletion(value, alreadyQuoted, detail = '') {
   const item = new vscode.CompletionItem(value, vscode.CompletionItemKind.EnumMember);
-  item.detail = 'DTL value';
+  item.detail = detail || 'DTL value';
   item.insertText = alreadyQuoted ? value : `"${value}"`;
   return item;
 }
@@ -126,7 +127,7 @@ function createAttributeValueSuggestions(entryName, attributeName, typedValue, p
     const prefix = (alreadyQuoted ? typedValue.slice(1) : typedValue).toLowerCase();
     return values
       .filter(value => value.toLowerCase().startsWith(prefix))
-      .map(value => createValueCompletion(value, alreadyQuoted));
+      .map(value => createValueCompletion(value, alreadyQuoted, require('../features/custom-events').idTitle(entryName, attributeName, value)));
   }
   const pathExtensions = events.DTL_PATH_ATTRIBUTES[entryName] && events.DTL_PATH_ATTRIBUTES[entryName][attributeName];
   if (pathExtensions) {

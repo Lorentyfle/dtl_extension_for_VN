@@ -1,4 +1,10 @@
 # Changelog
+## [2.3.0]
+- The project's ids file is found through `project.godot`: `ids_file` in the `[dialogic]` section (`dialogic/ids_file`), else `res://dialogic/ids.json`. The `dtlReader.idsFile` setting is gone (one place for the path, shared with the tool that writes the file).
+- Bug: the ids file REPLACED an event's own suggested values: an empty list (no CG in the catalog yet...) left `[cg id="` with no suggestion at all. The ids now join the event's values.
+- An id's title (`"titles": {"cg.id": {"beach": "Beach at night"}}`) is shown beside it in the suggestions.
+- An empty list in the ids file still checks its parameter: "No cg.id ids in the project's ids file yet".
+- Quick fixes for an unknown id: when no id is close, the 5 nearest are offered anyway (not preferred); the "Add" fix names the file it writes.
 ## [2.2.1]
 - Quick fixes for an unknown id (`dtlReader.diagnostics.unknownId`): **Change to "..."** with the closest ids of that parameter (a swapped pair of letters or a different case counts as one typo), and **Add "..." to the project's ids**: the id is written into the ids file's `values` (the warning goes away) and `requested`, so the tool that writes the file (e.g. a Godot editor plugin) can create the real entry.
 ## [2.2.0]
