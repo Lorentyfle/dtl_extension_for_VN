@@ -315,9 +315,13 @@ async function provideDiagnosticCodeActions(document, range, context) {
         const customEvents = require('../features/custom-events');
         const found = customEvents.findIdAt(document, diagnostic);
         if (!found) { break; }
-        fixes.push(...createDidYouMeanFixes(document, diagnostic, found.id, customEvents.cachedIds.get(found.key) || []));
+        const known = [...(customEvents.cachedIds.get(found.key) || [])];
+        const close = createDidYouMeanFixes(document, diagnostic, found.id, known);
+        // Nothing close: the nearest ids anyway (up to 5), never preferred.
+        fixes.push(...(close.length > 0 ? close : spelling.findSimilarNames(found.id, known, 5, Infinity)
+          .map(name => createReplaceFix(`Change to "${name}"`, document.uri, diagnostic.range, name, diagnostic, false))));
         if (/^[\p{L}_][\p{L}0-9_]*$/u.test(found.id)) {
-          const add = new vscode.CodeAction(`Add "${found.id}" to the project's ids (${found.key})`, vscode.CodeActionKind.QuickFix);
+          const add = new vscode.CodeAction(`Add "${found.id}" to the project's ids (${found.key}, ${customEvents.idsFile()})`, vscode.CodeActionKind.QuickFix);
           add.command = { command: 'dtlReader.addProjectId', title: 'Add the id', arguments: [found.key, found.id] };
           add.diagnostics = [diagnostic];
           fixes.push(add);

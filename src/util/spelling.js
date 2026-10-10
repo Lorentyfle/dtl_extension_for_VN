@@ -45,8 +45,7 @@ function editDistance(a, b) {
  * @param {number} [max]
  * @returns {string[]}
  */
-function findSimilarNames(name, candidates, max = 3) {
-  const limit = Math.max(1, Math.floor(name.length / 3));
+function findSimilarNames(name, candidates, max = 3, limit = Math.max(1, Math.floor(name.length / 3))) {
   return [...new Set(candidates)]
     .filter(candidate => candidate !== name)
     .map(candidate => ({ candidate, distance: editDistance(name, candidate) }))
