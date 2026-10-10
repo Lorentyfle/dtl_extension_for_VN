@@ -101,6 +101,7 @@ function activate(context) {
   context.subscriptions.push(scriptWatcher);
   // Timelines feed cross-timeline `jump Timeline/label` - re-read their
   // labels when one changes on disk, then re-check every open timeline.
+  context.subscriptions.push(vscode.commands.registerCommand('dtlReader.addProjectId', (key, id) => customEvents.addProjectId(key, id)));
   // The project's ids file (dtlReader.idsFile): suggestions and unknown-id checks follow it.
   const idsWatcher = vscode.workspace.createFileSystemWatcher('**/*.json');
   const onIdsChanged = uri => {

@@ -132,6 +132,8 @@ async function refreshCustomEvents(dialogicSection) {
 // Each "shortcode.param" key gets those values as suggestions after
 // `[shortcode param="`, and a value not in the list is reported
 // (`dtlReader.diagnostics.unknownId`). Works for built-in and custom events.
+// Quick fixes: the closest ids, or adding the id to the file (its "values",
+// and "requested" so the tool writing the file can create the entry).
 
 /** "shortcode.param" -> the ids allowed there. @type {Map<string, Set<string>>} */
 const cachedIds = new Map();
@@ -200,6 +202,50 @@ function findUnknownIdDiagnostics(document) {
   return diagnostics;
 }
 
+/**
+ * The "shortcode.param" key and the typed id of an unknownId diagnostic,
+ * re-read from its line (null if the line changed).
+ *
+ * @param {vscode.TextDocument} document
+ * @param {vscode.Diagnostic} diagnostic
+ * @returns {{key: string, id: string} | null}
+ */
+function findIdAt(document, diagnostic) {
+  const text = document.lineAt(diagnostic.range.start.line).text;
+  const match = /^\s*\[([A-Za-z_][A-Za-z0-9_]*)\b/.exec(text);
+  if (!match) { return null; }
+  const before = text.slice(0, diagnostic.range.start.character);
+  const param = /([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"$/.exec(before);
+  if (!param) { return null; }
+  return { key: `${match[1]}.${param[1]}`, id: document.getText(diagnostic.range) };
+}
+
+/**
+ * Adds [param id] to "values" (the warning goes away) and "requested" (the
+ * tool that writes the ids file - e.g. Laripo's IDs tab - can create the real
+ * entry) of the project's ids file, for [param key].
+ *
+ * @param {string} key - "shortcode.param"
+ * @param {string} id
+ */
+async function addProjectId(key, id) {
+  const resPath = vscode.workspace.getConfiguration('dtlReader').get('idsFile', 'res://dialogic/ids.json');
+  const uri = project.resolveResourcePath(resPath);
+  let parsed = {};
+  try { parsed = JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8')); } catch (error) { parsed = {}; }
+  if (typeof parsed !== 'object' || parsed === null) { parsed = {}; }
+  for (const part of ['values', 'requested']) {
+    if (typeof parsed[part] !== 'object' || parsed[part] === null) { parsed[part] = {}; }
+    const list = Array.isArray(parsed[part][key]) ? parsed[part][key] : [];
+    if (!list.includes(id)) { list.push(id); }
+    parsed[part][key] = list;
+  }
+  await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(parsed, null, '\t'), 'utf8'));
+  await refreshIds();
+  require('../diagnostics/index').refreshAllDiagnostics();
+  vscode.window.setStatusBarMessage(`DTL Reader: "${id}" added to ${resPath} (requested: create its entry in your tool).`, 5000);
+}
+
 // =============================================================================
 // CUSTOM EVENT COLOR
 // =============================================================================
@@ -258,6 +304,8 @@ Object.assign(module.exports, {
   refreshIds,
   cachedIds,
   findUnknownIdDiagnostics,
+  findIdAt,
+  addProjectId,
   updateCustomEventDecorations,
   resetCustomEventDecoration,
 });

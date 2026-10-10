@@ -311,6 +311,19 @@ async function provideDiagnosticCodeActions(document, range, context) {
       case 'dchDefaultPortrait':
         fixes.push(...createDidYouMeanFixes(document, diagnostic, typed, dchParse.parseDchPortraits(document.getText()).keys()));
         break;
+      case 'unknownId': {
+        const customEvents = require('../features/custom-events');
+        const found = customEvents.findIdAt(document, diagnostic);
+        if (!found) { break; }
+        fixes.push(...createDidYouMeanFixes(document, diagnostic, found.id, customEvents.cachedIds.get(found.key) || []));
+        if (/^[\p{L}_][\p{L}0-9_]*$/u.test(found.id)) {
+          const add = new vscode.CodeAction(`Add "${found.id}" to the project's ids (${found.key})`, vscode.CodeActionKind.QuickFix);
+          add.command = { command: 'dtlReader.addProjectId', title: 'Add the id', arguments: [found.key, found.id] };
+          add.diagnostics = [diagnostic];
+          fixes.push(add);
+        }
+        break;
+      }
       case 'dchMissingScene':
         fixes.push(...createDidYouMeanFixes(document, diagnostic, typed,
           state.cachedResourcePaths.filter(resPath => events.RESOURCE_EXTENSIONS.scene.includes(resPath.slice(resPath.lastIndexOf('.') + 1).toLowerCase()))));

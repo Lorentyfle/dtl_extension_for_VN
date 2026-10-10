@@ -1,4 +1,6 @@
 # Changelog
+## [2.2.1]
+- Quick fixes for an unknown id (`dtlReader.diagnostics.unknownId`): **Change to "..."** with the closest ids of that parameter (a swapped pair of letters or a different case counts as one typo), and **Add "..." to the project's ids**: the id is written into the ids file's `values` (the warning goes away) and `requested`, so the tool that writes the file (e.g. a Godot editor plugin) can create the real entry.
 ## [2.2.0]
 - Project ids: a JSON file (`dtlReader.idsFile`, `res://dialogic/ids.json` by default) can list the ids a timeline may use, `{"values": {"cg.id": ["beach"], "achievement.name": [...]}}`. Each `shortcode.param` then suggests those ids after `param="`, and an id not in the list is reported (`dtlReader.diagnostics.unknownId`, a warning by default). Works for built-in and custom events; the file is re-read when it changes.
 - Custom events stand out: the names of the project's own events (`[cg ...]`, `[achievement ...]`) get their own color and style (`dtlReader.customEvents.highlight`, `.color` - `#D7A6FF` by default - and `.fontStyle` - italic by default).

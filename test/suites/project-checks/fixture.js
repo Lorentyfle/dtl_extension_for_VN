@@ -34,7 +34,7 @@ const CUSTOM = [
   '[screen_shake wait=',
   '[screen_shake mode=',
   '[screen_shake flash="',
-  '[screen_shake mode="nope"]', // not in dialogic/ids.json: unknownId
+  '[screen_shake mode="wildd"]', // not in dialogic/ids.json: unknownId (closest: wild)
 ];
 
 const STARTER = [

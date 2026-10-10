@@ -148,7 +148,21 @@ exports.run = suite(async () => {
     items = await labelsAt(customUri, 4, 19);
     check('ids file values suggested', items.includes('wild'), items);
     const idDiag = vscode.languages.getDiagnostics(customUri).find(x => x.code === 'unknownId');
-    check('unknown id reported', idDiag !== undefined && idDiag.range.start.line === 6 && /nope/.test(idDiag.message), vscode.languages.getDiagnostics(customUri).map(d => d.code));
+    check('unknown id reported', idDiag !== undefined && idDiag.range.start.line === 6 && /wildd/.test(idDiag.message), vscode.languages.getDiagnostics(customUri).map(d => d.code));
+    if (idDiag) {
+      const actions = await vscode.commands.executeCommand('vscode.executeCodeActionProvider', customUri, idDiag.range) || [];
+      const titles = actions.map(a => a.title);
+      check('unknown id: closest id offered', titles.includes('Change to "wild"'), titles);
+      const add = actions.find(a => a.title.startsWith('Add "wildd"'));
+      check('unknown id: add-to-ids fix offered', add !== undefined, titles);
+      if (add && add.command) {
+        await vscode.commands.executeCommand(add.command.command, ...add.command.arguments);
+        const written = JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(at('dialogic', 'ids.json'))).toString('utf8'));
+        check('add-to-ids writes values and requested', written.values['screen_shake.mode'].includes('wildd') && written.requested['screen_shake.mode'].includes('wildd'), written);
+        const still = vscode.languages.getDiagnostics(customUri).some(x => x.code === 'unknownId');
+        check('unknown id gone after adding it', !still, vscode.languages.getDiagnostics(customUri).map(d => d.code));
+      }
+    }
     const hovers = await vscode.commands.executeCommand('vscode.executeHoverProvider', customUri, new vscode.Position(0, 4)) || [];
     const hoverText = hovers.map(h => h.contents.map(c => c.value || '').join('')).join('');
     check('custom event hover', /Screen Shake/.test(hoverText) && /Shakes the whole screen/.test(hoverText) && /How strong the shake is/.test(hoverText) && /event_screen_shake\.gd/.test(hoverText) && /\[screen_shake strength=1\.0\]/.test(hoverText), hoverText);
