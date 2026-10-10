@@ -218,7 +218,10 @@ every DTL Reader feature without risking real project data.
   inside `[screen_shake ` its parameters are, with their `##` docs on
   hover (`flash`'s doc is a trailing `##` comment); `wait=` suggests
   `true`/`false`, `mode=` `soft`/`hard`, and `flash="` the project's
-  `.png` files (its `file_filter`).
+  `.png` files (its `file_filter`). Its name is colored as a custom event.
+- **Project ids**: the project-checks fixture writes `dialogic/ids.json` with
+  `screen_shake.mode` = soft / hard / wild: `mode=` also suggests `wild`, and
+  `[screen_shake mode="nope"]` gets an unknown-id warning.
 - **Block snippets**: on an empty line type `cho`, `if`, `loop`, `scene` or
   `text_input` - whole blocks are suggested (the character placeholders
   list the project's characters). Typing the same words inside dialogue

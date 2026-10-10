@@ -145,6 +145,10 @@ exports.run = suite(async () => {
     check('suggested parameter values', items.includes('soft') && items.includes('hard'), items);
     items = await labelsAt(customUri, 5, 21);
     check('file parameter: res:// paths of its file_filter', items.includes('res://assets/bg.png') && items.every(label => !label.startsWith('res://') || label.endsWith('.png')), items);
+    items = await labelsAt(customUri, 4, 19);
+    check('ids file values suggested', items.includes('wild'), items);
+    const idDiag = vscode.languages.getDiagnostics(customUri).find(x => x.code === 'unknownId');
+    check('unknown id reported', idDiag !== undefined && idDiag.range.start.line === 6 && /nope/.test(idDiag.message), vscode.languages.getDiagnostics(customUri).map(d => d.code));
     const hovers = await vscode.commands.executeCommand('vscode.executeHoverProvider', customUri, new vscode.Position(0, 4)) || [];
     const hoverText = hovers.map(h => h.contents.map(c => c.value || '').join('')).join('');
     check('custom event hover', /Screen Shake/.test(hoverText) && /Shakes the whole screen/.test(hoverText) && /How strong the shake is/.test(hoverText) && /event_screen_shake\.gd/.test(hoverText) && /\[screen_shake strength=1\.0\]/.test(hoverText), hoverText);

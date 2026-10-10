@@ -120,9 +120,144 @@ async function refreshCustomEvents(dialogicSection) {
     if (Object.keys(parsed.paths).length > 0) { events.DTL_PATH_ATTRIBUTES[parsed.entry.name] = parsed.paths; }
     customEventNames.push(parsed.entry.name);
   }
+  await refreshIds();   // after the events: ids replace their suggestions
+}
+
+// =============================================================================
+// PROJECT IDS (ids.json): suggestions and unknown ids
+// =============================================================================
+// A project can list the ids its timelines may use in a JSON file
+// (`dtlReader.idsFile`, `res://dialogic/ids.json` by default):
+//   { "values": { "cg.id": ["beach", ...], "achievement.name": [...] } }
+// Each "shortcode.param" key gets those values as suggestions after
+// `[shortcode param="`, and a value not in the list is reported
+// (`dtlReader.diagnostics.unknownId`). Works for built-in and custom events.
+
+/** "shortcode.param" -> the ids allowed there. @type {Map<string, Set<string>>} */
+const cachedIds = new Map();
+/** Suggestions replaced by the ids file, to put back on the next refresh: "shortcode.param" -> previous values (or undefined). */
+let overriddenSuggestions = new Map();
+
+/**
+ * Read the ids file into cachedIds and the value suggestions (replacing
+ * what the event declared for those parameters).
+ */
+async function refreshIds() {
+  for (const [key, previous] of overriddenSuggestions) {
+    const [shortcode, param] = key.split('.');
+    const values = events.DTL_ATTRIBUTE_VALUE_SUGGESTIONS[shortcode];
+    if (!values) { continue; }
+    if (previous === undefined) { delete values[param]; } else { values[param] = previous; }
+  }
+  overriddenSuggestions = new Map();
+  cachedIds.clear();
+  if (!state.projectRootUri) { return; }
+  const resPath = vscode.workspace.getConfiguration('dtlReader').get('idsFile', 'res://dialogic/ids.json');
+  let parsed;
+  try {
+    parsed = JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(project.resolveResourcePath(resPath))).toString('utf8'));
+  } catch (error) { return; } // no ids file: nothing to suggest or check
+  const values = parsed && typeof parsed.values === 'object' ? parsed.values : {};
+  for (const key of Object.keys(values)) {
+    if (!Array.isArray(values[key]) || !key.includes('.')) { continue; }
+    const ids = values[key].map(String);
+    cachedIds.set(key, new Set(ids));
+    const [shortcode, param] = key.split('.');
+    const suggestions = events.DTL_ATTRIBUTE_VALUE_SUGGESTIONS[shortcode] || (events.DTL_ATTRIBUTE_VALUE_SUGGESTIONS[shortcode] = {});
+    overriddenSuggestions.set(key, suggestions[param]);
+    suggestions[param] = ids;
+  }
+}
+
+/**
+ * Unknown ids in a timeline: `[shortcode param="value"]` where
+ * "shortcode.param" is in the ids file and the value is not.
+ *
+ * @param {vscode.TextDocument} document
+ * @returns {vscode.Diagnostic[]}
+ */
+function findUnknownIdDiagnostics(document) {
+  const diagnostics = [];
+  if (cachedIds.size === 0) { return diagnostics; }
+  const problems = require('../diagnostics/index');
+  const eventPattern = /^\s*\[([A-Za-z_][A-Za-z0-9_]*)\b([^\]]*)/;
+  const paramPattern = /([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"/g;
+  for (let line = 0; line < document.lineCount; line++) {
+    const text = document.lineAt(line).text;
+    const match = eventPattern.exec(text);
+    if (!match) { continue; }
+    const paramsStart = text.indexOf(match[2], match.index + 1 + match[1].length);
+    paramPattern.lastIndex = 0;
+    let param;
+    while ((param = paramPattern.exec(match[2])) !== null) {
+      const ids = cachedIds.get(`${match[1]}.${param[1]}`);
+      if (!ids || param[2] === '' || ids.has(param[2]) || param[2].startsWith('{')) { continue; }
+      const start = paramsStart + param.index + param[0].indexOf('"') + 1;
+      problems.pushDiagnostic(diagnostics, 'unknownId', new vscode.Range(line, start, line, start + param[2].length),
+        `Unknown ${match[1]} ${param[1]} "${param[2]}": not in the project's ids (${vscode.workspace.getConfiguration('dtlReader').get('idsFile', 'res://dialogic/ids.json')}).`);
+    }
+  }
+  return diagnostics;
+}
+
+// =============================================================================
+// CUSTOM EVENT COLOR
+// =============================================================================
+// The project's own events (`[cg ...]`, `[achievement ...]`) get their own
+// look so they stand out from Dialogic's built-in ones:
+// `dtlReader.customEvents.highlight`, `.color`, `.fontStyle`.
+
+let customEventDecorationType = null;
+
+/** The decoration, made from the current settings (re-made when they change). */
+function customEventDecoration() {
+  if (!customEventDecorationType) {
+    const config = vscode.workspace.getConfiguration('dtlReader');
+    const style = config.get('customEvents.fontStyle', 'italic');
+    customEventDecorationType = vscode.window.createTextEditorDecorationType({
+      color: config.get('customEvents.color', '#D7A6FF'),
+      fontStyle: style.includes('italic') ? 'italic' : undefined,
+      fontWeight: style.includes('bold') ? 'bold' : undefined,
+      textDecoration: style.includes('underline') ? 'underline' : undefined,
+    });
+  }
+  return customEventDecorationType;
+}
+
+/** The settings changed: the decoration is made again on the next update. */
+function resetCustomEventDecoration() {
+  if (customEventDecorationType) { customEventDecorationType.dispose(); }
+  customEventDecorationType = null;
+}
+
+/**
+ * Color the names of the project's custom events in an editor.
+ *
+ * @param {vscode.TextEditor} editor
+ */
+function updateCustomEventDecorations(editor) {
+  if (!editor || editor.document.languageId !== 'dtl') { return; }
+  const enabled = vscode.workspace.getConfiguration('dtlReader').get('customEvents.highlight', true);
+  const ranges = [];
+  if (enabled && customEventNames.length > 0) {
+    const names = new Set(customEventNames);
+    const pattern = /^(\s*\[)([A-Za-z_][A-Za-z0-9_]*)/;
+    for (let line = 0; line < editor.document.lineCount; line++) {
+      const match = pattern.exec(editor.document.lineAt(line).text);
+      if (match && names.has(match[2])) {
+        ranges.push(new vscode.Range(line, match[1].length, line, match[1].length + match[2].length));
+      }
+    }
+  }
+  editor.setDecorations(customEventDecoration(), ranges);
 }
 
 Object.assign(module.exports, {
   parseCustomEventScript,
   refreshCustomEvents,
+  refreshIds,
+  cachedIds,
+  findUnknownIdDiagnostics,
+  updateCustomEventDecorations,
+  resetCustomEventDecoration,
 });

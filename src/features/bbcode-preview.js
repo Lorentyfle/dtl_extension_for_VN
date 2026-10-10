@@ -371,7 +371,7 @@ function scheduleBbcodePreview(document) {
     bbcodePreviewTimers.delete(key);
     vscode.window.visibleTextEditors
       .filter(editor => !document || editor.document === document)
-      .forEach(editor => { updateBbcodePreview(editor); glossaryFeature.updateGlossaryDecorations(editor); });
+      .forEach(editor => { updateBbcodePreview(editor); glossaryFeature.updateGlossaryDecorations(editor); require('./custom-events').updateCustomEventDecorations(editor); });
   }, document ? 150 : 0));
 }
 

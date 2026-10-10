@@ -2,7 +2,7 @@
   "name": "dtl-reader",
   "displayName": "DTL Reader",
   "description": "Dialogic 2 timeline (.dtl) and character (.dch) support for Godot: highlighting, autocomplete, documentation, error checking with quick fixes, navigation, BBCode preview, translation tools and Play in Godot.",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "publisher": "lorentyfle",
   "license": "MIT",
   "icon": "./icons/favicon.png",
@@ -460,6 +460,37 @@
             "default": "warning",
             "description": "A `Name: text` dialogue line whose speaker isn't a known character (Dialogic shows the whole line as narration). Turn off if you use `Something:` in narration on purpose.",
             "order": 4
+          },
+          "dtlReader.idsFile": {
+            "type": "string",
+            "default": "res://dialogic/ids.json",
+            "order": 40,
+            "markdownDescription": "A JSON file listing the ids your timelines may use: `{\"values\": {\"cg.id\": [\"beach\"], \"achievement.name\": [...]}}`. Each `shortcode.param` gets those ids as suggestions, and an id not in the list is reported (`#dtlReader.diagnostics.unknownId#`)."
+          },
+          "dtlReader.customEvents.highlight": {
+            "type": "boolean",
+            "default": true,
+            "order": 41,
+            "markdownDescription": "Give the project's own events (custom Dialogic events, e.g. `[cg]`) their own look, so they stand out from Dialogic's built-in ones."
+          },
+          "dtlReader.customEvents.color": {
+            "type": "string",
+            "default": "#D7A6FF",
+            "order": 42,
+            "markdownDescription": "Color of the custom events' names (`#dtlReader.customEvents.highlight#`)."
+          },
+          "dtlReader.customEvents.fontStyle": {
+            "type": "string",
+            "enum": ["normal", "italic", "bold", "underline", "italic bold", "italic underline"],
+            "default": "italic",
+            "order": 43,
+            "markdownDescription": "Style of the custom events' names (`#dtlReader.customEvents.highlight#`)."
+          },
+          "dtlReader.diagnostics.unknownId": {
+            "type": "string",
+            "enum": ["error", "warning", "information", "hint", "off"],
+            "default": "warning",
+            "markdownDescription": "An id not listed in the project's ids file (`#dtlReader.idsFile#`), e.g. `[cg id=\"beach\"]` with no CG `beach`."
           },
           "dtlReader.diagnostics.unknownMood": {
             "type": "string",

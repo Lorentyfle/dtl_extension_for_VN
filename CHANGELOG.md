@@ -1,4 +1,7 @@
 # Changelog
+## [2.2.0]
+- Project ids: a JSON file (`dtlReader.idsFile`, `res://dialogic/ids.json` by default) can list the ids a timeline may use, `{"values": {"cg.id": ["beach"], "achievement.name": [...]}}`. Each `shortcode.param` then suggests those ids after `param="`, and an id not in the list is reported (`dtlReader.diagnostics.unknownId`, a warning by default). Works for built-in and custom events; the file is re-read when it changes.
+- Custom events stand out: the names of the project's own events (`[cg ...]`, `[achievement ...]`) get their own color and style (`dtlReader.customEvents.highlight`, `.color` - `#D7A6FF` by default - and `.fontStyle` - italic by default).
 ## [2.1.0]
 - Trailing `##` documentation comments (`var speed := 3.0 ## How fast.`) document a variable, constant or enum value, like `##` lines above it (both are GDScript documentation comments): custom event parameters and autoload members get their hover / completion docs from them.
 - Custom events: a file parameter (`"ext_file": true` in `get_shortcode_parameters()`, or a `ValueType.FILE` field in `build_event_editor()`) suggests the project's `res://` paths after `param="`, limited to the extensions of the field's `file_filter` (`"*.png, *.jpg; Images"`) when it has one.

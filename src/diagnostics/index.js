@@ -36,6 +36,7 @@ const DIAGNOSTIC_DEFAULT_LEVELS = {
   unreachableLabel: 'warning',
   unusedCharacter: 'hint',
   unusedPortrait: 'hint',
+  unknownId: 'warning',
 };
 
 /** @type {Record<string, vscode.DiagnosticSeverity>} */
@@ -130,7 +131,8 @@ function updateDiagnostics(document) {
     ...timelineChecks.findUnknownCharacterDiagnostics(document),
     ...timelineChecks.findUnknownVariableDiagnostics(document),
     ...csvTranslations.findMissingTranslationDiagnostics(document),
-    ...flow.findUnreachableDiagnostics(document)
+    ...flow.findUnreachableDiagnostics(document),
+    ...require('../features/custom-events').findUnknownIdDiagnostics(document)
   ];
 
   state.diagnosticCollection.set(document.uri, diagnostics);
