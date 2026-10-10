@@ -34,6 +34,7 @@ const CUSTOM = [
   '[screen_shake wait=',
   '[screen_shake mode=',
   '[screen_shake flash="',
+  '[screen_shake mode="nope"]', // not in dialogic/ids.json: unknownId
 ];
 
 const STARTER = [
@@ -52,6 +53,9 @@ exports.prepare = root => {
   fs.writeFileSync(at('timelines', 'custom.dtl'), CUSTOM.join('\n') + '\n');
   fs.writeFileSync(at('scripts', 'starter.gd'), STARTER.join('\n') + '\n');
   // The custom event is test-room's own (addons/dialogic_additions/ScreenShake/).
+  // The project's ids file (dtlReader.idsFile default): suggestions + unknownId.
+  fs.mkdirSync(at('dialogic'), { recursive: true });
+  fs.writeFileSync(at('dialogic', 'ids.json'), JSON.stringify({ values: { 'screen_shake.mode': ['soft', 'hard', 'wild'] } }));
 
   let project = fs.readFileSync(at('project.godot'), 'utf8');
   const eol = project.includes('\r\n') ? '\r\n' : '\n';
